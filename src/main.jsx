@@ -33,6 +33,7 @@ function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
   const [jsonOpen, setJsonOpen] = useState(false);
+  const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
 
   const selectedShape = document.shapes.find((shape) => shape.id === selectedId);
@@ -44,8 +45,12 @@ function App() {
 
   useEffect(() => {
     const editor = editorRefs.current.get(selectedId);
-    if (editor) {
-      editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    const panel = controlPanelRef.current;
+    if (editor && panel) {
+      const panelRect = panel.getBoundingClientRect();
+      const editorRect = editor.getBoundingClientRect();
+      const targetTop = panel.scrollTop + editorRect.top - panelRect.top - 18;
+      panel.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
     }
   }, [selectedId]);
 
@@ -109,7 +114,7 @@ function App() {
         <Viewer document={document} selectedId={selectedId} onSelect={setSelectedId} />
       </section>
 
-      <section className="control-panel" aria-label="CAD controls">
+      <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
         <header className="control-header">
           <div>
             <p className="eyebrow">Oshida Smartphone CAD</p>
@@ -330,8 +335,8 @@ function ShapeEditor({
         </div>
       </header>
 
-      <div className="shape-compact-controls">
-        <SlideField
+      <div className="shape-control-grid">
+        <ControlField
           axis="x"
           label="X"
           value={shape.x}
@@ -339,7 +344,7 @@ function ShapeEditor({
           max={120}
           onChange={(x) => onChange({ x })}
         />
-        <SlideField
+        <ControlField
           axis="y"
           label="Y"
           value={shape.y}
@@ -347,24 +352,46 @@ function ShapeEditor({
           max={80}
           onChange={(y) => onChange({ y })}
         />
-        <div className="size-fields">
         {shape.type === 'rect' ? (
           <>
-            <NumberField label="W" value={shape.w} min={1} max={120} onChange={(w) => onChange({ w })} />
-            <NumberField label="H" value={shape.h} min={1} max={80} onChange={(h) => onChange({ h })} />
+            <ControlField
+              axis="x"
+              label="W"
+              value={shape.w}
+              min={1}
+              max={120}
+              onChange={(w) => onChange({ w })}
+            />
+            <ControlField
+              axis="x"
+              label="H"
+              value={shape.h}
+              min={1}
+              max={80}
+              onChange={(h) => onChange({ h })}
+            />
           </>
         ) : (
-          <NumberField label="R" value={shape.r} min={1} max={40} onChange={(r) => onChange({ r })} />
+          <>
+            <ControlField
+              axis="x"
+              label="R"
+              value={shape.r}
+              min={1}
+              max={40}
+              onChange={(r) => onChange({ r })}
+            />
+            <div className="control-field empty" aria-hidden="true" />
+          </>
         )}
-        </div>
       </div>
     </article>
   );
 }
 
-function SlideField({ axis, label, value, min, max, onChange }) {
+function ControlField({ axis, label, value, min, max, onChange }) {
   return (
-    <label className={`slide-field ${axis === 'y' ? 'axis-y' : 'axis-x'}`}>
+    <label className={`control-field ${axis === 'y' ? 'axis-y' : 'axis-x'}`}>
       <span>{label}</span>
       <input
         type="range"
