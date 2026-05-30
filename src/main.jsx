@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-30-face-01';
+const APP_VERSION = 'proto-2026-05-30-plan-01';
 const FACE_ORDER = ['top', 'right', 'left'];
 const FACE_LABELS = {
   top: '上',
@@ -66,6 +66,8 @@ function App() {
   const editorRefs = useRef(new Map());
 
   const selectedShape = document.shapes.find((shape) => shape.id === selectedId);
+  const activeFace = normalizeFace(document.activeFace);
+  const activeShapes = document.shapes.filter((shape) => normalizeFace(shape.face) === activeFace);
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
 
   useEffect(() => {
@@ -85,7 +87,7 @@ function App() {
       const targetTop = panel.scrollTop + editorRect.top - panelRect.top - 18;
       panel.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
     }
-  }, [selectedId]);
+  }, [selectedId, activeFace]);
 
   function updateDocument(patch) {
     setDocument((current) => ({ ...current, ...patch }));
@@ -94,6 +96,7 @@ function App() {
   function updateShape(id, patch) {
     setDocument((current) => ({
       ...current,
+      activeFace: patch.face ? normalizeFace(patch.face) : current.activeFace,
       shapes: current.shapes.map((shape) =>
         shape.id === id ? { ...shape, ...patch } : shape,
       ),
@@ -123,16 +126,37 @@ function App() {
     });
   }
 
+  function selectShape(id) {
+    if (!id) {
+      setSelectedId(null);
+      return;
+    }
+
+    const shape = document.shapes.find((item) => item.id === id);
+    if (shape) {
+      updateDocument({ activeFace: normalizeFace(shape.face) });
+    }
+    setSelectedId(id);
+  }
+
   function moveShape(id, direction) {
     setDocument((current) => {
-      const index = current.shapes.findIndex((shape) => shape.id === id);
-      const nextIndex = index + direction;
-      if (index < 0 || nextIndex < 0 || nextIndex >= current.shapes.length) {
+      const shape = current.shapes.find((item) => item.id === id);
+      if (!shape) {
         return current;
       }
+
+      const faceShapes = current.shapes.filter((item) => normalizeFace(item.face) === normalizeFace(shape.face));
+      const faceIndex = faceShapes.findIndex((item) => item.id === id);
+      const nextFaceShape = faceShapes[faceIndex + direction];
+      if (!nextFaceShape) {
+        return current;
+      }
+
+      const index = current.shapes.findIndex((item) => item.id === id);
+      const nextIndex = current.shapes.findIndex((item) => item.id === nextFaceShape.id);
       const shapes = [...current.shapes];
-      const [shape] = shapes.splice(index, 1);
-      shapes.splice(nextIndex, 0, shape);
+      [shapes[index], shapes[nextIndex]] = [shapes[nextIndex], shapes[index]];
       return { ...current, shapes };
     });
   }
@@ -153,7 +177,7 @@ function App() {
         <Viewer
           document={document}
           selectedId={selectedId}
-          onSelect={setSelectedId}
+          onSelect={selectShape}
           onFaceSelect={setActiveFace}
         />
       </section>
@@ -173,8 +197,8 @@ function App() {
         <div className="document-controls">
           <div className="active-face-control" aria-label="配置面">
             <span>配置面</span>
-            <strong className={`face-label face-${document.activeFace}`}>
-              {FACE_LABELS[document.activeFace]}
+            <strong className={`face-label face-${activeFace}`}>
+              {FACE_LABELS[activeFace]}
             </strong>
           </div>
           <label>
@@ -196,7 +220,7 @@ function App() {
         </div>
 
         <div className="shape-list">
-          {document.shapes.map((shape, index) => (
+          {activeShapes.map((shape, index) => (
             <ShapeEditor
               key={shape.id}
               editorRef={(node) => {
@@ -208,9 +232,9 @@ function App() {
               }}
               shape={shape}
               index={index}
-              total={document.shapes.length}
+              total={activeShapes.length}
               selected={shape.id === selectedId}
-              onSelect={() => setSelectedId(shape.id)}
+              onSelect={() => selectShape(shape.id)}
               onChange={(patch) => updateShape(shape.id, patch)}
               onMove={moveShape}
               onRemove={removeShape}
@@ -220,10 +244,12 @@ function App() {
 
         {selectedShape ? (
           <p className="selection-note">
-            選択中: {getShapeLabel(selectedShape)}
+            選択中: {FACE_LABELS[normalizeFace(selectedShape.face)]}面 / {getShapeLabel(selectedShape)}
           </p>
         ) : (
-          <p className="selection-note">図形を追加してください。</p>
+          <p className="selection-note">
+            {FACE_LABELS[activeFace]}面の図形: {activeShapes.length}件
+          </p>
         )}
 
         {jsonOpen ? <pre className="json-view">{jsonText}</pre> : null}
@@ -238,12 +264,11 @@ function Viewer({ document, selectedId, onSelect, onFaceSelect }) {
   return (
     <div className="viewer-frame">
       <div className="viewer-toolbar">
-        <span>2D preview</span>
+        <span>3面図</span>
         <span>{APP_VERSION}</span>
         <span>{document.extrude}mm extrude</span>
       </div>
-      <FaceSelector activeFace={activeFace} onSelect={onFaceSelect} />
-      <svg viewBox="0 0 120 120" role="img" aria-label="配置図形プレビュー" onClick={() => onSelect(null)}>
+      <svg className="tri-view" viewBox="0 0 268 268" role="img" aria-label="3面配置図">
         <defs>
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
@@ -259,27 +284,15 @@ function Viewer({ document, selectedId, onSelect, onFaceSelect }) {
             </mask>
           ))}
         </defs>
-        <rect width="120" height="120" fill="url(#grid)" />
-        <line x1="0" y1="60" x2="120" y2="60" stroke="#bac6d3" strokeWidth="0.5" />
-        <line x1="60" y1="0" x2="60" y2="120" stroke="#bac6d3" strokeWidth="0.5" />
         {FACE_ORDER.map((face) => (
-          <rect
+          <FacePlan
             key={face}
-            className={`final-face face-${face}`}
-            width="120"
-            height="120"
-            mask={`url(#body-mask-${face})`}
-          />
-        ))}
-        {document.shapes.map((shape) => (
-          <FinalOutline key={`outline-${shape.id}`} shape={shape} />
-        ))}
-        {document.shapes.map((shape) => (
-          <ShapePreview
-            key={shape.id}
-            shape={shape}
-            selected={shape.id === selectedId}
-            onSelect={() => onSelect(shape.id)}
+            face={face}
+            active={face === activeFace}
+            shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
+            selectedId={selectedId}
+            onSelect={onSelect}
+            onFaceSelect={onFaceSelect}
           />
         ))}
       </svg>
@@ -292,46 +305,57 @@ function Viewer({ document, selectedId, onSelect, onFaceSelect }) {
   );
 }
 
-function FaceSelector({ activeFace, onSelect }) {
-  const faces = [
-    { id: 'left', points: '70,44 20,24 20,70 70,96' },
-    { id: 'right', points: '70,44 120,24 120,70 70,96' },
-    { id: 'top', points: '70,44 20,24 70,4 120,24' },
-  ];
-  const orderedFaces = [
-    ...faces.filter((face) => face.id !== activeFace),
-    faces.find((face) => face.id === activeFace),
-  ].filter(Boolean);
+function getFaceTransform(face) {
+  if (face === 'top') {
+    return 'translate(74 6)';
+  }
+  if (face === 'right') {
+    return 'translate(142 142)';
+  }
+  return 'translate(6 142)';
+}
 
+function FacePlan({ face, active, shapes, selectedId, onSelect, onFaceSelect }) {
   return (
-    <div className="face-selector-wrap" aria-label="配置面選択">
-      <svg className="face-selector" viewBox="0 0 140 104" role="img" aria-label="上・右・左の面選択">
-        {orderedFaces.map((face) => (
-          <g
-            key={face.id}
-            className={`iso-face face-${face.id} ${face.id === activeFace ? 'active' : ''}`}
-            role="button"
-            tabIndex="0"
-            aria-label={`${FACE_LABELS[face.id]}面を選択`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onSelect(face.id);
-            }}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                onSelect(face.id);
-              }
-            }}
-          >
-            <polygon points={face.points} />
-            <text x={face.id === 'left' ? 42 : face.id === 'right' ? 98 : 70} y={face.id === 'top' ? 26 : 66}>
-              {FACE_LABELS[face.id]}
-            </text>
-          </g>
-        ))}
-      </svg>
-    </div>
+    <g
+      className={`face-plan face-${face} ${active ? 'active' : ''}`}
+      transform={getFaceTransform(face)}
+      role="button"
+      tabIndex="0"
+      aria-label={`${FACE_LABELS[face]}面`}
+      onClick={() => {
+        onFaceSelect(face);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onFaceSelect(face);
+        }
+      }}
+    >
+      <rect className="face-plan-bg" width="120" height="120" rx="2" />
+      <rect width="120" height="120" fill="url(#grid)" />
+      <line x1="0" y1="60" x2="120" y2="60" className="face-axis" />
+      <line x1="60" y1="0" x2="60" y2="120" className="face-axis" />
+      <rect
+        className={`final-face face-${face}`}
+        width="120"
+        height="120"
+        mask={`url(#body-mask-${face})`}
+      />
+      {shapes.map((shape) => (
+        <FinalOutline key={`outline-${shape.id}`} shape={shape} />
+      ))}
+      {shapes.map((shape) => (
+        <ShapePreview
+          key={shape.id}
+          shape={shape}
+          selected={shape.id === selectedId}
+          onSelect={() => onSelect(shape.id)}
+        />
+      ))}
+      <text className="face-plan-label" x="60" y="112">{FACE_LABELS[face]}</text>
+    </g>
   );
 }
 
