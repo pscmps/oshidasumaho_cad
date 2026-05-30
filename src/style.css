@@ -56,7 +56,7 @@ input[type="range"] {
   height: 30px;
   padding: 0;
   border: 0;
-  accent-color: #d43128;
+  accent-color: #2563eb;
   background: transparent;
 }
 
@@ -79,7 +79,7 @@ input[type="range"] {
 .viewer-frame {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 96px 1fr auto;
   border: 1px solid #b9c5d2;
   border-radius: 8px;
   overflow: hidden;
@@ -90,7 +90,7 @@ input[type="range"] {
 .viewer-legend {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 12px;
   min-height: 36px;
   padding: 0 12px;
@@ -99,20 +99,98 @@ input[type="range"] {
   font-weight: 700;
 }
 
-.viewer-frame svg {
+.viewer-toolbar span:last-child {
+  margin-left: auto;
+}
+
+.face-selector-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-top: 1px solid #e2e8f0;
+  border-bottom: 1px solid #d6dee8;
+  background: #eef3f8;
+}
+
+.face-selector {
+  width: min(180px, 72%);
+  height: 92px;
+}
+
+.iso-face {
+  cursor: pointer;
+  outline: none;
+}
+
+.iso-face polygon {
+  stroke-width: 2.2;
+  stroke-linejoin: round;
+  transition: filter 120ms ease, stroke-width 120ms ease, transform 120ms ease;
+}
+
+.iso-face text {
+  pointer-events: none;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  fill: #17212b;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.iso-face.face-top polygon,
+.final-face.face-top,
+.face-swatch.face-top {
+  fill: rgba(37, 99, 235, 0.18);
+}
+
+.iso-face.face-top polygon,
+.final-outline.face-top,
+.face-swatch.face-top {
+  stroke: #2563eb;
+}
+
+.iso-face.face-right polygon,
+.final-face.face-right,
+.face-swatch.face-right {
+  fill: rgba(220, 38, 38, 0.18);
+}
+
+.iso-face.face-right polygon,
+.final-outline.face-right,
+.face-swatch.face-right {
+  stroke: #dc2626;
+}
+
+.iso-face.face-left polygon,
+.final-face.face-left,
+.face-swatch.face-left {
+  fill: rgba(234, 179, 8, 0.24);
+}
+
+.iso-face.face-left polygon,
+.final-outline.face-left,
+.face-swatch.face-left {
+  stroke: #d69e00;
+}
+
+.iso-face.active polygon {
+  filter: drop-shadow(0 5px 5px rgba(15, 23, 42, 0.2));
+  stroke-width: 3.6;
+}
+
+.iso-face.active text {
+  fill: #111827;
+}
+
+.viewer-frame > svg {
   width: 100%;
   height: 100%;
   min-height: 0;
   touch-action: manipulation;
 }
 
-.final-face {
-  fill: rgba(214, 49, 40, 0.18);
-}
-
 .final-outline {
   fill: none;
-  stroke: #d43128;
   stroke-linejoin: round;
   stroke-width: 2.9;
   vector-effect: non-scaling-stroke;
@@ -144,8 +222,8 @@ input[type="range"] {
 }
 
 .viewer-legend {
-  justify-content: flex-start;
   border-top: 1px solid #d6dee8;
+  overflow-x: auto;
 }
 
 .viewer-legend span {
@@ -162,13 +240,8 @@ input[type="range"] {
 }
 
 .face-swatch {
-  background: rgba(214, 49, 40, 0.18);
-  border: 1px solid rgba(214, 49, 40, 0.48);
-}
-
-.outline-swatch {
-  background: #ffffff;
-  border: 3px solid #d43128;
+  border-width: 2px;
+  border-style: solid;
 }
 
 .control-panel {
@@ -217,10 +290,43 @@ h1 {
 
 .document-controls {
   display: grid;
-  grid-template-columns: minmax(160px, 1fr) auto auto;
+  grid-template-columns: auto minmax(120px, 1fr) auto auto;
   gap: 8px;
   align-items: end;
   margin-bottom: 12px;
+}
+
+.active-face-control {
+  display: grid;
+  gap: 4px;
+  color: #435365;
+  font-weight: 800;
+}
+
+.active-face-control span {
+  font-size: 0.75rem;
+}
+
+.face-label {
+  min-width: 44px;
+  min-height: 34px;
+  display: inline-grid;
+  place-items: center;
+  border: 2px solid currentColor;
+  border-radius: 6px;
+  background: #ffffff;
+}
+
+.face-label.face-top {
+  color: #2563eb;
+}
+
+.face-label.face-right {
+  color: #dc2626;
+}
+
+.face-label.face-left {
+  color: #b98900;
 }
 
 .document-controls label {
@@ -273,6 +379,10 @@ h1 {
 
 .mode-select {
   flex: 0 0 64px;
+}
+
+.face-select {
+  flex: 0 0 52px;
 }
 
 .shape-actions {
@@ -430,7 +540,7 @@ h1 {
 
   .shape-card-top {
     display: grid;
-    grid-template-columns: minmax(62px, 1fr) 62px auto;
+    grid-template-columns: minmax(56px, 1fr) 62px 52px auto;
   }
 
   .shape-title {

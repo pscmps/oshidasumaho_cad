@@ -3,21 +3,50 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
+const APP_VERSION = 'proto-2026-05-30-face-01';
+const FACE_ORDER = ['top', 'right', 'left'];
+const FACE_LABELS = {
+  top: '上',
+  right: '右',
+  left: '左',
+};
 
 const initialDocument = {
   extrude: 12,
+  activeFace: 'top',
   shapes: [
-    { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add' },
-    { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut' },
+    { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
+    { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
   ],
 };
+
+function normalizeFace(face) {
+  return FACE_ORDER.includes(face) ? face : 'top';
+}
+
+function normalizeDocument(document) {
+  const activeFace = normalizeFace(document?.activeFace);
+  const shapes = Array.isArray(document?.shapes)
+    ? document.shapes.map((shape) => ({
+        ...shape,
+        face: normalizeFace(shape.face ?? activeFace),
+      }))
+    : initialDocument.shapes;
+
+  return {
+    ...initialDocument,
+    ...document,
+    activeFace,
+    shapes,
+  };
+}
 
 function loadDocument() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? JSON.parse(saved) : initialDocument;
+    return saved ? normalizeDocument(JSON.parse(saved)) : normalizeDocument(initialDocument);
   } catch {
-    return initialDocument;
+    return normalizeDocument(initialDocument);
   }
 }
 
@@ -74,10 +103,11 @@ function App() {
   function addShape(type) {
     setDocument((current) => {
       const id = getNextId(current.shapes);
+      const face = normalizeFace(current.activeFace);
       const shape =
         type === 'rect'
-          ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add' }
-          : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut' };
+          ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add', face }
+          : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face };
       setSelectedId(id);
       return { ...current, shapes: [...current.shapes, shape] };
     });
@@ -112,10 +142,20 @@ function App() {
     setSelectedId(initialDocument.shapes[0].id);
   }
 
+  function setActiveFace(face) {
+    updateDocument({ activeFace: normalizeFace(face) });
+    setSelectedId(null);
+  }
+
   return (
     <main className="app-shell">
       <section className="viewer-panel" aria-label="CAD viewer">
-        <Viewer document={document} selectedId={selectedId} onSelect={setSelectedId} />
+        <Viewer
+          document={document}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          onFaceSelect={setActiveFace}
+        />
       </section>
 
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
@@ -131,6 +171,12 @@ function App() {
         </header>
 
         <div className="document-controls">
+          <div className="active-face-control" aria-label="配置面">
+            <span>配置面</span>
+            <strong className={`face-label face-${document.activeFace}`}>
+              {FACE_LABELS[document.activeFace]}
+            </strong>
+          </div>
           <label>
             押し出し
             <input
@@ -186,31 +232,45 @@ function App() {
   );
 }
 
-function Viewer({ document, selectedId, onSelect }) {
-  const maskId = 'body-mask';
+function Viewer({ document, selectedId, onSelect, onFaceSelect }) {
+  const activeFace = normalizeFace(document.activeFace);
 
   return (
     <div className="viewer-frame">
       <div className="viewer-toolbar">
         <span>2D preview</span>
+        <span>{APP_VERSION}</span>
         <span>{document.extrude}mm extrude</span>
       </div>
+      <FaceSelector activeFace={activeFace} onSelect={onFaceSelect} />
       <svg viewBox="0 0 120 120" role="img" aria-label="配置図形プレビュー" onClick={() => onSelect(null)}>
         <defs>
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
           </pattern>
-          <mask id={maskId}>
-            <rect width="120" height="120" fill="black" />
-            {document.shapes.map((shape) => (
-              <MaskShape key={shape.id} shape={shape} />
-            ))}
-          </mask>
+          {FACE_ORDER.map((face) => (
+            <mask key={face} id={`body-mask-${face}`}>
+              <rect width="120" height="120" fill="black" />
+              {document.shapes
+                .filter((shape) => normalizeFace(shape.face) === face)
+                .map((shape) => (
+                  <MaskShape key={shape.id} shape={shape} />
+                ))}
+            </mask>
+          ))}
         </defs>
         <rect width="120" height="120" fill="url(#grid)" />
         <line x1="0" y1="60" x2="120" y2="60" stroke="#bac6d3" strokeWidth="0.5" />
         <line x1="60" y1="0" x2="60" y2="120" stroke="#bac6d3" strokeWidth="0.5" />
-        <rect className="final-face" width="120" height="120" mask={`url(#${maskId})`} />
+        {FACE_ORDER.map((face) => (
+          <rect
+            key={face}
+            className={`final-face face-${face}`}
+            width="120"
+            height="120"
+            mask={`url(#body-mask-${face})`}
+          />
+        ))}
         {document.shapes.map((shape) => (
           <FinalOutline key={`outline-${shape.id}`} shape={shape} />
         ))}
@@ -224,9 +284,53 @@ function Viewer({ document, selectedId, onSelect }) {
         ))}
       </svg>
       <div className="viewer-legend">
-        <span><i className="face-swatch" /> body face</span>
-        <span><i className="outline-swatch" /> final edge</span>
+        {FACE_ORDER.map((face) => (
+          <span key={face}><i className={`face-swatch face-${face}`} /> {FACE_LABELS[face]}面</span>
+        ))}
       </div>
+    </div>
+  );
+}
+
+function FaceSelector({ activeFace, onSelect }) {
+  const faces = [
+    { id: 'left', points: '70,44 20,24 20,70 70,96' },
+    { id: 'right', points: '70,44 120,24 120,70 70,96' },
+    { id: 'top', points: '70,44 20,24 70,4 120,24' },
+  ];
+  const orderedFaces = [
+    ...faces.filter((face) => face.id !== activeFace),
+    faces.find((face) => face.id === activeFace),
+  ].filter(Boolean);
+
+  return (
+    <div className="face-selector-wrap" aria-label="配置面選択">
+      <svg className="face-selector" viewBox="0 0 140 104" role="img" aria-label="上・右・左の面選択">
+        {orderedFaces.map((face) => (
+          <g
+            key={face.id}
+            className={`iso-face face-${face.id} ${face.id === activeFace ? 'active' : ''}`}
+            role="button"
+            tabIndex="0"
+            aria-label={`${FACE_LABELS[face.id]}面を選択`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelect(face.id);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onSelect(face.id);
+              }
+            }}
+          >
+            <polygon points={face.points} />
+            <text x={face.id === 'left' ? 42 : face.id === 'right' ? 98 : 70} y={face.id === 'top' ? 26 : 66}>
+              {FACE_LABELS[face.id]}
+            </text>
+          </g>
+        ))}
+      </svg>
     </div>
   );
 }
@@ -250,10 +354,11 @@ function MaskShape({ shape }) {
 }
 
 function FinalOutline({ shape }) {
+  const className = `final-outline face-${normalizeFace(shape.face)}`;
   if (shape.type === 'circle') {
     return (
       <circle
-        className="final-outline"
+        className={className}
         cx={shape.x}
         cy={shape.y}
         r={shape.r}
@@ -263,7 +368,7 @@ function FinalOutline({ shape }) {
 
   return (
     <rect
-      className="final-outline"
+      className={className}
       x={shape.x}
       y={shape.y}
       width={shape.w}
@@ -274,7 +379,7 @@ function FinalOutline({ shape }) {
 }
 
 function ShapePreview({ shape, selected, onSelect }) {
-  const className = `shape-preview ${shape.mode} ${selected ? 'selected' : ''}`;
+  const className = `shape-preview ${shape.mode} face-${normalizeFace(shape.face)} ${selected ? 'selected' : ''}`;
   function handleSelect(event) {
     event.stopPropagation();
     onSelect();
@@ -330,6 +435,16 @@ function ShapeEditor({
         >
           <option value="add">add</option>
           <option value="cut">cut</option>
+        </select>
+        <select
+          className="face-select"
+          value={normalizeFace(shape.face)}
+          onChange={(event) => onChange({ face: event.target.value })}
+          aria-label={`${getShapeLabel(shape)} face`}
+        >
+          {FACE_ORDER.map((face) => (
+            <option key={face} value={face}>{FACE_LABELS[face]}</option>
+          ))}
         </select>
         <div className="shape-actions">
           <button type="button" onClick={() => onMove(shape.id, -1)} disabled={index === 0}>
