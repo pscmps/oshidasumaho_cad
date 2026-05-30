@@ -123,13 +123,13 @@ input[type="range"] {
   stroke: #dc2626;
 }
 
-.final-face.face-left,
-.face-swatch.face-left {
+.final-face.face-front,
+.face-swatch.face-front {
   fill: rgba(234, 179, 8, 0.24);
 }
 
-.final-outline.face-left,
-.face-swatch.face-left {
+.final-outline.face-front,
+.face-swatch.face-front {
   stroke: #d69e00;
 }
 
@@ -168,7 +168,7 @@ input[type="range"] {
   stroke: #dc2626;
 }
 
-.face-plan.face-left.active .face-plan-bg {
+.face-plan.face-front.active .face-plan-bg {
   stroke: #d69e00;
 }
 
@@ -322,7 +322,7 @@ h1 {
   color: #dc2626;
 }
 
-.face-label.face-left {
+.face-label.face-front {
   color: #b98900;
 }
 

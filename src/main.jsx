@@ -3,12 +3,12 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-30-plan-01';
-const FACE_ORDER = ['top', 'right', 'left'];
+const APP_VERSION = 'proto-2026-05-30-plan-02';
+const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
-  top: '上',
-  right: '右',
-  left: '左',
+  top: '上面',
+  front: '正面',
+  right: '右側面',
 };
 
 const initialDocument = {
@@ -21,6 +21,9 @@ const initialDocument = {
 };
 
 function normalizeFace(face) {
+  if (face === 'left') {
+    return 'front';
+  }
   return FACE_ORDER.includes(face) ? face : 'top';
 }
 
@@ -61,6 +64,7 @@ function getShapeLabel(shape) {
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
+  const [fullPreviewFace, setFullPreviewFace] = useState(null);
   const [jsonOpen, setJsonOpen] = useState(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
@@ -171,14 +175,23 @@ function App() {
     setSelectedId(null);
   }
 
+  function toggleFullPreview(face) {
+    const normalizedFace = normalizeFace(face);
+    updateDocument({ activeFace: normalizedFace });
+    setSelectedId(null);
+    setFullPreviewFace((current) => (current === normalizedFace ? null : normalizedFace));
+  }
+
   return (
     <main className="app-shell">
       <section className="viewer-panel" aria-label="CAD viewer">
         <Viewer
           document={document}
           selectedId={selectedId}
+          fullPreviewFace={fullPreviewFace}
           onSelect={selectShape}
           onFaceSelect={setActiveFace}
+          onFaceDoubleSelect={toggleFullPreview}
         />
       </section>
 
@@ -244,11 +257,11 @@ function App() {
 
         {selectedShape ? (
           <p className="selection-note">
-            選択中: {FACE_LABELS[normalizeFace(selectedShape.face)]}面 / {getShapeLabel(selectedShape)}
+            選択中: {FACE_LABELS[normalizeFace(selectedShape.face)]} / {getShapeLabel(selectedShape)}
           </p>
         ) : (
           <p className="selection-note">
-            {FACE_LABELS[activeFace]}面の図形: {activeShapes.length}件
+            {FACE_LABELS[activeFace]}の図形: {activeShapes.length}件
           </p>
         )}
 
@@ -258,8 +271,17 @@ function App() {
   );
 }
 
-function Viewer({ document, selectedId, onSelect, onFaceSelect }) {
+function Viewer({
+  document,
+  selectedId,
+  fullPreviewFace,
+  onSelect,
+  onFaceSelect,
+  onFaceDoubleSelect,
+}) {
   const activeFace = normalizeFace(document.activeFace);
+  const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
+  const visibleFaces = previewFace ? [previewFace] : FACE_ORDER;
 
   return (
     <div className="viewer-frame">
@@ -284,30 +306,35 @@ function Viewer({ document, selectedId, onSelect, onFaceSelect }) {
             </mask>
           ))}
         </defs>
-        {FACE_ORDER.map((face) => (
+        {visibleFaces.map((face) => (
           <FacePlan
             key={face}
             face={face}
             active={face === activeFace}
+            full={Boolean(previewFace)}
             shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
             selectedId={selectedId}
             onSelect={onSelect}
             onFaceSelect={onFaceSelect}
+            onFaceDoubleSelect={onFaceDoubleSelect}
           />
         ))}
       </svg>
       <div className="viewer-legend">
         {FACE_ORDER.map((face) => (
-          <span key={face}><i className={`face-swatch face-${face}`} /> {FACE_LABELS[face]}面</span>
+          <span key={face}><i className={`face-swatch face-${face}`} /> {FACE_LABELS[face]}</span>
         ))}
       </div>
     </div>
   );
 }
 
-function getFaceTransform(face) {
+function getFaceTransform(face, full) {
+  if (full) {
+    return 'translate(14 14) scale(2)';
+  }
   if (face === 'top') {
-    return 'translate(74 6)';
+    return 'translate(6 6)';
   }
   if (face === 'right') {
     return 'translate(142 142)';
@@ -315,16 +342,29 @@ function getFaceTransform(face) {
   return 'translate(6 142)';
 }
 
-function FacePlan({ face, active, shapes, selectedId, onSelect, onFaceSelect }) {
+function FacePlan({
+  face,
+  active,
+  full,
+  shapes,
+  selectedId,
+  onSelect,
+  onFaceSelect,
+  onFaceDoubleSelect,
+}) {
   return (
     <g
-      className={`face-plan face-${face} ${active ? 'active' : ''}`}
-      transform={getFaceTransform(face)}
+      className={`face-plan face-${face} ${active ? 'active' : ''} ${full ? 'full' : ''}`}
+      transform={getFaceTransform(face, full)}
       role="button"
       tabIndex="0"
-      aria-label={`${FACE_LABELS[face]}面`}
+      aria-label={FACE_LABELS[face]}
       onClick={() => {
         onFaceSelect(face);
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onFaceDoubleSelect(face);
       }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
@@ -409,6 +449,10 @@ function ShapePreview({ shape, selected, onSelect }) {
     onSelect();
   }
 
+  function handleDoubleClick(event) {
+    event.stopPropagation();
+  }
+
   if (shape.type === 'circle') {
     return (
       <circle
@@ -417,6 +461,7 @@ function ShapePreview({ shape, selected, onSelect }) {
         cy={shape.y}
         r={shape.r}
         onClick={handleSelect}
+        onDoubleClick={handleDoubleClick}
       />
     );
   }
@@ -430,6 +475,7 @@ function ShapePreview({ shape, selected, onSelect }) {
       height={shape.h}
       rx="1.4"
       onClick={handleSelect}
+      onDoubleClick={handleDoubleClick}
     />
   );
 }
