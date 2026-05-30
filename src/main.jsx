@@ -77,7 +77,7 @@ function App() {
       const shape =
         type === 'rect'
           ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add' }
-          : { id, type: 'circle', x: 44, y: 32, r: 10, mode: 'cut' };
+          : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut' };
       setSelectedId(id);
       return { ...current, shapes: [...current.shapes, shape] };
     });
@@ -414,7 +414,7 @@ function ControlField({ axis, label, value, min, max, invert = false, onChange }
         type="range"
         min={min}
         max={max}
-        step="0.5"
+        step="1"
         value={sliderValue}
         onChange={handleSliderChange}
       />
@@ -438,7 +438,7 @@ function NumberField({ label, value, min, max, compact = false, onChange }) {
         type="number"
         min={min}
         max={max}
-        step="0.5"
+        step="1"
         value={value}
         onChange={(event) => onChange(Number(event.target.value) || 0)}
       />

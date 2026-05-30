@@ -296,7 +296,7 @@ h1 {
 
 .control-field {
   display: grid;
-  grid-template-rows: auto 54px auto;
+  grid-template-rows: auto 76px auto;
   min-width: 0;
   gap: 6px;
   color: #506174;
@@ -324,14 +324,14 @@ h1 {
 .control-field.axis-y input[type="range"] {
   justify-self: center;
   width: 30px;
-  height: 54px;
+  height: 76px;
   writing-mode: vertical-lr;
   direction: rtl;
 }
 
 .control-field.axis-y {
   grid-template-columns: minmax(0, 1fr) 52px;
-  grid-template-rows: auto 54px;
+  grid-template-rows: auto 76px;
 }
 
 .control-field.axis-y > span {
@@ -442,15 +442,15 @@ h1 {
   }
 
   .control-field {
-    grid-template-rows: auto 48px auto;
+    grid-template-rows: auto 68px auto;
   }
 
   .control-field.axis-y input[type="range"] {
-    height: 48px;
+    height: 68px;
   }
 
   .control-field.axis-y {
     grid-template-columns: minmax(0, 1fr) 44px;
-    grid-template-rows: auto 48px;
+    grid-template-rows: auto 68px;
   }
 }
