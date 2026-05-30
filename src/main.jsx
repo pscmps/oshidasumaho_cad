@@ -350,6 +350,7 @@ function ShapeEditor({
           value={shape.y}
           min={0}
           max={80}
+          invert
           onChange={(y) => onChange({ y })}
         />
         {shape.type === 'rect' ? (
@@ -363,7 +364,7 @@ function ShapeEditor({
               onChange={(w) => onChange({ w })}
             />
             <ControlField
-              axis="x"
+              axis="y"
               label="H"
               value={shape.h}
               min={1}
@@ -389,7 +390,14 @@ function ShapeEditor({
   );
 }
 
-function ControlField({ axis, label, value, min, max, onChange }) {
+function ControlField({ axis, label, value, min, max, invert = false, onChange }) {
+  const sliderValue = invert ? max - value + min : value;
+
+  function handleSliderChange(event) {
+    const nextValue = Number(event.target.value);
+    onChange(invert ? max - nextValue + min : nextValue);
+  }
+
   return (
     <label className={`control-field ${axis === 'y' ? 'axis-y' : 'axis-x'}`}>
       <span>{label}</span>
@@ -398,8 +406,8 @@ function ControlField({ axis, label, value, min, max, onChange }) {
         min={min}
         max={max}
         step="0.5"
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value))}
+        value={sliderValue}
+        onChange={handleSliderChange}
       />
       <NumberField
         label={`${label} value`}
