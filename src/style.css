@@ -202,6 +202,40 @@ input[type="range"] {
   font-weight: 900;
 }
 
+.area-lock-button {
+  cursor: pointer;
+  outline: none;
+}
+
+.area-lock-button rect {
+  fill: #ffffff;
+  stroke: #9aa8b8;
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.area-lock-button text {
+  pointer-events: none;
+  fill: #435365;
+  font-size: 9px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
+.area-lock-button.locked rect {
+  fill: #17212b;
+  stroke: #17212b;
+}
+
+.area-lock-button.locked text {
+  fill: #ffffff;
+}
+
+.area-lock-button.disabled {
+  cursor: not-allowed;
+  opacity: 0.38;
+}
+
 .final-outline {
   fill: none;
   stroke-linejoin: round;

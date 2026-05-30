@@ -3,17 +3,23 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-30-plan-03';
+const APP_VERSION = 'proto-2026-05-30-plan-04';
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
   front: '正面',
   right: '右側面',
 };
+const DEFAULT_AREA_LOCKS = {
+  top: false,
+  front: false,
+  right: false,
+};
 
 const initialDocument = {
   extrude: 12,
   activeFace: 'top',
+  areaLocks: DEFAULT_AREA_LOCKS,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -29,6 +35,10 @@ function normalizeFace(face) {
 
 function normalizeDocument(document) {
   const activeFace = normalizeFace(document?.activeFace);
+  const areaLocks = FACE_ORDER.reduce((locks, face) => ({
+    ...locks,
+    [face]: Boolean(document?.areaLocks?.[face]),
+  }), DEFAULT_AREA_LOCKS);
   const shapes = Array.isArray(document?.shapes)
     ? document.shapes.map((shape) => ({
         ...shape,
@@ -40,6 +50,7 @@ function normalizeDocument(document) {
     ...initialDocument,
     ...document,
     activeFace,
+    areaLocks,
     shapes,
   };
 }
@@ -106,6 +117,160 @@ function getFaceBounds(shapes, face) {
   }, null);
 }
 
+function getAllFaceBounds(shapes) {
+  return Object.fromEntries(FACE_ORDER.map((face) => [face, getFaceBounds(shapes, face)]));
+}
+
+function getFaceConstraint(face, faceBounds) {
+  const constraint = {
+    minX: 0,
+    maxX: 120,
+    minY: 0,
+    maxY: 120,
+    constrainedX: false,
+    constrainedY: false,
+  };
+  const topBounds = faceBounds.top;
+  const frontBounds = faceBounds.front;
+  const rightBounds = faceBounds.right;
+
+  if (face === 'top' && frontBounds) {
+    constraint.minX = frontBounds.minX;
+    constraint.maxX = frontBounds.maxX;
+    constraint.constrainedX = true;
+  }
+  if (face === 'front') {
+    if (topBounds) {
+      constraint.minX = topBounds.minX;
+      constraint.maxX = topBounds.maxX;
+      constraint.constrainedX = true;
+    }
+    if (rightBounds) {
+      constraint.minY = rightBounds.minY;
+      constraint.maxY = rightBounds.maxY;
+      constraint.constrainedY = true;
+    }
+  }
+  if (face === 'right' && frontBounds) {
+    constraint.minY = frontBounds.minY;
+    constraint.maxY = frontBounds.maxY;
+    constraint.constrainedY = true;
+  }
+
+  return constraint;
+}
+
+function hasAreaConstraint(constraint) {
+  return (
+    (constraint.constrainedX && constraint.maxX > constraint.minX) ||
+    (constraint.constrainedY && constraint.maxY > constraint.minY)
+  );
+}
+
+function isShapeWithinConstraint(shape, constraint) {
+  const bounds = getShapeBounds(shape);
+  return (
+    bounds.minX >= constraint.minX &&
+    bounds.maxX <= constraint.maxX &&
+    bounds.minY >= constraint.minY &&
+    bounds.maxY <= constraint.maxY
+  );
+}
+
+function canLockFace(shapes, face, faceBounds = getAllFaceBounds(shapes)) {
+  const constraint = getFaceConstraint(face, faceBounds);
+  if (!hasAreaConstraint(constraint)) {
+    return false;
+  }
+
+  return shapes
+    .filter((shape) => normalizeFace(shape.face) === face)
+    .every((shape) => isShapeWithinConstraint(shape, constraint));
+}
+
+function clampValue(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function constrainShape(shape, constraint) {
+  if (!constraint) {
+    return shape;
+  }
+
+  if (shape.type === 'circle') {
+    const maxR = Math.max(
+      1,
+      Math.min(
+        60,
+        (constraint.maxX - constraint.minX) / 2,
+        (constraint.maxY - constraint.minY) / 2,
+      ),
+    );
+    const r = clampValue(shape.r, 1, maxR);
+    return {
+      ...shape,
+      r,
+      x: clampValue(shape.x, constraint.minX + r, constraint.maxX - r),
+      y: clampValue(shape.y, constraint.minY + r, constraint.maxY - r),
+    };
+  }
+
+  const w = clampValue(shape.w, 1, Math.max(1, constraint.maxX - constraint.minX));
+  const h = clampValue(shape.h, 1, Math.max(1, constraint.maxY - constraint.minY));
+  return {
+    ...shape,
+    w,
+    h,
+    x: clampValue(shape.x, constraint.minX, constraint.maxX - w),
+    y: clampValue(shape.y, constraint.minY, constraint.maxY - h),
+  };
+}
+
+function applyAreaLocks(document) {
+  const faceBounds = getAllFaceBounds(document.shapes);
+  return {
+    ...document,
+    shapes: document.shapes.map((shape) => {
+      const face = normalizeFace(shape.face);
+      if (!document.areaLocks?.[face]) {
+        return shape;
+      }
+      return constrainShape(shape, getFaceConstraint(face, faceBounds));
+    }),
+  };
+}
+
+function getShapeControlLimits(shape, constraint, locked) {
+  const fullConstraint = locked
+    ? constraint
+    : { minX: 0, maxX: 120, minY: 0, maxY: 120 };
+
+  if (shape.type === 'circle') {
+    const rMax = Math.max(
+      1,
+      Math.min(
+        60,
+        shape.x - fullConstraint.minX,
+        fullConstraint.maxX - shape.x,
+        shape.y - fullConstraint.minY,
+        fullConstraint.maxY - shape.y,
+      ),
+    );
+    return {
+      x: { min: fullConstraint.minX + shape.r, max: fullConstraint.maxX - shape.r },
+      y: { min: fullConstraint.minY + shape.r, max: fullConstraint.maxY - shape.r },
+      r: { min: 1, max: rMax },
+    };
+  }
+
+  return {
+    x: { min: fullConstraint.minX, max: Math.max(fullConstraint.minX, fullConstraint.maxX - shape.w) },
+    y: { min: fullConstraint.minY, max: Math.max(fullConstraint.minY, fullConstraint.maxY - shape.h) },
+    w: { min: 1, max: Math.max(1, fullConstraint.maxX - shape.x) },
+    h: { min: 1, max: Math.max(1, fullConstraint.maxY - shape.y) },
+  };
+}
+
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -117,6 +282,11 @@ function App() {
   const selectedShape = document.shapes.find((shape) => shape.id === selectedId);
   const activeFace = normalizeFace(document.activeFace);
   const activeShapes = document.shapes.filter((shape) => normalizeFace(shape.face) === activeFace);
+  const faceBounds = useMemo(() => getAllFaceBounds(document.shapes), [document.shapes]);
+  const areaLockAvailability = useMemo(
+    () => Object.fromEntries(FACE_ORDER.map((face) => [face, canLockFace(document.shapes, face, faceBounds)])),
+    [document.shapes, faceBounds],
+  );
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
 
   useEffect(() => {
@@ -143,12 +313,20 @@ function App() {
   }
 
   function updateShape(id, patch) {
-    setDocument((current) => ({
+    setDocument((current) => applyAreaLocks({
       ...current,
       activeFace: patch.face ? normalizeFace(patch.face) : current.activeFace,
-      shapes: current.shapes.map((shape) =>
-        shape.id === id ? { ...shape, ...patch } : shape,
-      ),
+      shapes: current.shapes.map((shape) => {
+        if (shape.id !== id) {
+          return shape;
+        }
+        const nextShape = { ...shape, ...patch };
+        const face = normalizeFace(nextShape.face);
+        if (!current.areaLocks?.[face]) {
+          return nextShape;
+        }
+        return constrainShape(nextShape, getFaceConstraint(face, getAllFaceBounds(current.shapes)));
+      }),
     }));
   }
 
@@ -156,12 +334,15 @@ function App() {
     setDocument((current) => {
       const id = getNextId(current.shapes);
       const face = normalizeFace(current.activeFace);
-      const shape =
+      const shapeBase =
         type === 'rect'
           ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add', face }
           : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face };
+      const shape = current.areaLocks?.[face]
+        ? constrainShape(shapeBase, getFaceConstraint(face, getAllFaceBounds(current.shapes)))
+        : shapeBase;
       setSelectedId(id);
-      return { ...current, shapes: [...current.shapes, shape] };
+      return applyAreaLocks({ ...current, shapes: [...current.shapes, shape] });
     });
   }
 
@@ -171,7 +352,7 @@ function App() {
       if (selectedId === id) {
         setSelectedId(nextShapes[0]?.id ?? null);
       }
-      return { ...current, shapes: nextShapes };
+      return applyAreaLocks({ ...current, shapes: nextShapes });
     });
   }
 
@@ -210,6 +391,25 @@ function App() {
     });
   }
 
+  function toggleAreaLock(face) {
+    const normalizedFace = normalizeFace(face);
+    setDocument((current) => {
+      const currentLocks = { ...DEFAULT_AREA_LOCKS, ...current.areaLocks };
+      const nextLockValue = !currentLocks[normalizedFace];
+      if (nextLockValue && !canLockFace(current.shapes, normalizedFace)) {
+        return current;
+      }
+
+      return applyAreaLocks({
+        ...current,
+        areaLocks: {
+          ...currentLocks,
+          [normalizedFace]: nextLockValue,
+        },
+      });
+    });
+  }
+
   function resetDocument() {
     setDocument(initialDocument);
     setSelectedId(initialDocument.shapes[0].id);
@@ -234,9 +434,12 @@ function App() {
           document={document}
           selectedId={selectedId}
           fullPreviewFace={fullPreviewFace}
+          areaLocks={document.areaLocks}
+          areaLockAvailability={areaLockAvailability}
           onSelect={selectShape}
           onFaceSelect={setActiveFace}
           onFaceDoubleSelect={toggleFullPreview}
+          onAreaLockToggle={toggleAreaLock}
         />
       </section>
 
@@ -292,6 +495,8 @@ function App() {
               index={index}
               total={activeShapes.length}
               selected={shape.id === selectedId}
+              locked={Boolean(document.areaLocks?.[normalizeFace(shape.face)])}
+              constraint={getFaceConstraint(normalizeFace(shape.face), faceBounds)}
               onSelect={() => selectShape(shape.id)}
               onChange={(patch) => updateShape(shape.id, patch)}
               onMove={moveShape}
@@ -320,9 +525,12 @@ function Viewer({
   document,
   selectedId,
   fullPreviewFace,
+  areaLocks,
+  areaLockAvailability,
   onSelect,
   onFaceSelect,
   onFaceDoubleSelect,
+  onAreaLockToggle,
 }) {
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
@@ -339,7 +547,7 @@ function Viewer({
         <span>{APP_VERSION}</span>
         <span>{document.extrude}mm extrude</span>
       </div>
-      <svg className="tri-view" viewBox="0 0 268 268" role="img" aria-label="3面配置図">
+      <svg className="tri-view" viewBox="0 0 326 268" role="img" aria-label="3面配置図">
         <defs>
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
@@ -369,6 +577,16 @@ function Viewer({
             onFaceDoubleSelect={onFaceDoubleSelect}
           />
         ))}
+        {visibleFaces.map((face) => (
+          <AreaLockButton
+            key={`lock-${face}`}
+            face={face}
+            full={Boolean(previewFace)}
+            locked={Boolean(areaLocks?.[face])}
+            disabled={!areaLocks?.[face] && !areaLockAvailability?.[face]}
+            onToggle={onAreaLockToggle}
+          />
+        ))}
       </svg>
       <div className="viewer-legend">
         {FACE_ORDER.map((face) => (
@@ -379,17 +597,61 @@ function Viewer({
   );
 }
 
-function getFaceTransform(face, full) {
+function getAreaLockTransform(face, full) {
   if (full) {
-    return 'translate(14 14) scale(2)';
-  }
-  if (face === 'top') {
-    return 'translate(6 6)';
+    return 'translate(48 22)';
   }
   if (face === 'right') {
-    return 'translate(142 142)';
+    return 'translate(270 190)';
   }
-  return 'translate(6 142)';
+  if (face === 'front') {
+    return 'translate(6 190)';
+  }
+  return 'translate(6 54)';
+}
+
+function AreaLockButton({ face, full, locked, disabled, onToggle }) {
+  return (
+    <g
+      className={`area-lock-button face-${face} ${locked ? 'locked' : ''} ${disabled ? 'disabled' : ''}`}
+      transform={getAreaLockTransform(face, full)}
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      aria-label={`${FACE_LABELS[face]} エリアロック`}
+      onClick={(event) => {
+        event.stopPropagation();
+        if (!disabled) {
+          onToggle(face);
+        }
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+      }}
+      onKeyDown={(event) => {
+        if ((event.key === 'Enter' || event.key === ' ') && !disabled) {
+          event.preventDefault();
+          onToggle(face);
+        }
+      }}
+    >
+      <rect width="50" height="24" rx="5" />
+      <text x="25" y="16">エリア</text>
+      <text x="43" y="16">🔒</text>
+    </g>
+  );
+}
+
+function getFaceTransform(face, full) {
+  if (full) {
+    return 'translate(43 14) scale(2)';
+  }
+  if (face === 'top') {
+    return 'translate(62 6)';
+  }
+  if (face === 'right') {
+    return 'translate(198 142)';
+  }
+  return 'translate(62 142)';
 }
 
 function FacePlan({
@@ -585,11 +847,15 @@ function ShapeEditor({
   index,
   total,
   selected,
+  locked,
+  constraint,
   onSelect,
   onChange,
   onMove,
   onRemove,
 }) {
+  const limits = getShapeControlLimits(shape, constraint, locked);
+
   return (
     <article ref={editorRef} className={`shape-card ${selected ? 'selected' : ''}`}>
       <header className="shape-card-top">
@@ -633,16 +899,16 @@ function ShapeEditor({
           axis="x"
           label="X"
           value={shape.x}
-          min={0}
-          max={120}
+          min={limits.x.min}
+          max={limits.x.max}
           onChange={(x) => onChange({ x })}
         />
         <ControlField
           axis="y"
           label="Y"
           value={shape.y}
-          min={0}
-          max={120}
+          min={limits.y.min}
+          max={limits.y.max}
           invert
           onChange={(y) => onChange({ y })}
         />
@@ -652,16 +918,16 @@ function ShapeEditor({
               axis="x"
               label="W"
               value={shape.w}
-              min={1}
-              max={120}
+              min={limits.w.min}
+              max={limits.w.max}
               onChange={(w) => onChange({ w })}
             />
             <ControlField
               axis="y"
               label="H"
               value={shape.h}
-              min={1}
-              max={120}
+              min={limits.h.min}
+              max={limits.h.max}
               onChange={(h) => onChange({ h })}
             />
           </>
@@ -671,8 +937,8 @@ function ShapeEditor({
               axis="x"
               label="R"
               value={shape.r}
-              min={1}
-              max={60}
+              min={limits.r.min}
+              max={limits.r.max}
               onChange={(r) => onChange({ r })}
             />
             <div className="control-field empty" aria-hidden="true" />
