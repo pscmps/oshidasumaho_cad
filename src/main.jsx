@@ -304,11 +304,12 @@ function ShapeEditor({
 }) {
   return (
     <article ref={editorRef} className={`shape-card ${selected ? 'selected' : ''}`}>
-      <header>
+      <header className="shape-card-top">
         <button type="button" className="shape-title" onClick={onSelect}>
           {getShapeLabel(shape)}
         </button>
         <select
+          className="mode-select"
           value={shape.mode}
           onChange={(event) => onChange({ mode: event.target.value })}
           aria-label={`${getShapeLabel(shape)} operation`}
@@ -316,14 +317,37 @@ function ShapeEditor({
           <option value="add">add</option>
           <option value="cut">cut</option>
         </select>
+        <div className="shape-actions">
+          <button type="button" onClick={() => onMove(shape.id, -1)} disabled={index === 0}>
+            ↑
+          </button>
+          <button type="button" onClick={() => onMove(shape.id, 1)} disabled={index === total - 1}>
+            ↓
+          </button>
+          <button type="button" className="danger" onClick={() => onRemove(shape.id)}>
+            削除
+          </button>
+        </div>
       </header>
 
-      <div className="position-controls">
-        <SlideField label="X" value={shape.x} min={0} max={120} onChange={(x) => onChange({ x })} />
-        <SlideField label="Y" value={shape.y} min={0} max={80} onChange={(y) => onChange({ y })} />
-      </div>
-
-      <div className="field-grid">
+      <div className="shape-compact-controls">
+        <SlideField
+          axis="x"
+          label="X"
+          value={shape.x}
+          min={0}
+          max={120}
+          onChange={(x) => onChange({ x })}
+        />
+        <SlideField
+          axis="y"
+          label="Y"
+          value={shape.y}
+          min={0}
+          max={80}
+          onChange={(y) => onChange({ y })}
+        />
+        <div className="size-fields">
         {shape.type === 'rect' ? (
           <>
             <NumberField label="W" value={shape.w} min={1} max={120} onChange={(w) => onChange({ w })} />
@@ -332,26 +356,15 @@ function ShapeEditor({
         ) : (
           <NumberField label="R" value={shape.r} min={1} max={40} onChange={(r) => onChange({ r })} />
         )}
+        </div>
       </div>
-
-      <footer>
-        <button type="button" onClick={() => onMove(shape.id, -1)} disabled={index === 0}>
-          ↑
-        </button>
-        <button type="button" onClick={() => onMove(shape.id, 1)} disabled={index === total - 1}>
-          ↓
-        </button>
-        <button type="button" className="danger" onClick={() => onRemove(shape.id)}>
-          削除
-        </button>
-      </footer>
     </article>
   );
 }
 
-function SlideField({ label, value, min, max, onChange }) {
+function SlideField({ axis, label, value, min, max, onChange }) {
   return (
-    <label className="slide-field">
+    <label className={`slide-field ${axis === 'y' ? 'axis-y' : 'axis-x'}`}>
       <span>{label}</span>
       <input
         type="range"
