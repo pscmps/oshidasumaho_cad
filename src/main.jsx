@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-30-plan-02';
+const APP_VERSION = 'proto-2026-05-30-plan-03';
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -59,6 +59,51 @@ function getNextId(shapes) {
 
 function getShapeLabel(shape) {
   return `${shape.type === 'rect' ? 'Rect' : 'Circle'} ${shape.id}`;
+}
+
+function clampRangeValue(value) {
+  return Math.min(120, Math.max(0, value));
+}
+
+function getShapeBounds(shape) {
+  if (shape.type === 'circle') {
+    return {
+      minX: clampRangeValue(shape.x - shape.r),
+      maxX: clampRangeValue(shape.x + shape.r),
+      minY: clampRangeValue(shape.y - shape.r),
+      maxY: clampRangeValue(shape.y + shape.r),
+    };
+  }
+
+  return {
+    minX: clampRangeValue(shape.x),
+    maxX: clampRangeValue(shape.x + shape.w),
+    minY: clampRangeValue(shape.y),
+    maxY: clampRangeValue(shape.y + shape.h),
+  };
+}
+
+function getFaceBounds(shapes, face) {
+  const addShapes = shapes.filter(
+    (shape) => normalizeFace(shape.face) === face && shape.mode === 'add',
+  );
+  if (!addShapes.length) {
+    return null;
+  }
+
+  return addShapes.reduce((bounds, shape) => {
+    const shapeBounds = getShapeBounds(shape);
+    if (!bounds) {
+      return shapeBounds;
+    }
+
+    return {
+      minX: Math.min(bounds.minX, shapeBounds.minX),
+      maxX: Math.max(bounds.maxX, shapeBounds.maxX),
+      minY: Math.min(bounds.minY, shapeBounds.minY),
+      maxY: Math.max(bounds.maxY, shapeBounds.maxY),
+    };
+  }, null);
 }
 
 function App() {
@@ -282,6 +327,10 @@ function Viewer({
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
   const visibleFaces = previewFace ? [previewFace] : FACE_ORDER;
+  const faceBounds = useMemo(
+    () => Object.fromEntries(FACE_ORDER.map((face) => [face, getFaceBounds(document.shapes, face)])),
+    [document.shapes],
+  );
 
   return (
     <div className="viewer-frame">
@@ -313,6 +362,7 @@ function Viewer({
             active={face === activeFace}
             full={Boolean(previewFace)}
             shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
+            faceBounds={faceBounds}
             selectedId={selectedId}
             onSelect={onSelect}
             onFaceSelect={onFaceSelect}
@@ -347,6 +397,7 @@ function FacePlan({
   active,
   full,
   shapes,
+  faceBounds,
   selectedId,
   onSelect,
   onFaceSelect,
@@ -383,6 +434,7 @@ function FacePlan({
         height="120"
         mask={`url(#body-mask-${face})`}
       />
+      <ConstraintOverlay face={face} faceBounds={faceBounds} />
       {shapes.map((shape) => (
         <FinalOutline key={`outline-${shape.id}`} shape={shape} />
       ))}
@@ -397,6 +449,53 @@ function FacePlan({
       <text className="face-plan-label" x="60" y="112">{FACE_LABELS[face]}</text>
     </g>
   );
+}
+
+function ConstraintOverlay({ face, faceBounds }) {
+  const overlays = [];
+  const topBounds = faceBounds.top;
+  const frontBounds = faceBounds.front;
+  const rightBounds = faceBounds.right;
+
+  if (face === 'top' && frontBounds) {
+    overlays.push(...getOutsideXRects(frontBounds));
+  }
+  if (face === 'front') {
+    if (topBounds) {
+      overlays.push(...getOutsideXRects(topBounds));
+    }
+    if (rightBounds) {
+      overlays.push(...getOutsideYRects(rightBounds));
+    }
+  }
+  if (face === 'right' && frontBounds) {
+    overlays.push(...getOutsideYRects(frontBounds));
+  }
+
+  return overlays.map((rect, index) => (
+    <rect
+      key={`${rect.type}-${index}`}
+      className={`constraint-mask ${rect.type}`}
+      x={rect.x}
+      y={rect.y}
+      width={rect.width}
+      height={rect.height}
+    />
+  ));
+}
+
+function getOutsideXRects(bounds) {
+  return [
+    { type: 'x', x: 0, y: 0, width: bounds.minX, height: 120 },
+    { type: 'x', x: bounds.maxX, y: 0, width: 120 - bounds.maxX, height: 120 },
+  ].filter((rect) => rect.width > 0.01);
+}
+
+function getOutsideYRects(bounds) {
+  return [
+    { type: 'y', x: 0, y: 0, width: 120, height: bounds.minY },
+    { type: 'y', x: 0, y: bounds.maxY, width: 120, height: 120 - bounds.maxY },
+  ].filter((rect) => rect.height > 0.01);
 }
 
 function MaskShape({ shape }) {

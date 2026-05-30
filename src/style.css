@@ -178,6 +178,22 @@ input[type="range"] {
   vector-effect: non-scaling-stroke;
 }
 
+.constraint-mask {
+  pointer-events: none;
+  fill: rgba(107, 114, 128, 0.26);
+}
+
+.constraint-mask.x {
+  stroke: rgba(75, 85, 99, 0.36);
+  stroke-width: 0.4;
+}
+
+.constraint-mask.y {
+  fill: rgba(107, 114, 128, 0.32);
+  stroke: rgba(75, 85, 99, 0.4);
+  stroke-width: 0.4;
+}
+
 .face-plan-label {
   pointer-events: none;
   text-anchor: middle;
