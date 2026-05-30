@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 
@@ -33,6 +33,7 @@ function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
   const [jsonOpen, setJsonOpen] = useState(false);
+  const editorRefs = useRef(new Map());
 
   const selectedShape = document.shapes.find((shape) => shape.id === selectedId);
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
@@ -40,6 +41,13 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
   }, [document]);
+
+  useEffect(() => {
+    const editor = editorRefs.current.get(selectedId);
+    if (editor) {
+      editor.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+  }, [selectedId]);
 
   function updateDocument(patch) {
     setDocument((current) => ({ ...current, ...patch }));
@@ -136,6 +144,13 @@ function App() {
           {document.shapes.map((shape, index) => (
             <ShapeEditor
               key={shape.id}
+              editorRef={(node) => {
+                if (node) {
+                  editorRefs.current.set(shape.id, node);
+                } else {
+                  editorRefs.current.delete(shape.id);
+                }
+              }}
               shape={shape}
               index={index}
               total={document.shapes.length}
@@ -163,6 +178,8 @@ function App() {
 }
 
 function Viewer({ document, selectedId, onSelect }) {
+  const maskId = 'body-mask';
+
   return (
     <div className="viewer-frame">
       <div className="viewer-toolbar">
@@ -174,10 +191,20 @@ function Viewer({ document, selectedId, onSelect }) {
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
           </pattern>
+          <mask id={maskId}>
+            <rect width="120" height="80" fill="black" />
+            {document.shapes.map((shape) => (
+              <MaskShape key={shape.id} shape={shape} />
+            ))}
+          </mask>
         </defs>
         <rect width="120" height="80" fill="url(#grid)" />
         <line x1="0" y1="40" x2="120" y2="40" stroke="#bac6d3" strokeWidth="0.5" />
         <line x1="60" y1="0" x2="60" y2="80" stroke="#bac6d3" strokeWidth="0.5" />
+        <rect className="final-face" width="120" height="80" mask={`url(#${maskId})`} />
+        {document.shapes.map((shape) => (
+          <FinalOutline key={`outline-${shape.id}`} shape={shape} />
+        ))}
         {document.shapes.map((shape) => (
           <ShapePreview
             key={shape.id}
@@ -188,10 +215,52 @@ function Viewer({ document, selectedId, onSelect }) {
         ))}
       </svg>
       <div className="viewer-legend">
-        <span><i className="add-swatch" /> add</span>
-        <span><i className="cut-swatch" /> cut</span>
+        <span><i className="face-swatch" /> body face</span>
+        <span><i className="outline-swatch" /> final edge</span>
       </div>
     </div>
+  );
+}
+
+function MaskShape({ shape }) {
+  const fill = shape.mode === 'cut' ? 'black' : 'white';
+  if (shape.type === 'circle') {
+    return <circle cx={shape.x} cy={shape.y} r={shape.r} fill={fill} />;
+  }
+
+  return (
+    <rect
+      x={shape.x}
+      y={shape.y}
+      width={shape.w}
+      height={shape.h}
+      rx="1.4"
+      fill={fill}
+    />
+  );
+}
+
+function FinalOutline({ shape }) {
+  if (shape.type === 'circle') {
+    return (
+      <circle
+        className="final-outline"
+        cx={shape.x}
+        cy={shape.y}
+        r={shape.r}
+      />
+    );
+  }
+
+  return (
+    <rect
+      className="final-outline"
+      x={shape.x}
+      y={shape.y}
+      width={shape.w}
+      height={shape.h}
+      rx="1.4"
+    />
   );
 }
 
@@ -222,9 +291,19 @@ function ShapePreview({ shape, selected, onSelect }) {
   );
 }
 
-function ShapeEditor({ shape, index, total, selected, onSelect, onChange, onMove, onRemove }) {
+function ShapeEditor({
+  editorRef,
+  shape,
+  index,
+  total,
+  selected,
+  onSelect,
+  onChange,
+  onMove,
+  onRemove,
+}) {
   return (
-    <article className={`shape-card ${selected ? 'selected' : ''}`}>
+    <article ref={editorRef} className={`shape-card ${selected ? 'selected' : ''}`}>
       <header>
         <button type="button" className="shape-title" onClick={onSelect}>
           {getShapeLabel(shape)}
@@ -239,16 +318,19 @@ function ShapeEditor({ shape, index, total, selected, onSelect, onChange, onMove
         </select>
       </header>
 
+      <div className="position-controls">
+        <SlideField label="X" value={shape.x} min={0} max={120} onChange={(x) => onChange({ x })} />
+        <SlideField label="Y" value={shape.y} min={0} max={80} onChange={(y) => onChange({ y })} />
+      </div>
+
       <div className="field-grid">
-        <NumberField label="X" value={shape.x} onChange={(x) => onChange({ x })} />
-        <NumberField label="Y" value={shape.y} onChange={(y) => onChange({ y })} />
         {shape.type === 'rect' ? (
           <>
-            <NumberField label="W" value={shape.w} min={1} onChange={(w) => onChange({ w })} />
-            <NumberField label="H" value={shape.h} min={1} onChange={(h) => onChange({ h })} />
+            <NumberField label="W" value={shape.w} min={1} max={120} onChange={(w) => onChange({ w })} />
+            <NumberField label="H" value={shape.h} min={1} max={80} onChange={(h) => onChange({ h })} />
           </>
         ) : (
-          <NumberField label="R" value={shape.r} min={1} onChange={(r) => onChange({ r })} />
+          <NumberField label="R" value={shape.r} min={1} max={40} onChange={(r) => onChange({ r })} />
         )}
       </div>
 
@@ -267,13 +349,39 @@ function ShapeEditor({ shape, index, total, selected, onSelect, onChange, onMove
   );
 }
 
-function NumberField({ label, value, min, onChange }) {
+function SlideField({ label, value, min, max, onChange }) {
   return (
-    <label>
-      {label}
+    <label className="slide-field">
+      <span>{label}</span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step="0.5"
+        value={value}
+        onChange={(event) => onChange(Number(event.target.value))}
+      />
+      <NumberField
+        label={`${label} value`}
+        value={value}
+        min={min}
+        max={max}
+        compact
+        onChange={onChange}
+      />
+    </label>
+  );
+}
+
+function NumberField({ label, value, min, max, compact = false, onChange }) {
+  return (
+    <label className={compact ? 'number-field compact' : 'number-field'}>
+      <span>{label}</span>
       <input
         type="number"
         min={min}
+        max={max}
+        step="0.5"
         value={value}
         onChange={(event) => onChange(Number(event.target.value) || 0)}
       />

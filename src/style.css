@@ -51,6 +51,14 @@ input {
   color: #17212b;
 }
 
+input[type="range"] {
+  height: 30px;
+  padding: 0;
+  border: 0;
+  accent-color: #d43128;
+  background: transparent;
+}
+
 .app-shell {
   min-height: 100vh;
   display: grid;
@@ -93,26 +101,41 @@ input {
   touch-action: manipulation;
 }
 
+.final-face {
+  fill: rgba(214, 49, 40, 0.18);
+}
+
+.final-outline {
+  fill: none;
+  stroke: #d43128;
+  stroke-linejoin: round;
+  stroke-width: 2.9;
+  vector-effect: non-scaling-stroke;
+}
+
 .shape-preview {
   cursor: pointer;
+  fill: transparent;
+  stroke: transparent;
   stroke-width: 1.2;
   vector-effect: non-scaling-stroke;
 }
 
 .shape-preview.add {
-  fill: rgba(32, 125, 115, 0.42);
-  stroke: #156f67;
+  fill: transparent;
+  stroke: transparent;
 }
 
 .shape-preview.cut {
-  fill: rgba(212, 84, 66, 0.3);
-  stroke: #b33d2f;
-  stroke-dasharray: 3 2;
+  fill: transparent;
+  stroke: transparent;
 }
 
 .shape-preview.selected {
+  fill: rgba(17, 24, 39, 0.08);
   stroke: #111827;
-  stroke-width: 2.4;
+  stroke-dasharray: 2 1.6;
+  stroke-width: 1.6;
 }
 
 .viewer-legend {
@@ -133,14 +156,14 @@ input {
   display: inline-block;
 }
 
-.add-swatch {
-  background: rgba(32, 125, 115, 0.42);
-  border: 1px solid #156f67;
+.face-swatch {
+  background: rgba(214, 49, 40, 0.18);
+  border: 1px solid rgba(214, 49, 40, 0.48);
 }
 
-.cut-swatch {
-  background: rgba(212, 84, 66, 0.3);
-  border: 1px dashed #b33d2f;
+.outline-swatch {
+  background: #ffffff;
+  border: 3px solid #d43128;
 }
 
 .control-panel {
@@ -235,17 +258,51 @@ h1 {
 
 .field-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
   margin-bottom: 10px;
 }
 
-.field-grid label {
+.position-controls {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.slide-field {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) 66px;
+  align-items: center;
+  gap: 8px;
+  color: #506174;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.number-field {
   display: grid;
   gap: 4px;
   color: #506174;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.number-field.compact span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.number-field.compact input {
+  height: 32px;
+  padding: 0 6px;
+  text-align: right;
+}
+
+.field-grid .number-field input {
+  height: 34px;
 }
 
 .shape-card footer {
@@ -318,5 +375,9 @@ h1 {
 
   .field-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .slide-field {
+    grid-template-columns: 18px minmax(0, 1fr) 58px;
   }
 }
