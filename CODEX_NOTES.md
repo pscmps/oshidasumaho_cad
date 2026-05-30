@@ -1,145 +1,137 @@
 # Codex作業メモ: オシダスマホキャド
 
-## 現状
+## プロジェクトの狙い
 
-このリポジトリは、スマホ向け軽量CAD「オシダスマホキャド」のGitHub Pages / React試作用です。
+オシダスマホキャドは、スマホWebブラウザ上で動作する軽量なメカ部品向けCADです。
+Fusion 360などの高機能CADの縮小版ではなく、スマホ操作とAI生成に合わせた「図形配置CAD」として作ります。
 
-ChatGPT上のGitHub連携から以下を追加済みです。
+主な対象は、ブラケット、ケース、プレート、モーターマウント、ギア、ラック、スペーサ、ベアリングホルダなどの比較的単純な機械部品です。
 
-- `index.html`
-  - 旧Hello Worldページのまま残っている可能性が高いです。
-  - React/Vite入口用に差し替える必要があります。
-- `package.json`
-  - React + Vite用の最小設定を追加済み。
-- `src/main.jsx`
-  - Reactの初期Appを追加済み。
-- `src/style.css`
-  - スマホ画面を意識した上下2分割風の初期スタイルを追加済み。
+## 設計思想
 
-GitHub Pagesはpublic repo化して有効化済みの想定です。
+- 線を引かない
+- 補助線、寸法拘束、幾何拘束は初期仕様に入れない
+- 四角、円、長穴、多角形などの意味付き図形を数値入力で配置する
+- 図形ごとに `add` / `cut` を設定し、リスト順で合成する
+- 2Dの合成結果を押し出して3D化する
+- ビューアは表示、確認、選択が役割で、精密ドラッグ編集はしない
+- 下部UIが編集の本体
+- 内部データはJSON/DSL寄りにして、AI生成とGit管理に向ける
 
-## 注意
+一般的なスケッチCADではなく、「パラメトリック図形合成エディタ」に近いものとして扱います。
 
-ChatGPTのGitHub連携から複数ファイルをまとめて更新するのは手間が大きく、既存ファイル更新が安全チェックで止まることがありました。
-そのため、以降はCodexでまとめて整える方針がよいです。
+## 第一段階の範囲
 
-## まずやること
+まずはGitHub Pages上で動く完全フロントエンドの単品部品作成ツールに限定します。
 
-1. リポジトリをcloneまたはCodexで開く。
-2. `npm install` を実行。
-3. `index.html` をVite標準の入口に差し替える。
-4. `vite.config.js` を追加して、GitHub Pagesのサブパス `/oshidasumaho_cad/` に対応させる。
-5. GitHub Actions workflowを追加して、`main` push時にVite buildしてPagesへdeployする。
-6. `npm run build` が通ることを確認する。
+第一段階で扱う図形:
 
-## index.html 差し替え案
+- 四角形
+- 円
 
-```html
-<!doctype html>
-<html lang="ja">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>オシダスマホキャド</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
-</html>
-```
+第一段階で扱う編集内容:
 
-## vite.config.js 案
+- 座標
+- サイズ
+- add/cut
+- 図形の並び順
+- 押し出し量
 
-```js
-import { defineConfig } from 'vite';
-import react from '@vitejs/plugin-react';
+第一段階で実装しないもの:
 
-export default defineConfig({
-  plugins: [react()],
-  base: '/oshidasumaho_cad/',
-});
-```
+- スケッチ線描画
+- 寸法拘束
+- 幾何拘束
+- アセンブリ
+- 履歴ツリー
+- 高度なブーリアン
+- マルチボディ
+- STEP出力
 
-## GitHub Actions案
+## UI方針
 
-`.github/workflows/deploy.yml` を追加。
-
-```yaml
-name: Deploy to GitHub Pages
-
-on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: pages
-  cancel-in-progress: false
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build
-        run: npm run build
-
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./dist
-
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-```
-
-GitHub Pages設定は、Actionsからdeployする場合、Settings → Pages → Build and deployment の Source を `GitHub Actions` にする。
-
-## 当面の開発方針
-
-最初からReact + Viteで進める。
-素のHTML/JSプロトは後で捨てることになりそうなので、ここからはReact前提で作る。
-
-第一段階は、CAD本体というよりUI/データ構造の確認を優先する。
+画面構成はスマホ前提です。
 
 - 上半分: ビューア領域
 - 下半分: 編集UI
-- 図形はまず四角と円のみ
-- 図形は直接ドラッグしない
-- 下UIで座標、サイズ、add/cut、順序を編集
-- 上ビューアでは選択と表示確認のみ
-- 内部データはJSONで保持
-- 保存はまずlocalStorageでよい
 
-## 仕様の重要ポイント
+ビューアでできること:
 
-オシダスマホキャドは一般的なスケッチCADではない。
-線を引かず、図形を配置して、ブール演算と押し出しで形を作る。
-スマホ操作向けに、直接ドラッグ編集や拘束ベースのスケッチは避ける。
+- 図形の表示
+- 図形の選択
+- 将来的な3D確認
 
-最初のゴールは、GitHub Pages上で動くReactアプリとして、四角と円を数値入力で追加・編集できる状態にすること。
+ビューアでやらないこと:
+
+- 図形のドラッグ移動
+- ハンドル操作による寸法変更
+- 拘束編集
+
+図形を選択したら、下部UIの該当パラメータを編集する流れにします。
+
+## データ構造の基本形
+
+```json
+{
+  "extrude": 12,
+  "shapes": [
+    {
+      "id": 1,
+      "type": "rect",
+      "x": 10,
+      "y": 20,
+      "w": 30,
+      "h": 40,
+      "mode": "add"
+    },
+    {
+      "id": 2,
+      "type": "circle",
+      "x": 35,
+      "y": 32,
+      "r": 8,
+      "mode": "cut"
+    }
+  ]
+}
+```
+
+AI/DSL入力の方向性:
+
+```txt
+box 100 50 5
+circle x=20 y=20 d=3 cut
+```
+
+AIは部品のたたき台や穴配置を生成し、人間は数値微調整と最終確認を担当する想定です。
+
+## 技術方針
+
+初期はReact + Viteで進め、GitHub Pagesへ静的デプロイします。
+サーバ依存は避けます。
+
+将来的な候補:
+
+- Zustand: 状態管理
+- shadcn/ui: UI部品
+- martinez polygon clipping: 2Dブール演算
+- Three.js / react-three-fiber: 3Dビュー
+- localStorage / IndexedDB: 保存
+
+ただし、最初のプロトタイプでは依存を増やしすぎず、まずUIとデータ構造の感触を確かめます。
+
+## 現在の実装方針
+
+まず作るもの:
+
+1. Vite標準のReact入口にする
+2. GitHub Pages用の `base` を設定する
+3. 四角と円を追加できる
+4. 図形リストを数値入力で編集できる
+5. add/cutの違いをビューア上で視覚化する
+6. 選択状態をビューアと下部UIで同期する
+7. localStorageへ自動保存する
+8. JSONを表示して内部表現を確認できる
+
+この段階では正確な2Dブール演算やSTL出力までは入れません。
+目処が立ったら、GitHubへpushしてPagesで確認します。
