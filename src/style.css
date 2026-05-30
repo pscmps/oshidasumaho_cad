@@ -205,9 +205,14 @@ h1 {
 
 .header-actions {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+}
+
+.header-actions button {
+  min-height: 32px;
+  padding: 0 10px;
 }
 
 .document-controls {
@@ -324,6 +329,19 @@ h1 {
   direction: rtl;
 }
 
+.control-field.axis-y {
+  grid-template-columns: minmax(0, 1fr) 52px;
+  grid-template-rows: auto 54px;
+}
+
+.control-field.axis-y > span {
+  grid-column: 1 / 3;
+}
+
+.control-field.axis-y .number-field {
+  align-self: center;
+}
+
 .number-field {
   display: grid;
   gap: 4px;
@@ -403,10 +421,9 @@ h1 {
   }
 
   .header-actions {
-    justify-content: stretch;
+    justify-content: flex-start;
   }
 
-  .header-actions button,
   .document-controls button {
     width: 100%;
   }
@@ -430,5 +447,10 @@ h1 {
 
   .control-field.axis-y input[type="range"] {
     height: 48px;
+  }
+
+  .control-field.axis-y {
+    grid-template-columns: minmax(0, 1fr) 44px;
+    grid-template-rows: auto 48px;
   }
 }

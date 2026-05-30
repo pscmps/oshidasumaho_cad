@@ -46,6 +46,10 @@ function App() {
   useEffect(() => {
     const editor = editorRefs.current.get(selectedId);
     const panel = controlPanelRef.current;
+    if (!selectedId && panel) {
+      panel.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     if (editor && panel) {
       const panelRect = panel.getBoundingClientRect();
       const editorRect = editor.getBoundingClientRect();
@@ -191,22 +195,22 @@ function Viewer({ document, selectedId, onSelect }) {
         <span>2D preview</span>
         <span>{document.extrude}mm extrude</span>
       </div>
-      <svg viewBox="0 0 120 80" role="img" aria-label="配置図形プレビュー">
+      <svg viewBox="0 0 120 120" role="img" aria-label="配置図形プレビュー" onClick={() => onSelect(null)}>
         <defs>
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
           </pattern>
           <mask id={maskId}>
-            <rect width="120" height="80" fill="black" />
+            <rect width="120" height="120" fill="black" />
             {document.shapes.map((shape) => (
               <MaskShape key={shape.id} shape={shape} />
             ))}
           </mask>
         </defs>
-        <rect width="120" height="80" fill="url(#grid)" />
-        <line x1="0" y1="40" x2="120" y2="40" stroke="#bac6d3" strokeWidth="0.5" />
-        <line x1="60" y1="0" x2="60" y2="80" stroke="#bac6d3" strokeWidth="0.5" />
-        <rect className="final-face" width="120" height="80" mask={`url(#${maskId})`} />
+        <rect width="120" height="120" fill="url(#grid)" />
+        <line x1="0" y1="60" x2="120" y2="60" stroke="#bac6d3" strokeWidth="0.5" />
+        <line x1="60" y1="0" x2="60" y2="120" stroke="#bac6d3" strokeWidth="0.5" />
+        <rect className="final-face" width="120" height="120" mask={`url(#${maskId})`} />
         {document.shapes.map((shape) => (
           <FinalOutline key={`outline-${shape.id}`} shape={shape} />
         ))}
@@ -271,6 +275,11 @@ function FinalOutline({ shape }) {
 
 function ShapePreview({ shape, selected, onSelect }) {
   const className = `shape-preview ${shape.mode} ${selected ? 'selected' : ''}`;
+  function handleSelect(event) {
+    event.stopPropagation();
+    onSelect();
+  }
+
   if (shape.type === 'circle') {
     return (
       <circle
@@ -278,7 +287,7 @@ function ShapePreview({ shape, selected, onSelect }) {
         cx={shape.x}
         cy={shape.y}
         r={shape.r}
-        onClick={onSelect}
+        onClick={handleSelect}
       />
     );
   }
@@ -291,7 +300,7 @@ function ShapePreview({ shape, selected, onSelect }) {
       width={shape.w}
       height={shape.h}
       rx="1.4"
-      onClick={onSelect}
+      onClick={handleSelect}
     />
   );
 }
@@ -349,7 +358,7 @@ function ShapeEditor({
           label="Y"
           value={shape.y}
           min={0}
-          max={80}
+          max={120}
           invert
           onChange={(y) => onChange({ y })}
         />
@@ -368,7 +377,7 @@ function ShapeEditor({
               label="H"
               value={shape.h}
               min={1}
-              max={80}
+              max={120}
               onChange={(h) => onChange({ h })}
             />
           </>
@@ -379,7 +388,7 @@ function ShapeEditor({
               label="R"
               value={shape.r}
               min={1}
-              max={40}
+              max={60}
               onChange={(r) => onChange({ r })}
             />
             <div className="control-field empty" aria-hidden="true" />
