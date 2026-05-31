@@ -4,9 +4,10 @@ import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-19';
+const APP_VERSION = 'proto-2026-05-31-plan-20';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
+const SECTION_SAMPLE_EPSILON = 0.001;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
   top: { x: 90, y: 0, z: 0 },
@@ -584,28 +585,6 @@ function centeredCoordinate(value, dimension) {
   return value - dimension.min - dimension.size / 2;
 }
 
-function getSurfacePoint(face, u, v, dimensions, opposite = false) {
-  if (face === 'top') {
-    return {
-      x: centeredCoordinate(u, dimensions.width),
-      y: centeredCoordinate(v, dimensions.depth),
-      z: opposite ? -dimensions.height.size / 2 : dimensions.height.size / 2,
-    };
-  }
-  if (face === 'front') {
-    return {
-      x: centeredCoordinate(u, dimensions.width),
-      y: opposite ? dimensions.depth.size / 2 : -dimensions.depth.size / 2,
-      z: centeredCoordinate(v, dimensions.height),
-    };
-  }
-  return {
-    x: opposite ? -dimensions.width.size / 2 : dimensions.width.size / 2,
-    y: centeredCoordinate(u, dimensions.depth),
-    z: centeredCoordinate(v, dimensions.height),
-  };
-}
-
 function getShapePlanRing(shape) {
   if (shape.type === 'circle') {
     return Array.from({ length: CIRCLE_MESH_SEGMENTS }, (_, index) => {
@@ -720,8 +699,115 @@ function getAxisStops(values, dimension) {
     .filter((value, index, sorted) => index === 0 || Math.abs(value - sorted[index - 1]) > 0.001);
 }
 
-function getPlanSurfaceRing(ring, face, dimensions, opposite = false) {
-  return ring.map(([u, v]) => getSurfacePoint(face, u, v, dimensions, opposite));
+function normalizeMultiPolygon(multiPolygon) {
+  return multiPolygon
+    .map((polygon) => polygon.map(normalizePlanRing).filter((ring) => ring.length >= 3))
+    .filter((polygon) => polygon.length);
+}
+
+function normalizeIntervals(intervals) {
+  return intervals
+    .filter(([start, end]) => end - start > 0.001)
+    .sort((a, b) => a[0] - b[0])
+    .reduce((merged, interval) => {
+      const previous = merged[merged.length - 1];
+      if (!previous || interval[0] > previous[1] + 0.001) {
+        merged.push([...interval]);
+        return merged;
+      }
+      previous[1] = Math.max(previous[1], interval[1]);
+      return merged;
+    }, []);
+}
+
+function subtractIntervals(baseIntervals, cutIntervals) {
+  const cuts = normalizeIntervals(cutIntervals);
+  return normalizeIntervals(baseIntervals).flatMap(([baseStart, baseEnd]) => {
+    let parts = [[baseStart, baseEnd]];
+    cuts.forEach(([cutStart, cutEnd]) => {
+      parts = parts.flatMap(([start, end]) => {
+        if (cutEnd <= start || cutStart >= end) {
+          return [[start, end]];
+        }
+        return [
+          [start, Math.max(start, cutStart)],
+          [Math.min(end, cutEnd), end],
+        ].filter(([nextStart, nextEnd]) => nextEnd - nextStart > 0.001);
+      });
+    });
+    return parts;
+  });
+}
+
+function getRingLineIntervals(ring, fixedValue, fixedAxis) {
+  const variableAxis = fixedAxis === 0 ? 1 : 0;
+  const intersections = [];
+  ring.forEach((start, index) => {
+    const end = ring[(index + 1) % ring.length];
+    const startFixed = start[fixedAxis];
+    const endFixed = end[fixedAxis];
+    if ((startFixed > fixedValue) === (endFixed > fixedValue)) {
+      return;
+    }
+    const ratio = (fixedValue - startFixed) / (endFixed - startFixed);
+    intersections.push(start[variableAxis] + (end[variableAxis] - start[variableAxis]) * ratio);
+  });
+  return intersections
+    .sort((a, b) => a - b)
+    .reduce((intervals, value, index, sorted) => {
+      if (index % 2 === 0 && sorted[index + 1] !== undefined) {
+        intervals.push([value, sorted[index + 1]]);
+      }
+      return intervals;
+    }, []);
+}
+
+function getLineIntervalsForPolygons(polygons, fixedValue, fixedAxis) {
+  return normalizeIntervals(polygons.flatMap((polygon) => {
+    const outerIntervals = getRingLineIntervals(polygon[0], fixedValue, fixedAxis);
+    const holeIntervals = polygon.slice(1).flatMap((ring) =>
+      getRingLineIntervals(ring, fixedValue, fixedAxis),
+    );
+    return subtractIntervals(outerIntervals, holeIntervals);
+  }));
+}
+
+function getIntervalRectangles(firstIntervals, secondIntervals) {
+  return firstIntervals.flatMap(([firstStart, firstEnd]) =>
+    secondIntervals.map(([secondStart, secondEnd]) => [[
+      [firstStart, secondStart],
+      [firstEnd, secondStart],
+      [firstEnd, secondEnd],
+      [firstStart, secondEnd],
+    ]]),
+  );
+}
+
+function intersectPolygonsWithIntervals(basePolygons, firstIntervals, secondIntervals) {
+  const rectangles = getIntervalRectangles(firstIntervals, secondIntervals);
+  if (!basePolygons.length || !rectangles.length) {
+    return [];
+  }
+  const clipPolygons = rectangles.length === 1 ? rectangles : polygonClipping.union(...rectangles);
+  return normalizeMultiPolygon(polygonClipping.intersection(basePolygons, clipPolygons));
+}
+
+function differencePolygons(basePolygons, cutPolygons) {
+  if (!basePolygons.length) {
+    return [];
+  }
+  if (!cutPolygons.length) {
+    return basePolygons;
+  }
+  return normalizeMultiPolygon(polygonClipping.difference(basePolygons, cutPolygons));
+}
+
+function getSectionSample(value, dimension, direction) {
+  const sample = value + direction * SECTION_SAMPLE_EPSILON;
+  if (sample <= dimension.min || sample >= dimension.max) {
+    return null;
+  }
+  return sample;
 }
 
 function getExtrudedSurfacePoint(face, u, v, t, dimensions) {
@@ -784,12 +870,31 @@ function isExtrusionIntervalValid(face, u, v, t, polygonsByFace) {
   );
 }
 
+function getConstrainedWallClass(face, point, next, fallbackClassName, dimensions) {
+  if (fallbackClassName === 'iso-preview-cut-side') {
+    return fallbackClassName;
+  }
+  if (face === 'front' && Math.abs(point[1] - next[1]) < 0.0001) {
+    const midHeight = dimensions.height.min + dimensions.height.size / 2;
+    return point[1] >= midHeight ? 'iso-preview-top' : 'iso-preview-bottom';
+  }
+  if (face === 'right' && Math.abs(point[1] - next[1]) < 0.0001) {
+    const midHeight = dimensions.height.min + dimensions.height.size / 2;
+    return point[1] >= midHeight ? 'iso-preview-top' : 'iso-preview-bottom';
+  }
+  return `iso-preview-side ${fallbackClassName}`;
+}
+
 function buildConstrainedRingWalls(planRing, face, className, polygonsByFace, dimensions) {
   const stops = getExtrusionStops(face, polygonsByFace, dimensions);
   return planRing.flatMap((point, index) => {
     const next = planRing[(index + 1) % planRing.length];
+    if (Math.abs(point[0] - next[0]) < 0.0001 || Math.abs(point[1] - next[1]) < 0.0001) {
+      return [];
+    }
     const u = (point[0] + next[0]) / 2;
     const v = (point[1] + next[1]) / 2;
+    const wallClassName = getConstrainedWallClass(face, point, next, className, dimensions);
     return stops.slice(0, -1).flatMap((start, stopIndex) => {
       const end = stops[stopIndex + 1];
       const t = (start + end) / 2;
@@ -797,16 +902,64 @@ function buildConstrainedRingWalls(planRing, face, className, polygonsByFace, di
         return [];
       }
       return {
-        className,
+        className: wallClassName,
         rings: [[
           getExtrudedSurfacePoint(face, point[0], point[1], start, dimensions),
           getExtrudedSurfacePoint(face, next[0], next[1], start, dimensions),
           getExtrudedSurfacePoint(face, next[0], next[1], end, dimensions),
           getExtrudedSurfacePoint(face, point[0], point[1], end, dimensions),
         ]],
-        edge: false,
+        edge: true,
       };
     });
+  });
+}
+
+function getZSectionPolygons(z, polygonsByFace) {
+  const xIntervals = getLineIntervalsForPolygons(polygonsByFace.front, z, 1);
+  const yIntervals = getLineIntervalsForPolygons(polygonsByFace.right, z, 1);
+  return intersectPolygonsWithIntervals(polygonsByFace.top, xIntervals, yIntervals);
+}
+
+function getYSectionPolygons(y, polygonsByFace) {
+  const xIntervals = getLineIntervalsForPolygons(polygonsByFace.top, y, 1);
+  const zIntervals = getLineIntervalsForPolygons(polygonsByFace.right, y, 0);
+  return intersectPolygonsWithIntervals(polygonsByFace.front, xIntervals, zIntervals);
+}
+
+function getXSectionPolygons(x, polygonsByFace) {
+  const yIntervals = getLineIntervalsForPolygons(polygonsByFace.top, x, 0);
+  const zIntervals = getLineIntervalsForPolygons(polygonsByFace.front, x, 0);
+  return intersectPolygonsWithIntervals(polygonsByFace.right, yIntervals, zIntervals);
+}
+
+function mapSectionPolygonToSurface(polygon, plane, value, dimensions, className) {
+  return {
+    className,
+    rings: polygon.map((ring) => ring.map(([first, second]) => {
+      if (plane === 'z') {
+        return getExtrudedSurfacePoint('top', first, second, value, dimensions);
+      }
+      if (plane === 'y') {
+        return getExtrudedSurfacePoint('front', first, second, value, dimensions);
+      }
+      return getExtrudedSurfacePoint('right', first, second, value, dimensions);
+    })),
+    edge: true,
+  };
+}
+
+function buildSectionSurfaces(stops, dimension, getSectionPolygons, plane, negativeClassName, positiveClassName, dimensions) {
+  return stops.flatMap((value) => {
+    const beforeSample = getSectionSample(value, dimension, -1);
+    const afterSample = getSectionSample(value, dimension, 1);
+    const before = beforeSample === null ? [] : getSectionPolygons(beforeSample);
+    const after = afterSample === null ? [] : getSectionPolygons(afterSample);
+    const negativeSurfaces = differencePolygons(after, before)
+      .map((polygon) => mapSectionPolygonToSurface(polygon, plane, value, dimensions, negativeClassName));
+    const positiveSurfaces = differencePolygons(before, after)
+      .map((polygon) => mapSectionPolygonToSurface(polygon, plane, value, dimensions, positiveClassName));
+    return [...negativeSurfaces, ...positiveSurfaces];
   });
 }
 
@@ -822,38 +975,69 @@ function buildSurfacePreviewFaces(shapes, dimensions) {
   }
 
   const facePairs = [
-    { source: 'top', className: 'iso-preview-top', oppositeClassName: 'iso-preview-bottom' },
-    { source: 'front', className: 'iso-preview-front', oppositeClassName: 'iso-preview-back' },
-    { source: 'right', className: 'iso-preview-right', oppositeClassName: 'iso-preview-left' },
+    { source: 'top', className: 'iso-preview-top' },
+    { source: 'front', className: 'iso-preview-front' },
+    { source: 'right', className: 'iso-preview-right' },
   ];
 
-  return facePairs.flatMap(({ source, className, oppositeClassName }) =>
+  const zStops = getAxisStops([
+    ...collectPlanCoordinates(polygonsByFace.front, 1),
+    ...collectPlanCoordinates(polygonsByFace.right, 1),
+  ], dimensions.height);
+  const yStops = getAxisStops([
+    ...collectPlanCoordinates(polygonsByFace.top, 1),
+    ...collectPlanCoordinates(polygonsByFace.right, 0),
+  ], dimensions.depth);
+  const xStops = getAxisStops([
+    ...collectPlanCoordinates(polygonsByFace.top, 0),
+    ...collectPlanCoordinates(polygonsByFace.front, 0),
+  ], dimensions.width);
+
+  const sectionSurfaces = [
+    ...buildSectionSurfaces(
+      zStops,
+      dimensions.height,
+      (z) => getZSectionPolygons(z, polygonsByFace),
+      'z',
+      'iso-preview-bottom',
+      'iso-preview-top',
+      dimensions,
+    ),
+    ...buildSectionSurfaces(
+      yStops,
+      dimensions.depth,
+      (y) => getYSectionPolygons(y, polygonsByFace),
+      'y',
+      'iso-preview-front',
+      'iso-preview-back',
+      dimensions,
+    ),
+    ...buildSectionSurfaces(
+      xStops,
+      dimensions.width,
+      (x) => getXSectionPolygons(x, polygonsByFace),
+      'x',
+      'iso-preview-left',
+      'iso-preview-right',
+      dimensions,
+    ),
+  ];
+
+  const sweptSurfaces = facePairs.flatMap(({ source, className }) =>
     polygonsByFace[source].flatMap((polygon) => {
-      const frontRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, false));
-      const backRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, true));
-      return [
-        {
-          className,
-          rings: frontRings,
-          edge: true,
-        },
-        {
-          className: oppositeClassName,
-          rings: backRings,
-          edge: false,
-        },
-        ...polygon.flatMap((ring, index) =>
-          buildConstrainedRingWalls(
-            ring,
-            source,
-            index === 0 ? `iso-preview-side ${className}` : 'iso-preview-cut-side',
-            polygonsByFace,
-            dimensions,
-          ),
+      return polygon.flatMap((ring, index) =>
+        buildConstrainedRingWalls(
+          ring,
+          source,
+          index === 0 ? className : 'iso-preview-cut-side',
+          polygonsByFace,
+          dimensions,
         ),
-      ];
+      );
     }),
   );
+
+  return [...sectionSurfaces, ...sweptSurfaces];
 }
 
 function App() {
