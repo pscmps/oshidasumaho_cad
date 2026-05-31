@@ -79,15 +79,14 @@ input[type="range"] {
 .viewer-frame {
   height: 100%;
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr;
   border: 1px solid #b9c5d2;
   border-radius: 8px;
   overflow: hidden;
   background: #f8fafc;
 }
 
-.viewer-toolbar,
-.viewer-legend {
+.viewer-toolbar {
   display: flex;
   align-items: center;
   justify-content: flex-start;
@@ -435,17 +434,22 @@ input[type="range"] {
 .rotation-actions {
   display: grid;
   grid-template-columns: minmax(76px, auto) minmax(0, 1fr) minmax(64px, auto);
+  grid-template-rows: repeat(4, 30px);
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
   margin-top: 10px;
 }
 
 .rotation-reset {
+  grid-column: 1;
+  grid-row: 1;
   min-height: 32px;
   padding: 0 8px;
 }
 
 .view-net {
+  grid-column: 2;
+  grid-row: 1 / span 4;
   display: grid;
   grid-template-columns: repeat(3, minmax(54px, 1fr));
   grid-template-rows: repeat(4, 30px);
@@ -491,7 +495,7 @@ input[type="range"] {
 .transparent-toggle,
 .grid-toggle,
 .edge-toggle {
-  min-height: 32px;
+  min-height: 30px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -513,10 +517,24 @@ input[type="range"] {
   padding: 0;
 }
 
+.transparent-toggle {
+  grid-column: 3;
+  grid-row: 1;
+  justify-self: stretch;
+}
+
 .grid-toggle,
 .edge-toggle {
   grid-column: 3;
   justify-self: stretch;
+}
+
+.grid-toggle {
+  grid-row: 2;
+}
+
+.edge-toggle {
+  grid-row: 3;
 }
 
 .final-outline {
@@ -549,29 +567,6 @@ input[type="range"] {
   stroke: #111827;
   stroke-dasharray: 2 1.6;
   stroke-width: 1.6;
-}
-
-.viewer-legend {
-  border-top: 1px solid #d6dee8;
-  overflow-x: auto;
-}
-
-.viewer-legend span {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.viewer-legend i {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
-  display: inline-block;
-}
-
-.face-swatch {
-  border-width: 2px;
-  border-style: solid;
 }
 
 .control-panel {

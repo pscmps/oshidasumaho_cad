@@ -4,7 +4,7 @@ import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-21';
+const APP_VERSION = 'proto-2026-05-31-plan-22';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const SECTION_SAMPLE_EPSILON = 0.001;
@@ -1463,7 +1463,7 @@ function Viewer({
           ) : null}
         </div>
       </div>
-      <svg className="tri-view" viewBox="0 0 326 268" role="img" aria-label="3面配置図">
+      <svg className="tri-view" viewBox="0 0 378 268" role="img" aria-label="3面配置図">
         <defs>
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
@@ -1532,11 +1532,6 @@ function Viewer({
           </>
         )}
       </svg>
-      <div className="viewer-legend">
-        {FACE_ORDER.map((face) => (
-          <span key={face}><i className={`face-swatch face-${face}`} /> {FACE_LABELS[face]}</span>
-        ))}
-      </div>
     </div>
   );
 }
@@ -1546,7 +1541,7 @@ function getAreaLockTransform(face, full) {
     return 'translate(48 22)';
   }
   if (face === 'right') {
-    return 'translate(270 190)';
+    return 'translate(326 190)';
   }
   if (face === 'front') {
     return 'translate(6 190)';
