@@ -3,8 +3,8 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-13';
-const SOLID_PREVIEW_STEPS = 18;
+const APP_VERSION = 'proto-2026-05-31-plan-14';
+const SOLID_PREVIEW_STEPS = 48;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
   top: { x: 90, y: 0, z: 0 },
