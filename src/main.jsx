@@ -6,7 +6,7 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-25';
+const APP_VERSION = 'proto-2026-05-31-plan-26';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const SECTION_SAMPLE_EPSILON = 0.001;
@@ -151,45 +151,9 @@ function clampRangeValue(value) {
   return Math.min(120, Math.max(0, value));
 }
 
-function getShapeBounds(shape) {
-  if (shape.type === 'circle') {
-    return {
-      minX: clampRangeValue(shape.x - shape.r),
-      maxX: clampRangeValue(shape.x + shape.r),
-      minY: clampRangeValue(shape.y - shape.r),
-      maxY: clampRangeValue(shape.y + shape.r),
-    };
-  }
-
-  return {
-    minX: clampRangeValue(shape.x),
-    maxX: clampRangeValue(shape.x + shape.w),
-    minY: clampRangeValue(shape.y),
-    maxY: clampRangeValue(shape.y + shape.h),
-  };
-}
-
 function getFaceBounds(shapes, face) {
-  const addShapes = shapes.filter(
-    (shape) => normalizeFace(shape.face) === face && shape.mode === 'add',
-  );
-  if (!addShapes.length) {
-    return null;
-  }
-
-  return addShapes.reduce((bounds, shape) => {
-    const shapeBounds = getShapeBounds(shape);
-    if (!bounds) {
-      return shapeBounds;
-    }
-
-    return {
-      minX: Math.min(bounds.minX, shapeBounds.minX),
-      maxX: Math.max(bounds.maxX, shapeBounds.maxX),
-      minY: Math.min(bounds.minY, shapeBounds.minY),
-      maxY: Math.max(bounds.maxY, shapeBounds.maxY),
-    };
-  }, null);
+  const faceShapes = shapes.filter((shape) => normalizeFace(shape.face) === face);
+  return getBooleanPolygonBounds(getFaceBooleanPolygons(faceShapes));
 }
 
 function getAllFaceBounds(shapes) {
@@ -330,13 +294,24 @@ function hasAreaConstraint(constraint) {
   );
 }
 
-function isShapeWithinConstraint(shape, constraint) {
-  const bounds = getShapeBounds(shape);
+function areBoundsWithinConstraint(bounds, constraint) {
+  if (!bounds || !hasAreaConstraint(constraint)) {
+    return true;
+  }
+
   return (
-    bounds.minX >= constraint.minX &&
-    bounds.maxX <= constraint.maxX &&
-    bounds.minY >= constraint.minY &&
-    bounds.maxY <= constraint.maxY
+    bounds.minX >= constraint.minX - 0.001 &&
+    bounds.maxX <= constraint.maxX + 0.001 &&
+    bounds.minY >= constraint.minY - 0.001 &&
+    bounds.maxY <= constraint.maxY + 0.001
+  );
+}
+
+function areLockedFaceBoundsValid(document) {
+  const faceBounds = getAllFaceBounds(document.shapes);
+  const lockedConstraints = getAllLockedConstraints(document);
+  return FACE_ORDER.every((face) =>
+    areBoundsWithinConstraint(faceBounds[face], lockedConstraints[face]),
   );
 }
 
@@ -362,8 +337,8 @@ function canLockFace(document, face, faceBounds = getAllFaceBounds(document.shap
   };
   const lockedConstraints = getAllLockedConstraints(proposedDocument);
 
-  return document.shapes.every((shape) =>
-    isShapeWithinConstraint(shape, lockedConstraints[normalizeFace(shape.face)]),
+  return FACE_ORDER.every((targetFace) =>
+    areBoundsWithinConstraint(faceBounds[targetFace], lockedConstraints[targetFace]),
   );
 }
 
@@ -412,7 +387,7 @@ function applyAreaLocks(document) {
     shapes: document.shapes.map((shape) => {
       const face = normalizeFace(shape.face);
       const constraint = lockedConstraints[face];
-      if (!hasAreaConstraint(constraint)) {
+      if (shape.mode === 'cut' || !hasAreaConstraint(constraint)) {
         return shape;
       }
       return constrainShape(shape, constraint);
@@ -503,12 +478,12 @@ function pointInShape(shape, x, y) {
 
 function pointInFaceSolid(shapes, face, x, y) {
   const faceShapes = shapes.filter((shape) => normalizeFace(shape.face) === face);
-  const added = faceShapes.some((shape) => shape.mode === 'add' && pointInShape(shape, x, y));
-  if (!added) {
-    return false;
-  }
-
-  return !faceShapes.some((shape) => shape.mode === 'cut' && pointInShape(shape, x, y));
+  return faceShapes.reduce((solid, shape) => {
+    if (!pointInShape(shape, x, y)) {
+      return solid;
+    }
+    return shape.mode === 'add';
+  }, false);
 }
 
 function isVoxelSolid(shapes, dimensions, x, depth, height) {
@@ -644,26 +619,34 @@ function normalizePlanRing(ring) {
 }
 
 function getFaceBooleanPolygons(faceShapes) {
-  const addPolygons = faceShapes
-    .filter((shape) => shape.mode === 'add')
-    .map(getShapeMultiPolygon);
-  if (!addPolygons.length) {
-    return [];
+  const solid = faceShapes.reduce((result, shape) => {
+    const shapePolygon = getShapeMultiPolygon(shape);
+    if (shape.mode === 'add') {
+      return normalizeMultiPolygon(
+        result.length ? polygonClipping.union(result, shapePolygon) : shapePolygon,
+      );
+    }
+    if (!result.length) {
+      return [];
+    }
+    return normalizeMultiPolygon(polygonClipping.difference(result, shapePolygon));
+  }, []);
+
+  return normalizeMultiPolygon(solid);
+}
+
+function getBooleanPolygonBounds(polygons) {
+  const points = polygons.flatMap((polygon) => polygon.flatMap((ring) => ring));
+  if (!points.length) {
+    return null;
   }
 
-  const solid = addPolygons.length === 1
-    ? addPolygons[0]
-    : polygonClipping.union(...addPolygons);
-  const cutPolygons = faceShapes
-    .filter((shape) => shape.mode === 'cut')
-    .map(getShapeMultiPolygon);
-  const booleanResult = cutPolygons.length
-    ? polygonClipping.difference(solid, ...cutPolygons)
-    : solid;
-
-  return booleanResult
-    .map((polygon) => polygon.map(normalizePlanRing).filter((ring) => ring.length >= 3))
-    .filter((polygon) => polygon.length);
+  return {
+    minX: clampRangeValue(Math.min(...points.map(([x]) => x))),
+    maxX: clampRangeValue(Math.max(...points.map(([x]) => x))),
+    minY: clampRangeValue(Math.min(...points.map(([, y]) => y))),
+    maxY: clampRangeValue(Math.max(...points.map(([, y]) => y))),
+  };
 }
 
 function isPointOnSegment(point, start, end) {
@@ -932,7 +915,7 @@ function buildConstrainedRingWalls(planRing, face, className, polygonsByFace, di
           getExtrudedSurfacePoint(face, next[0], next[1], end, dimensions),
           getExtrudedSurfacePoint(face, point[0], point[1], end, dimensions),
         ]],
-        edge: true,
+        edge: !wallClassName.includes('iso-preview-cut-side'),
       };
     });
   });
@@ -1301,22 +1284,25 @@ function App() {
   function updateShape(id, patch) {
     setPreview3DSelected(false);
     setOutputOpen(false);
-    setDocument((current) => applyAreaLocks({
-      ...current,
-      activeFace: patch.face ? normalizeFace(patch.face) : current.activeFace,
-      shapes: current.shapes.map((shape) => {
-        if (shape.id !== id) {
-          return shape;
-        }
-        const nextShape = { ...shape, ...patch };
-        const face = normalizeFace(nextShape.face);
-        const constraint = getLockedFaceConstraint(current, face);
-        if (!hasAreaConstraint(constraint)) {
-          return nextShape;
-        }
-        return constrainShape(nextShape, constraint);
-      }),
-    }));
+    setDocument((current) => {
+      const nextDocument = applyAreaLocks({
+        ...current,
+        activeFace: patch.face ? normalizeFace(patch.face) : current.activeFace,
+        shapes: current.shapes.map((shape) => {
+          if (shape.id !== id) {
+            return shape;
+          }
+          const nextShape = { ...shape, ...patch };
+          const face = normalizeFace(nextShape.face);
+          const constraint = getLockedFaceConstraint(current, face);
+          if (nextShape.mode === 'cut' || !hasAreaConstraint(constraint)) {
+            return nextShape;
+          }
+          return constrainShape(nextShape, constraint);
+        }),
+      });
+      return areLockedFaceBoundsValid(nextDocument) ? nextDocument : current;
+    });
   }
 
   function addShape(type) {
@@ -1330,11 +1316,12 @@ function App() {
           ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add', face }
           : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face };
       const constraint = getLockedFaceConstraint(current, face);
-      const shape = hasAreaConstraint(constraint)
+      const shape = shapeBase.mode !== 'cut' && hasAreaConstraint(constraint)
         ? constrainShape(shapeBase, constraint)
         : shapeBase;
       setSelectedId(id);
-      return applyAreaLocks({ ...current, shapes: [...current.shapes, shape] });
+      const nextDocument = applyAreaLocks({ ...current, shapes: [...current.shapes, shape] });
+      return areLockedFaceBoundsValid(nextDocument) ? nextDocument : current;
     });
   }
 
@@ -1346,7 +1333,8 @@ function App() {
       if (selectedId === id) {
         setSelectedId(nextShapes[0]?.id ?? null);
       }
-      return applyAreaLocks({ ...current, shapes: nextShapes });
+      const nextDocument = applyAreaLocks({ ...current, shapes: nextShapes });
+      return areLockedFaceBoundsValid(nextDocument) ? nextDocument : current;
     });
   }
 
@@ -1383,7 +1371,8 @@ function App() {
       const nextIndex = current.shapes.findIndex((item) => item.id === nextFaceShape.id);
       const shapes = [...current.shapes];
       [shapes[index], shapes[nextIndex]] = [shapes[nextIndex], shapes[index]];
-      return { ...current, shapes };
+      const nextDocument = { ...current, shapes };
+      return areLockedFaceBoundsValid(nextDocument) ? nextDocument : current;
     });
   }
 
@@ -1403,7 +1392,7 @@ function App() {
         return current;
       }
 
-      return applyAreaLocks({
+      const nextDocument = {
         ...current,
         areaLocks: {
           ...currentLocks,
@@ -1413,7 +1402,8 @@ function App() {
           ...currentConstraints,
           [normalizedFace]: nextLockValue ? nextConstraint : null,
         },
-      });
+      };
+      return areLockedFaceBoundsValid(nextDocument) ? nextDocument : current;
     });
   }
 
@@ -1627,7 +1617,7 @@ function App() {
                 index={index}
                 total={activeShapes.length}
                 selected={shape.id === selectedId}
-                locked={hasAreaConstraint(lockedConstraints[normalizeFace(shape.face)])}
+                locked={shape.mode !== 'cut' && hasAreaConstraint(lockedConstraints[normalizeFace(shape.face)])}
                 constraint={lockedConstraints[normalizeFace(shape.face)]}
                 onSelect={() => selectShape(shape.id)}
                 onChange={(patch) => updateShape(shape.id, patch)}
