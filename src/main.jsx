@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-06';
+const APP_VERSION = 'proto-2026-05-31-plan-07';
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -31,6 +31,8 @@ const initialDocument = {
   activeFace: 'top',
   areaLocks: DEFAULT_AREA_LOCKS,
   areaLockConstraints: DEFAULT_AREA_LOCK_CONSTRAINTS,
+  viewMode: 'faces',
+  rotation: { x: 24, y: -34, z: 0 },
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -46,6 +48,8 @@ function normalizeFace(face) {
 
 function normalizeDocument(document) {
   const activeFace = normalizeFace(document?.activeFace);
+  const viewMode = document?.viewMode === '3d' ? '3d' : 'faces';
+  const rotation = normalizeRotation(document?.rotation);
   const areaLocks = FACE_ORDER.reduce((locks, face) => ({
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
@@ -67,7 +71,17 @@ function normalizeDocument(document) {
     activeFace,
     areaLocks,
     areaLockConstraints,
+    viewMode,
+    rotation,
     shapes,
+  };
+}
+
+function normalizeRotation(rotation) {
+  return {
+    x: clampValue(Number(rotation?.x) || 0, -180, 180),
+    y: clampValue(Number(rotation?.y) || 0, -180, 180),
+    z: clampValue(Number(rotation?.z) || 0, -180, 180),
   };
 }
 
@@ -451,6 +465,7 @@ function App() {
     () => Object.fromEntries(FACE_ORDER.map((face) => [face, canLockFace(document, face, faceBounds)])),
     [document, faceBounds],
   );
+  const previewDimensions = useMemo(() => getLockedPreviewDimensions(document), [document]);
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
 
   useEffect(() => {
@@ -474,6 +489,16 @@ function App() {
 
   function updateDocument(patch) {
     setDocument((current) => ({ ...current, ...patch }));
+  }
+
+  function updateRotation(axis, value) {
+    setDocument((current) => ({
+      ...current,
+      rotation: normalizeRotation({
+        ...current.rotation,
+        [axis]: value,
+      }),
+    }));
   }
 
   function updateShape(id, patch) {
@@ -602,6 +627,18 @@ function App() {
     setFullPreviewFace((current) => (current === normalizedFace ? null : normalizedFace));
   }
 
+  function toggle3DPreview() {
+    if (!previewDimensions) {
+      return;
+    }
+    setDocument((current) => ({
+      ...current,
+      viewMode: current.viewMode === '3d' ? 'faces' : '3d',
+    }));
+    setFullPreviewFace(null);
+    setSelectedId(null);
+  }
+
   return (
     <main className="app-shell">
       <section className="viewer-panel" aria-label="CAD viewer">
@@ -612,10 +649,14 @@ function App() {
           areaLocks={document.areaLocks}
           areaLockConstraints={document.areaLockConstraints}
           areaLockAvailability={areaLockAvailability}
+          previewDimensions={previewDimensions}
+          rotation={document.rotation}
+          viewMode={document.viewMode}
           onSelect={selectShape}
           onFaceSelect={setActiveFace}
           onFaceDoubleSelect={toggleFullPreview}
           onAreaLockToggle={toggleAreaLock}
+          on3DDoubleSelect={toggle3DPreview}
         />
       </section>
 
@@ -691,6 +732,10 @@ function App() {
           </p>
         )}
 
+        {document.viewMode === '3d' && previewDimensions ? (
+          <RotationControls rotation={document.rotation} onChange={updateRotation} />
+        ) : null}
+
         {jsonOpen ? <pre className="json-view">{jsonText}</pre> : null}
       </section>
     </main>
@@ -704,13 +749,18 @@ function Viewer({
   areaLocks,
   areaLockConstraints,
   areaLockAvailability,
+  previewDimensions,
+  rotation,
+  viewMode,
   onSelect,
   onFaceSelect,
   onFaceDoubleSelect,
   onAreaLockToggle,
+  on3DDoubleSelect,
 }) {
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
+  const is3DMode = viewMode === '3d' && previewDimensions;
   const visibleFaces = previewFace ? [previewFace] : FACE_ORDER;
   const faceBounds = useMemo(
     () => Object.fromEntries(FACE_ORDER.map((face) => [face, getFaceBounds(document.shapes, face)])),
@@ -720,11 +770,6 @@ function Viewer({
     () => getAllDisplayConstraints({ ...document, areaLocks, areaLockConstraints }, faceBounds),
     [document, areaLocks, areaLockConstraints, faceBounds],
   );
-  const previewDimensions = useMemo(
-    () => getLockedPreviewDimensions({ ...document, areaLocks, areaLockConstraints }),
-    [document, areaLocks, areaLockConstraints],
-  );
-
   return (
     <div className="viewer-frame">
       <div className="viewer-toolbar">
@@ -748,33 +793,48 @@ function Viewer({
             </mask>
           ))}
         </defs>
-        {visibleFaces.map((face) => (
-          <FacePlan
-            key={face}
-            face={face}
-            active={face === activeFace}
-            full={Boolean(previewFace)}
-            shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
-            constraint={faceConstraints[face]}
-            selectedId={selectedId}
-            onSelect={onSelect}
-            onFaceSelect={onFaceSelect}
-            onFaceDoubleSelect={onFaceDoubleSelect}
+        {is3DMode ? (
+          <IsometricPreview
+            dimensions={previewDimensions}
+            rotation={rotation}
+            expanded
+            onDoubleSelect={on3DDoubleSelect}
           />
-        ))}
-        {visibleFaces.map((face) => (
-          <AreaLockButton
-            key={`lock-${face}`}
-            face={face}
-            full={Boolean(previewFace)}
-            locked={Boolean(areaLocks?.[face])}
-            disabled={!areaLocks?.[face] && !areaLockAvailability?.[face]}
-            onToggle={onAreaLockToggle}
-          />
-        ))}
-        {!previewFace && previewDimensions ? (
-          <IsometricPreview dimensions={previewDimensions} />
-        ) : null}
+        ) : (
+          <>
+            {visibleFaces.map((face) => (
+              <FacePlan
+                key={face}
+                face={face}
+                active={face === activeFace}
+                full={Boolean(previewFace)}
+                shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
+                constraint={faceConstraints[face]}
+                selectedId={selectedId}
+                onSelect={onSelect}
+                onFaceSelect={onFaceSelect}
+                onFaceDoubleSelect={onFaceDoubleSelect}
+              />
+            ))}
+            {visibleFaces.map((face) => (
+              <AreaLockButton
+                key={`lock-${face}`}
+                face={face}
+                full={Boolean(previewFace)}
+                locked={Boolean(areaLocks?.[face])}
+                disabled={!areaLocks?.[face] && !areaLockAvailability?.[face]}
+                onToggle={onAreaLockToggle}
+              />
+            ))}
+            {!previewFace && previewDimensions ? (
+              <IsometricPreview
+                dimensions={previewDimensions}
+                rotation={rotation}
+                onDoubleSelect={on3DDoubleSelect}
+              />
+            ) : null}
+          </>
+        )}
       </svg>
       <div className="viewer-legend">
         {FACE_ORDER.map((face) => (
@@ -829,41 +889,87 @@ function AreaLockButton({ face, full, locked, disabled, onToggle }) {
   );
 }
 
-function IsometricPreview({ dimensions }) {
+function rotatePoint(point, rotation) {
+  const xRad = (rotation.x * Math.PI) / 180;
+  const yRad = (rotation.y * Math.PI) / 180;
+  const zRad = (rotation.z * Math.PI) / 180;
+  let { x, y, z } = point;
+  let nextY = y * Math.cos(xRad) - z * Math.sin(xRad);
+  let nextZ = y * Math.sin(xRad) + z * Math.cos(xRad);
+  y = nextY;
+  z = nextZ;
+
+  let nextX = x * Math.cos(yRad) + z * Math.sin(yRad);
+  nextZ = -x * Math.sin(yRad) + z * Math.cos(yRad);
+  x = nextX;
+  z = nextZ;
+
+  nextX = x * Math.cos(zRad) - y * Math.sin(zRad);
+  nextY = x * Math.sin(zRad) + y * Math.cos(zRad);
+  return { x: nextX, y: nextY, z };
+}
+
+function IsometricPreview({
+  dimensions,
+  rotation,
+  expanded = false,
+  onDoubleSelect,
+}) {
+  const box = expanded
+    ? { x: 30, y: 12, width: 266, height: 240, labelY: 238 }
+    : { x: 198, y: 6, width: 120, height: 120, labelY: 116 };
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + (expanded ? 12 : 4) };
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
-  const scale = 44 / maxSize;
-  const width = dimensions.width.size * scale;
-  const depth = dimensions.depth.size * scale;
-  const height = dimensions.height.size * scale;
-  const origin = { x: 258, y: 84 };
-  const xVector = { x: width * 0.62, y: width * 0.34 };
-  const dVector = { x: -depth * 0.62, y: depth * 0.34 };
-  const hVector = { x: 0, y: -height };
-  const add = (...points) => points.reduce((sum, point) => ({
-    x: sum.x + point.x,
-    y: sum.y + point.y,
-  }), { x: 0, y: 0 });
-  const p0 = origin;
-  const p1 = add(origin, xVector);
-  const p2 = add(origin, xVector, dVector);
-  const p3 = add(origin, dVector);
-  const p4 = add(origin, hVector);
-  const p5 = add(origin, xVector, hVector);
-  const p6 = add(origin, xVector, dVector, hVector);
-  const p7 = add(origin, dVector, hVector);
-  const points = (...items) => items.map((point) => `${point.x},${point.y}`).join(' ');
+  const scale = (expanded ? 96 : 48) / maxSize;
+  const width = dimensions.width.size;
+  const depth = dimensions.depth.size;
+  const height = dimensions.height.size;
+  const vertices = [
+    { x: -width / 2, y: -depth / 2, z: -height / 2 },
+    { x: width / 2, y: -depth / 2, z: -height / 2 },
+    { x: width / 2, y: depth / 2, z: -height / 2 },
+    { x: -width / 2, y: depth / 2, z: -height / 2 },
+    { x: -width / 2, y: -depth / 2, z: height / 2 },
+    { x: width / 2, y: -depth / 2, z: height / 2 },
+    { x: width / 2, y: depth / 2, z: height / 2 },
+    { x: -width / 2, y: depth / 2, z: height / 2 },
+  ].map((point) => {
+    const rotated = rotatePoint(point, rotation);
+    return {
+      ...rotated,
+      sx: center.x + rotated.x * scale,
+      sy: center.y - rotated.z * scale,
+    };
+  });
+  const faces = [
+    { className: 'iso-preview-top', indexes: [4, 5, 6, 7] },
+    { className: 'iso-preview-right', indexes: [1, 2, 6, 5] },
+    { className: 'iso-preview-front', indexes: [0, 1, 5, 4] },
+  ].sort((a, b) => {
+    const aDepth = a.indexes.reduce((sum, index) => sum + vertices[index].y, 0) / a.indexes.length;
+    const bDepth = b.indexes.reduce((sum, index) => sum + vertices[index].y, 0) / b.indexes.length;
+    return bDepth - aDepth;
+  });
+  const points = (indexes) => indexes.map((index) => `${vertices[index].sx},${vertices[index].sy}`).join(' ');
 
   return (
-    <g className="iso-preview" aria-label="3Dプレビュー">
-      <rect x="198" y="6" width="120" height="120" rx="4" />
-      <polygon className="iso-preview-top" points={points(p4, p5, p6, p7)} />
-      <polygon className="iso-preview-right" points={points(p1, p2, p6, p5)} />
-      <polygon className="iso-preview-front" points={points(p0, p1, p5, p4)} />
-      <polyline className="iso-preview-edge" points={points(p0, p1, p2, p3, p0, p4, p5, p6, p7, p4)} />
-      <line className="iso-preview-edge" x1={p1.x} y1={p1.y} x2={p5.x} y2={p5.y} />
-      <line className="iso-preview-edge" x1={p2.x} y1={p2.y} x2={p6.x} y2={p6.y} />
-      <line className="iso-preview-edge" x1={p3.x} y1={p3.y} x2={p7.x} y2={p7.y} />
-      <text x="258" y="116">3D preview</text>
+    <g
+      className={`iso-preview ${expanded ? 'expanded' : ''}`}
+      aria-label="3Dプレビュー"
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onDoubleSelect();
+      }}
+    >
+      <rect x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
+      {faces.map((face) => (
+        <polygon key={face.className} className={face.className} points={points(face.indexes)} />
+      ))}
+      <polyline className="iso-preview-edge" points={points([0, 1, 2, 3, 0, 4, 5, 6, 7, 4])} />
+      <line className="iso-preview-edge" x1={vertices[1].sx} y1={vertices[1].sy} x2={vertices[5].sx} y2={vertices[5].sy} />
+      <line className="iso-preview-edge" x1={vertices[2].sx} y1={vertices[2].sy} x2={vertices[6].sx} y2={vertices[6].sy} />
+      <line className="iso-preview-edge" x1={vertices[3].sx} y1={vertices[3].sy} x2={vertices[7].sx} y2={vertices[7].sy} />
+      <text x={box.x + box.width / 2} y={box.labelY}>3D preview</text>
     </g>
   );
 }
@@ -1161,6 +1267,39 @@ function ShapeEditor({
         )}
       </div>
     </article>
+  );
+}
+
+function RotationControls({ rotation, onChange }) {
+  return (
+    <section className="rotation-panel" aria-label="3D rotation controls">
+      <div className="rotation-header">
+        <span>3D回転</span>
+      </div>
+      <div className="rotation-grid">
+        {['x', 'y', 'z'].map((axis) => (
+          <label key={axis} className="rotation-field">
+            <span>{axis.toUpperCase()}</span>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              value={rotation[axis]}
+              onChange={(event) => onChange(axis, Number(event.target.value))}
+            />
+            <NumberField
+              label={`${axis} rotation`}
+              value={rotation[axis]}
+              min={-180}
+              max={180}
+              compact
+              onChange={(value) => onChange(axis, value)}
+            />
+          </label>
+        ))}
+      </div>
+    </section>
   );
 }
 

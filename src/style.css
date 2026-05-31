@@ -237,7 +237,7 @@ input[type="range"] {
 }
 
 .iso-preview {
-  pointer-events: none;
+  cursor: pointer;
 }
 
 .iso-preview rect {
@@ -272,10 +272,49 @@ input[type="range"] {
 }
 
 .iso-preview text {
+  pointer-events: none;
   text-anchor: middle;
   fill: #506174;
   font-size: 9px;
   font-weight: 900;
+}
+
+.iso-preview.expanded text {
+  font-size: 11px;
+}
+
+.rotation-panel {
+  margin: 12px 0 0;
+  border: 1px solid #d1d9e3;
+  border-radius: 8px;
+  background: #f9fbfd;
+  padding: 8px;
+}
+
+.rotation-header {
+  color: #435365;
+  font-size: 0.78rem;
+  font-weight: 900;
+  margin-bottom: 8px;
+}
+
+.rotation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.rotation-field {
+  display: grid;
+  grid-template-rows: auto 32px auto;
+  gap: 4px;
+  color: #506174;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.rotation-field > span {
+  text-align: center;
 }
 
 .final-outline {
