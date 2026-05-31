@@ -291,6 +291,19 @@ input[type="range"] {
   stroke-width: 0.55;
 }
 
+.iso-preview-outline-edge {
+  fill: none;
+  stroke: #17212b;
+  stroke-width: 1.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+
+.iso-preview.expanded .iso-preview-outline-edge {
+  stroke-width: 1.35;
+}
+
 .iso-preview.transparent .iso-preview-top {
   fill: rgba(37, 99, 235, 0.14);
 }
@@ -416,7 +429,8 @@ input[type="range"] {
 }
 
 .transparent-toggle,
-.grid-toggle {
+.grid-toggle,
+.edge-toggle {
   min-height: 32px;
   display: inline-flex;
   align-items: center;
@@ -432,13 +446,15 @@ input[type="range"] {
 }
 
 .transparent-toggle input,
-.grid-toggle input {
+.grid-toggle input,
+.edge-toggle input {
   width: 16px;
   height: 16px;
   padding: 0;
 }
 
-.grid-toggle {
+.grid-toggle,
+.edge-toggle {
   grid-column: 3;
   justify-self: stretch;
 }

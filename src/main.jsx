@@ -3,15 +3,15 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-12';
+const APP_VERSION = 'proto-2026-05-31-plan-13';
 const SOLID_PREVIEW_STEPS = 18;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
   top: { x: 90, y: 0, z: 0 },
   front: { x: 0, y: 0, z: 0 },
-  right: { x: 0, y: -90, z: 0 },
-  left: { x: 0, y: 90, z: 0 },
-  back: { x: 0, y: 180, z: 0 },
+  right: { x: 0, y: 0, z: -90 },
+  left: { x: 0, y: 0, z: 90 },
+  back: { x: 0, y: 0, z: 180 },
   bottom: { x: -90, y: 0, z: 0 },
 };
 const FACE_ORDER = ['top', 'front', 'right'];
@@ -43,8 +43,9 @@ const initialDocument = {
   areaLockConstraints: DEFAULT_AREA_LOCK_CONSTRAINTS,
   viewMode: 'faces',
   rotation: DEFAULT_ROTATION,
-  transparent3D: false,
-  show3DGrid: true,
+  transparent3D: true,
+  show3DGrid: false,
+  show3DEdges: true,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -62,8 +63,9 @@ function normalizeDocument(document) {
   const activeFace = normalizeFace(document?.activeFace);
   const viewMode = document?.viewMode === '3d' ? '3d' : 'faces';
   const rotation = normalizeRotation(document?.rotation);
-  const transparent3D = Boolean(document?.transparent3D);
-  const show3DGrid = document?.show3DGrid !== false;
+  const transparent3D = document?.transparent3D !== false;
+  const show3DGrid = Boolean(document?.show3DGrid);
+  const show3DEdges = document?.show3DEdges !== false;
   const areaLocks = FACE_ORDER.reduce((locks, face) => ({
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
@@ -89,6 +91,7 @@ function normalizeDocument(document) {
     rotation,
     transparent3D,
     show3DGrid,
+    show3DEdges,
     shapes,
   };
 }
@@ -651,6 +654,13 @@ function App() {
     }));
   }
 
+  function setShow3DEdges(show3DEdges) {
+    setDocument((current) => ({
+      ...current,
+      show3DEdges,
+    }));
+  }
+
   function updateShape(id, patch) {
     setPreview3DSelected(false);
     setDocument((current) => applyAreaLocks({
@@ -820,6 +830,7 @@ function App() {
           rotation={document.rotation}
           transparent3D={document.transparent3D}
           show3DGrid={document.show3DGrid}
+          show3DEdges={document.show3DEdges}
           viewMode={document.viewMode}
           preview3DSelected={preview3DSelected}
           onSelect={selectShape}
@@ -916,11 +927,13 @@ function App() {
             rotation={document.rotation}
             transparent={document.transparent3D}
             showGrid={document.show3DGrid}
+            showEdges={document.show3DEdges}
             onChange={updateRotation}
             onReset={() => setRotation(DEFAULT_ROTATION)}
             onView={(view) => setRotation(FACE_VIEW_ROTATIONS[view])}
             onTransparencyChange={setTransparent3D}
             onGridChange={setShow3DGrid}
+            onEdgesChange={setShow3DEdges}
           />
         ) : null}
 
@@ -941,6 +954,7 @@ function Viewer({
   rotation,
   transparent3D,
   show3DGrid,
+  show3DEdges,
   viewMode,
   preview3DSelected,
   onSelect,
@@ -992,6 +1006,7 @@ function Viewer({
             rotation={rotation}
             transparent={transparent3D}
             showGrid={show3DGrid}
+            showEdges={show3DEdges}
             expanded
             onDoubleSelect={on3DDoubleSelect}
           />
@@ -1028,6 +1043,7 @@ function Viewer({
                 rotation={rotation}
                 transparent={transparent3D}
                 showGrid={show3DGrid}
+                showEdges={show3DEdges}
                 selected={preview3DSelected}
                 onSelect={on3DSelect}
                 onDoubleSelect={on3DDoubleSelect}
@@ -1115,6 +1131,7 @@ function IsometricPreview({
   rotation,
   transparent = false,
   showGrid = true,
+  showEdges = true,
   expanded = false,
   selected = false,
   onSelect,
@@ -1140,13 +1157,35 @@ function IsometricPreview({
     return {
       ...face,
       depth,
+      projectedCorners: points,
       points: points.map((point) => `${point.sx},${point.sy}`).join(' '),
     };
   }).sort((a, b) => b.depth - a.depth);
+  const pointKey = (point) => `${point.x.toFixed(4)}:${point.y.toFixed(4)}:${point.z.toFixed(4)}`;
+  const edgeKey = (face, index) => {
+    const nextIndex = (index + 1) % face.corners.length;
+    return [
+      face.className,
+      [pointKey(face.corners[index]), pointKey(face.corners[nextIndex])].sort().join('|'),
+    ].join('|');
+  };
+  const edgeUsage = useMemo(() => {
+    if (!showEdges) {
+      return new Map();
+    }
+    const edgeMap = new Map();
+    projectedFaces.forEach((face) => {
+      face.corners.forEach((_, index) => {
+        const key = edgeKey(face, index);
+        edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
+      });
+    });
+    return edgeMap;
+  }, [projectedFaces, showEdges]);
 
   return (
     <g
-      className={`iso-preview ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''} ${transparent ? 'transparent' : ''} ${showGrid ? 'grid-on' : ''}`}
+      className={`iso-preview ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''} ${transparent ? 'transparent' : ''} ${showGrid ? 'grid-on' : ''} ${showEdges ? 'edges-on' : ''}`}
       aria-label="3Dプレビュー"
       onClick={(event) => {
         event.stopPropagation();
@@ -1158,8 +1197,26 @@ function IsometricPreview({
       }}
     >
       <rect className="iso-preview-frame" x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
-      {projectedFaces.map((face, index) => (
-        <polygon key={`${face.className}-${index}`} className={face.className} points={face.points} />
+      {projectedFaces.map((face, faceIndex) => (
+        <g key={`${face.className}-${faceIndex}`}>
+          <polygon className={face.className} points={face.points} />
+          {showEdges ? face.projectedCorners.map((point, index) => {
+            if (edgeUsage.get(edgeKey(face, index)) !== 1) {
+              return null;
+            }
+            const next = face.projectedCorners[(index + 1) % face.projectedCorners.length];
+            return (
+              <line
+                key={`${face.className}-${faceIndex}-edge-${index}`}
+                className="iso-preview-outline-edge"
+                x1={point.sx}
+                y1={point.sy}
+                x2={next.sx}
+                y2={next.sy}
+              />
+            );
+          }) : null}
+        </g>
       ))}
       <text x={box.x + box.width / 2} y={box.labelY}>3D preview</text>
     </g>
@@ -1466,11 +1523,13 @@ function RotationControls({
   rotation,
   transparent,
   showGrid,
+  showEdges,
   onChange,
   onReset,
   onView,
   onTransparencyChange,
   onGridChange,
+  onEdgesChange,
 }) {
   return (
     <section className="rotation-panel" aria-label="3D rotation controls">
@@ -1527,6 +1586,14 @@ function RotationControls({
             onChange={(event) => onGridChange(event.target.checked)}
           />
           <span>グリッド</span>
+        </label>
+        <label className="edge-toggle">
+          <input
+            type="checkbox"
+            checked={showEdges}
+            onChange={(event) => onEdgesChange(event.target.checked)}
+          />
+          <span>エッジ</span>
         </label>
       </div>
     </section>
