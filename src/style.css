@@ -156,6 +156,10 @@ input[type="range"] {
   vector-effect: non-scaling-stroke;
 }
 
+.face-plan-surface {
+  fill: #ffffff;
+}
+
 .face-plan.active .face-plan-bg {
   stroke-width: 3;
 }
@@ -240,14 +244,14 @@ input[type="range"] {
   cursor: pointer;
 }
 
-.iso-preview rect {
+.iso-preview-frame {
   fill: #ffffff;
   stroke: #c8d3df;
   stroke-width: 1;
 }
 
-.iso-preview.selected rect,
-.iso-preview.expanded rect {
+.iso-preview.selected .iso-preview-frame,
+.iso-preview.expanded .iso-preview-frame {
   stroke: #17212b;
   stroke-width: 3;
 }
@@ -274,6 +278,29 @@ input[type="range"] {
 .iso-preview-back,
 .iso-preview-bottom {
   fill: rgba(148, 163, 184, 0.24);
+}
+
+.iso-preview.transparent polygon {
+  fill: rgba(255, 255, 255, 0.04);
+  stroke: rgba(23, 33, 43, 0.5);
+}
+
+.iso-preview:not(.transparent) .iso-preview-top {
+  fill: rgba(37, 99, 235, 0.52);
+}
+
+.iso-preview:not(.transparent) .iso-preview-front {
+  fill: rgba(234, 179, 8, 0.58);
+}
+
+.iso-preview:not(.transparent) .iso-preview-right {
+  fill: rgba(220, 38, 38, 0.5);
+}
+
+.iso-preview:not(.transparent) .iso-preview-left,
+.iso-preview:not(.transparent) .iso-preview-back,
+.iso-preview:not(.transparent) .iso-preview-bottom {
+  fill: rgba(148, 163, 184, 0.52);
 }
 
 .iso-preview text {
@@ -320,6 +347,83 @@ input[type="range"] {
 
 .rotation-field > span {
   text-align: center;
+}
+
+.rotation-actions {
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(0, 1fr) minmax(64px, auto);
+  gap: 8px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.rotation-reset {
+  min-height: 32px;
+  padding: 0 8px;
+}
+
+.view-net {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(54px, 1fr));
+  grid-template-rows: repeat(4, 30px);
+  gap: 4px;
+}
+
+.view-net button {
+  min-height: 30px;
+  padding: 0 5px;
+  font-size: 0.72rem;
+}
+
+.view-top {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.view-left {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.view-front {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.view-right {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.view-bottom {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.view-back {
+  grid-column: 2;
+  grid-row: 4;
+}
+
+.transparent-toggle {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid #c9d3df;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #435365;
+  font-size: 0.78rem;
+  font-weight: 900;
+  padding: 0 8px;
+}
+
+.transparent-toggle input {
+  width: 16px;
+  height: 16px;
+  padding: 0;
 }
 
 .final-outline {

@@ -3,8 +3,17 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-10';
+const APP_VERSION = 'proto-2026-05-31-plan-11';
 const SOLID_PREVIEW_STEPS = 18;
+const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
+const FACE_VIEW_ROTATIONS = {
+  top: { x: 90, y: 0, z: 0 },
+  front: { x: 0, y: 0, z: 0 },
+  right: { x: 0, y: -90, z: 0 },
+  left: { x: 0, y: 90, z: 0 },
+  back: { x: 0, y: 180, z: 0 },
+  bottom: { x: -90, y: 0, z: 0 },
+};
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -33,7 +42,8 @@ const initialDocument = {
   areaLocks: DEFAULT_AREA_LOCKS,
   areaLockConstraints: DEFAULT_AREA_LOCK_CONSTRAINTS,
   viewMode: 'faces',
-  rotation: { x: 24, y: -34, z: 0 },
+  rotation: DEFAULT_ROTATION,
+  transparent3D: false,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -51,6 +61,7 @@ function normalizeDocument(document) {
   const activeFace = normalizeFace(document?.activeFace);
   const viewMode = document?.viewMode === '3d' ? '3d' : 'faces';
   const rotation = normalizeRotation(document?.rotation);
+  const transparent3D = Boolean(document?.transparent3D);
   const areaLocks = FACE_ORDER.reduce((locks, face) => ({
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
@@ -74,15 +85,16 @@ function normalizeDocument(document) {
     areaLockConstraints,
     viewMode,
     rotation,
+    transparent3D,
     shapes,
   };
 }
 
 function normalizeRotation(rotation) {
   return {
-    x: clampValue(Number(rotation?.x) || 0, -180, 180),
-    y: clampValue(Number(rotation?.y) || 0, -180, 180),
-    z: clampValue(Number(rotation?.z) || 0, -180, 180),
+    x: clampValue(Number(rotation?.x ?? DEFAULT_ROTATION.x), -180, 180),
+    y: clampValue(Number(rotation?.y ?? DEFAULT_ROTATION.y), -180, 180),
+    z: clampValue(Number(rotation?.z ?? DEFAULT_ROTATION.z), -180, 180),
   };
 }
 
@@ -615,6 +627,20 @@ function App() {
     }));
   }
 
+  function setRotation(rotation) {
+    setDocument((current) => ({
+      ...current,
+      rotation: normalizeRotation(rotation),
+    }));
+  }
+
+  function setTransparent3D(transparent3D) {
+    setDocument((current) => ({
+      ...current,
+      transparent3D,
+    }));
+  }
+
   function updateShape(id, patch) {
     setPreview3DSelected(false);
     setDocument((current) => applyAreaLocks({
@@ -782,6 +808,7 @@ function App() {
           areaLockAvailability={areaLockAvailability}
           previewDimensions={previewDimensions}
           rotation={document.rotation}
+          transparent3D={document.transparent3D}
           viewMode={document.viewMode}
           preview3DSelected={preview3DSelected}
           onSelect={selectShape}
@@ -874,7 +901,14 @@ function App() {
         ) : null}
 
         {showing3DControls ? (
-          <RotationControls rotation={document.rotation} onChange={updateRotation} />
+          <RotationControls
+            rotation={document.rotation}
+            transparent={document.transparent3D}
+            onChange={updateRotation}
+            onReset={() => setRotation(DEFAULT_ROTATION)}
+            onView={(view) => setRotation(FACE_VIEW_ROTATIONS[view])}
+            onTransparencyChange={setTransparent3D}
+          />
         ) : null}
 
         {jsonOpen ? <pre className="json-view">{jsonText}</pre> : null}
@@ -892,6 +926,7 @@ function Viewer({
   areaLockAvailability,
   previewDimensions,
   rotation,
+  transparent3D,
   viewMode,
   preview3DSelected,
   onSelect,
@@ -941,6 +976,7 @@ function Viewer({
             dimensions={previewDimensions}
             shapes={document.shapes}
             rotation={rotation}
+            transparent={transparent3D}
             expanded
             onDoubleSelect={on3DDoubleSelect}
           />
@@ -975,6 +1011,7 @@ function Viewer({
                 dimensions={previewDimensions}
                 shapes={document.shapes}
                 rotation={rotation}
+                transparent={transparent3D}
                 selected={preview3DSelected}
                 onSelect={on3DSelect}
                 onDoubleSelect={on3DDoubleSelect}
@@ -1060,6 +1097,7 @@ function IsometricPreview({
   dimensions,
   shapes,
   rotation,
+  transparent = false,
   expanded = false,
   selected = false,
   onSelect,
@@ -1091,7 +1129,7 @@ function IsometricPreview({
 
   return (
     <g
-      className={`iso-preview ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''}`}
+      className={`iso-preview ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''} ${transparent ? 'transparent' : ''}`}
       aria-label="3Dプレビュー"
       onClick={(event) => {
         event.stopPropagation();
@@ -1102,7 +1140,7 @@ function IsometricPreview({
         onDoubleSelect();
       }}
     >
-      <rect x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
+      <rect className="iso-preview-frame" x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
       {projectedFaces.map((face, index) => (
         <polygon key={`${face.className}-${index}`} className={face.className} points={face.points} />
       ))}
@@ -1157,7 +1195,7 @@ function FacePlan({
       }}
     >
       <rect className="face-plan-bg" width="120" height="120" rx="2" />
-      <rect width="120" height="120" fill="url(#grid)" />
+      <rect className="face-plan-surface" width="120" height="120" />
       <line x1="0" y1="60" x2="120" y2="60" className="face-axis" />
       <line x1="60" y1="0" x2="60" y2="120" className="face-axis" />
       <rect
@@ -1407,7 +1445,14 @@ function ShapeEditor({
   );
 }
 
-function RotationControls({ rotation, onChange }) {
+function RotationControls({
+  rotation,
+  transparent,
+  onChange,
+  onReset,
+  onView,
+  onTransparencyChange,
+}) {
   return (
     <section className="rotation-panel" aria-label="3D rotation controls">
       <div className="rotation-header">
@@ -1435,6 +1480,27 @@ function RotationControls({ rotation, onChange }) {
             />
           </label>
         ))}
+      </div>
+      <div className="rotation-actions">
+        <button type="button" className="rotation-reset" onClick={onReset}>
+          初期角度
+        </button>
+        <div className="view-net" aria-label="3D view presets">
+          <button type="button" className="view-top" onClick={() => onView('top')}>上面</button>
+          <button type="button" className="view-left" onClick={() => onView('left')}>左側面</button>
+          <button type="button" className="view-front" onClick={() => onView('front')}>正面</button>
+          <button type="button" className="view-right" onClick={() => onView('right')}>右側面</button>
+          <button type="button" className="view-bottom" onClick={() => onView('bottom')}>底面</button>
+          <button type="button" className="view-back" onClick={() => onView('back')}>背面</button>
+        </div>
+        <label className="transparent-toggle">
+          <input
+            type="checkbox"
+            checked={transparent}
+            onChange={(event) => onTransparencyChange(event.target.checked)}
+          />
+          <span>透過</span>
+        </label>
       </div>
     </section>
   );
