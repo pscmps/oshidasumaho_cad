@@ -4,7 +4,7 @@ import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-18';
+const APP_VERSION = 'proto-2026-05-31-plan-19';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
@@ -664,10 +664,6 @@ function getFaceBooleanPolygons(faceShapes) {
     .filter((polygon) => polygon.length);
 }
 
-function getPlanSurfaceRing(ring, face, dimensions, opposite = false) {
-  return ring.map(([u, v]) => getSurfacePoint(face, u, v, dimensions, opposite));
-}
-
 function isPointOnSegment(point, start, end) {
   const [x, y] = point;
   const [x1, y1] = start;
@@ -716,7 +712,7 @@ function collectPlanCoordinates(polygons, axis) {
   );
 }
 
-function getAdaptiveAxisStops(values, dimension) {
+function getAxisStops(values, dimension) {
   return [...values, dimension.min, dimension.max]
     .filter((value) => Number.isFinite(value))
     .map((value) => clampValue(value, dimension.min, dimension.max))
@@ -724,53 +720,94 @@ function getAdaptiveAxisStops(values, dimension) {
     .filter((value, index, sorted) => index === 0 || Math.abs(value - sorted[index - 1]) > 0.001);
 }
 
-function getCenteredPoint(x, y, z, dimensions) {
+function getPlanSurfaceRing(ring, face, dimensions, opposite = false) {
+  return ring.map(([u, v]) => getSurfacePoint(face, u, v, dimensions, opposite));
+}
+
+function getExtrudedSurfacePoint(face, u, v, t, dimensions) {
+  if (face === 'top') {
+    return {
+      x: centeredCoordinate(u, dimensions.width),
+      y: centeredCoordinate(v, dimensions.depth),
+      z: centeredCoordinate(t, dimensions.height),
+    };
+  }
+  if (face === 'front') {
+    return {
+      x: centeredCoordinate(u, dimensions.width),
+      y: centeredCoordinate(t, dimensions.depth),
+      z: centeredCoordinate(v, dimensions.height),
+    };
+  }
   return {
-    x: centeredCoordinate(x, dimensions.width),
-    y: centeredCoordinate(y, dimensions.depth),
-    z: centeredCoordinate(z, dimensions.height),
+    x: centeredCoordinate(t, dimensions.width),
+    y: centeredCoordinate(u, dimensions.depth),
+    z: centeredCoordinate(v, dimensions.height),
   };
 }
 
-function buildCellSurface(x0, x1, y0, y1, z0, z1, side, dimensions) {
-  const definitions = {
-    top: {
-      className: 'iso-preview-top',
-      edge: true,
-      points: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
-    },
-    bottom: {
-      className: 'iso-preview-bottom',
-      edge: false,
-      points: [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]],
-    },
-    front: {
-      className: 'iso-preview-front',
-      edge: true,
-      points: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
-    },
-    back: {
-      className: 'iso-preview-back',
-      edge: false,
-      points: [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
-    },
-    right: {
-      className: 'iso-preview-right',
-      edge: true,
-      points: [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]],
-    },
-    left: {
-      className: 'iso-preview-left',
-      edge: false,
-      points: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
-    },
-  };
-  const definition = definitions[side];
-  return {
-    className: definition.className,
-    rings: [definition.points.map(([x, y, z]) => getCenteredPoint(x, y, z, dimensions))],
-    edge: definition.edge,
-  };
+function getExtrusionStops(face, polygonsByFace, dimensions) {
+  if (face === 'top') {
+    return getAxisStops([
+      ...collectPlanCoordinates(polygonsByFace.front, 1),
+      ...collectPlanCoordinates(polygonsByFace.right, 1),
+    ], dimensions.height);
+  }
+  if (face === 'front') {
+    return getAxisStops([
+      ...collectPlanCoordinates(polygonsByFace.top, 1),
+      ...collectPlanCoordinates(polygonsByFace.right, 0),
+    ], dimensions.depth);
+  }
+  return getAxisStops([
+    ...collectPlanCoordinates(polygonsByFace.top, 0),
+    ...collectPlanCoordinates(polygonsByFace.front, 0),
+  ], dimensions.width);
+}
+
+function isExtrusionIntervalValid(face, u, v, t, polygonsByFace) {
+  if (face === 'top') {
+    return (
+      pointInFacePolygons(polygonsByFace.front, u, t) &&
+      pointInFacePolygons(polygonsByFace.right, v, t)
+    );
+  }
+  if (face === 'front') {
+    return (
+      pointInFacePolygons(polygonsByFace.top, u, t) &&
+      pointInFacePolygons(polygonsByFace.right, t, v)
+    );
+  }
+  return (
+    pointInFacePolygons(polygonsByFace.top, t, u) &&
+    pointInFacePolygons(polygonsByFace.front, t, v)
+  );
+}
+
+function buildConstrainedRingWalls(planRing, face, className, polygonsByFace, dimensions) {
+  const stops = getExtrusionStops(face, polygonsByFace, dimensions);
+  return planRing.flatMap((point, index) => {
+    const next = planRing[(index + 1) % planRing.length];
+    const u = (point[0] + next[0]) / 2;
+    const v = (point[1] + next[1]) / 2;
+    return stops.slice(0, -1).flatMap((start, stopIndex) => {
+      const end = stops[stopIndex + 1];
+      const t = (start + end) / 2;
+      if (!isExtrusionIntervalValid(face, u, v, t, polygonsByFace)) {
+        return [];
+      }
+      return {
+        className,
+        rings: [[
+          getExtrudedSurfacePoint(face, point[0], point[1], start, dimensions),
+          getExtrudedSurfacePoint(face, next[0], next[1], start, dimensions),
+          getExtrudedSurfacePoint(face, next[0], next[1], end, dimensions),
+          getExtrudedSurfacePoint(face, point[0], point[1], end, dimensions),
+        ]],
+        edge: false,
+      };
+    });
+  });
 }
 
 function buildSurfacePreviewFaces(shapes, dimensions) {
@@ -784,74 +821,39 @@ function buildSurfacePreviewFaces(shapes, dimensions) {
     return [];
   }
 
-  const xStops = getAdaptiveAxisStops([
-    ...collectPlanCoordinates(polygonsByFace.top, 0),
-    ...collectPlanCoordinates(polygonsByFace.front, 0),
-  ], dimensions.width);
-  const yStops = getAdaptiveAxisStops([
-    ...collectPlanCoordinates(polygonsByFace.top, 1),
-    ...collectPlanCoordinates(polygonsByFace.right, 0),
-  ], dimensions.depth);
-  const zStops = getAdaptiveAxisStops([
-    ...collectPlanCoordinates(polygonsByFace.front, 1),
-    ...collectPlanCoordinates(polygonsByFace.right, 1),
-  ], dimensions.height);
-
-  const solidCells = new Set();
-  const key = (xIndex, yIndex, zIndex) => `${xIndex}:${yIndex}:${zIndex}`;
-  for (let xIndex = 0; xIndex < xStops.length - 1; xIndex += 1) {
-    for (let yIndex = 0; yIndex < yStops.length - 1; yIndex += 1) {
-      for (let zIndex = 0; zIndex < zStops.length - 1; zIndex += 1) {
-        const x = (xStops[xIndex] + xStops[xIndex + 1]) / 2;
-        const y = (yStops[yIndex] + yStops[yIndex + 1]) / 2;
-        const z = (zStops[zIndex] + zStops[zIndex + 1]) / 2;
-        if (
-          pointInFacePolygons(polygonsByFace.top, x, y) &&
-          pointInFacePolygons(polygonsByFace.front, x, z) &&
-          pointInFacePolygons(polygonsByFace.right, y, z)
-        ) {
-          solidCells.add(key(xIndex, yIndex, zIndex));
-        }
-      }
-    }
-  }
-
-  const neighborDefinitions = [
-    { offset: [0, 0, 1], side: 'top' },
-    { offset: [0, 0, -1], side: 'bottom' },
-    { offset: [0, -1, 0], side: 'front' },
-    { offset: [0, 1, 0], side: 'back' },
-    { offset: [1, 0, 0], side: 'right' },
-    { offset: [-1, 0, 0], side: 'left' },
+  const facePairs = [
+    { source: 'top', className: 'iso-preview-top', oppositeClassName: 'iso-preview-bottom' },
+    { source: 'front', className: 'iso-preview-front', oppositeClassName: 'iso-preview-back' },
+    { source: 'right', className: 'iso-preview-right', oppositeClassName: 'iso-preview-left' },
   ];
-  const surfaces = [];
-  for (let xIndex = 0; xIndex < xStops.length - 1; xIndex += 1) {
-    for (let yIndex = 0; yIndex < yStops.length - 1; yIndex += 1) {
-      for (let zIndex = 0; zIndex < zStops.length - 1; zIndex += 1) {
-        if (!solidCells.has(key(xIndex, yIndex, zIndex))) {
-          continue;
-        }
-        neighborDefinitions.forEach(({ offset, side }) => {
-          const neighborKey = key(xIndex + offset[0], yIndex + offset[1], zIndex + offset[2]);
-          if (solidCells.has(neighborKey)) {
-            return;
-          }
-          surfaces.push(buildCellSurface(
-            xStops[xIndex],
-            xStops[xIndex + 1],
-            yStops[yIndex],
-            yStops[yIndex + 1],
-            zStops[zIndex],
-            zStops[zIndex + 1],
-            side,
-            dimensions,
-          ));
-        });
-      }
-    }
-  }
 
-  return surfaces;
+  return facePairs.flatMap(({ source, className, oppositeClassName }) =>
+    polygonsByFace[source].flatMap((polygon) => {
+      const frontRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, false));
+      const backRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, true));
+      return [
+        {
+          className,
+          rings: frontRings,
+          edge: true,
+        },
+        {
+          className: oppositeClassName,
+          rings: backRings,
+          edge: false,
+        },
+        ...polygon.flatMap((ring, index) =>
+          buildConstrainedRingWalls(
+            ring,
+            source,
+            index === 0 ? `iso-preview-side ${className}` : 'iso-preview-cut-side',
+            polygonsByFace,
+            dimensions,
+          ),
+        ),
+      ];
+    }),
+  );
 }
 
 function App() {
