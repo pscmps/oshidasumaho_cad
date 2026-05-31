@@ -4,7 +4,8 @@ import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-22';
+const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
+const APP_VERSION = 'proto-2026-05-31-plan-23';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const SECTION_SAMPLE_EPSILON = 0.001;
@@ -114,6 +115,27 @@ function loadDocument() {
   } catch {
     return normalizeDocument(initialDocument);
   }
+}
+
+function loadSavedParts() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(SAVED_PARTS_KEY) || '[]');
+    if (!Array.isArray(saved)) {
+      return [];
+    }
+    return saved
+      .filter((item) => item?.id && item?.name && item?.document)
+      .map((item) => ({
+        ...item,
+        document: normalizeDocument(item.document),
+      }));
+  } catch {
+    return [];
+  }
+}
+
+function storeSavedParts(parts) {
+  localStorage.setItem(SAVED_PARTS_KEY, JSON.stringify(parts));
 }
 
 function getNextId(shapes) {
@@ -1047,6 +1069,10 @@ function App() {
   const [fullPreviewFace, setFullPreviewFace] = useState(null);
   const [jsonOpen, setJsonOpen] = useState(false);
   const [previewMenuOpen, setPreviewMenuOpen] = useState(false);
+  const [savedParts, setSavedParts] = useState(loadSavedParts);
+  const [partDialog, setPartDialog] = useState(null);
+  const [saveName, setSaveName] = useState(document.partName ?? '');
+  const [loadPartId, setLoadPartId] = useState('');
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
 
@@ -1245,6 +1271,62 @@ function App() {
     setFullPreviewFace(null);
     setJsonOpen(false);
     setPreviewMenuOpen(false);
+    setPartDialog(null);
+  }
+
+  function openSaveDialog() {
+    setSaveName(document.partName ?? '');
+    setPartDialog('save');
+    setPreviewMenuOpen(false);
+  }
+
+  function openLoadDialog() {
+    setLoadPartId(savedParts[0]?.id ?? '');
+    setPartDialog('load');
+    setPreviewMenuOpen(false);
+  }
+
+  function closePartDialog() {
+    setPartDialog(null);
+  }
+
+  function savePart() {
+    const name = saveName.trim();
+    if (!name) {
+      return;
+    }
+    const savedAt = new Date().toISOString();
+    const nextDocument = normalizeDocument({ ...document, partName: name });
+    const existing = savedParts.find((part) => part.name === name);
+    const nextPart = {
+      id: existing?.id ?? `part-${Date.now()}`,
+      name,
+      savedAt,
+      document: nextDocument,
+    };
+    const nextSavedParts = [
+      ...savedParts.filter((part) => part.id !== nextPart.id && part.name !== name),
+      nextPart,
+    ].sort((a, b) => a.name.localeCompare(b.name, 'ja'));
+    setSavedParts(nextSavedParts);
+    storeSavedParts(nextSavedParts);
+    setDocument(nextDocument);
+    setPartDialog(null);
+  }
+
+  function loadPart() {
+    const part = savedParts.find((item) => item.id === loadPartId);
+    if (!part) {
+      return;
+    }
+    const nextDocument = normalizeDocument(part.document);
+    setDocument(nextDocument);
+    setSelectedId(nextDocument.shapes[0]?.id ?? null);
+    setPreview3DSelected(false);
+    setFullPreviewFace(null);
+    setJsonOpen(false);
+    setPartDialog(null);
+    setPreviewMenuOpen(false);
   }
 
   function setActiveFace(face) {
@@ -1313,6 +1395,8 @@ function App() {
             setJsonOpen((open) => !open);
             setPreviewMenuOpen(false);
           }}
+          onSaveOpen={openSaveDialog}
+          onLoadOpen={openLoadDialog}
         />
       </section>
 
@@ -1397,6 +1481,23 @@ function App() {
 
         {jsonOpen ? <pre className="json-view">{jsonText}</pre> : null}
       </section>
+      {partDialog === 'save' ? (
+        <SavePartDialog
+          name={saveName}
+          onNameChange={setSaveName}
+          onSave={savePart}
+          onCancel={closePartDialog}
+        />
+      ) : null}
+      {partDialog === 'load' ? (
+        <LoadPartDialog
+          savedParts={savedParts}
+          selectedId={loadPartId}
+          onSelect={setLoadPartId}
+          onLoad={loadPart}
+          onCancel={closePartDialog}
+        />
+      ) : null}
     </main>
   );
 }
@@ -1425,6 +1526,8 @@ function Viewer({
   onMenuToggle,
   onReset,
   onJsonToggle,
+  onSaveOpen,
+  onLoadOpen,
 }) {
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
@@ -1457,6 +1560,8 @@ function Viewer({
           </button>
           {menuOpen ? (
             <div className="viewer-menu-popover">
+              <button type="button" onClick={onSaveOpen}>保存</button>
+              <button type="button" onClick={onLoadOpen}>呼び出し</button>
               <button type="button" onClick={onReset}>初期化</button>
               <button type="button" onClick={onJsonToggle}>JSON</button>
             </div>
@@ -1532,6 +1637,80 @@ function Viewer({
           </>
         )}
       </svg>
+    </div>
+  );
+}
+
+function SavePartDialog({ name, onNameChange, onSave, onCancel }) {
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <form
+        className="part-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="部品保存"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onSave();
+        }}
+      >
+        <header>
+          <h2>保存</h2>
+        </header>
+        <label className="dialog-field">
+          <span>名前</span>
+          <input
+            type="text"
+            value={name}
+            autoFocus
+            onChange={(event) => onNameChange(event.target.value)}
+          />
+        </label>
+        <div className="dialog-actions">
+          <button type="submit" disabled={!name.trim()}>save</button>
+          <button type="button" onClick={onCancel}>cancel</button>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function LoadPartDialog({ savedParts, selectedId, onSelect, onLoad, onCancel }) {
+  const hasSavedParts = savedParts.length > 0;
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <form
+        className="part-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="部品呼び出し"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onLoad();
+        }}
+      >
+        <header>
+          <h2>呼び出し</h2>
+        </header>
+        <label className="dialog-field">
+          <span>保存データ</span>
+          <select
+            value={selectedId}
+            disabled={!hasSavedParts}
+            onChange={(event) => onSelect(event.target.value)}
+          >
+            {hasSavedParts ? savedParts.map((part) => (
+              <option key={part.id} value={part.id}>{part.name}</option>
+            )) : (
+              <option value="">保存データなし</option>
+            )}
+          </select>
+        </label>
+        <div className="dialog-actions">
+          <button type="submit" disabled={!hasSavedParts || !selectedId}>load</button>
+          <button type="button" onClick={onCancel}>cancel</button>
+        </div>
+      </form>
     </div>
   );
 }
