@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import earcut from 'earcut';
 import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-24';
+const APP_VERSION = 'proto-2026-05-31-plan-25';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const SECTION_SAMPLE_EPSILON = 0.001;
@@ -1062,6 +1063,147 @@ function buildSurfacePreviewFaces(shapes, dimensions) {
   return [...sectionSurfaces, ...sweptSurfaces];
 }
 
+function subtractPoint(a, b) {
+  return {
+    x: a.x - b.x,
+    y: a.y - b.y,
+    z: a.z - b.z,
+  };
+}
+
+function crossProduct(a, b) {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+
+function dotProduct(a, b) {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
+}
+
+function normalizeVector(vector) {
+  const length = Math.hypot(vector.x, vector.y, vector.z);
+  if (length < 0.000001) {
+    return null;
+  }
+  return {
+    x: vector.x / length,
+    y: vector.y / length,
+    z: vector.z / length,
+  };
+}
+
+function getRingNormal(ring) {
+  const normal = ring.reduce((sum, point, index) => {
+    const next = ring[(index + 1) % ring.length];
+    return {
+      x: sum.x + (point.y - next.y) * (point.z + next.z),
+      y: sum.y + (point.z - next.z) * (point.x + next.x),
+      z: sum.z + (point.x - next.x) * (point.y + next.y),
+    };
+  }, { x: 0, y: 0, z: 0 });
+  return normalizeVector(normal) ?? { x: 0, y: 0, z: 1 };
+}
+
+function getProjectionAxes(normal) {
+  const absolute = {
+    x: Math.abs(normal.x),
+    y: Math.abs(normal.y),
+    z: Math.abs(normal.z),
+  };
+  if (absolute.x >= absolute.y && absolute.x >= absolute.z) {
+    return ['y', 'z'];
+  }
+  if (absolute.y >= absolute.x && absolute.y >= absolute.z) {
+    return ['x', 'z'];
+  }
+  return ['x', 'y'];
+}
+
+function getTriangleNormal(a, b, c) {
+  return normalizeVector(crossProduct(subtractPoint(b, a), subtractPoint(c, a)));
+}
+
+function triangulateSurface(surface) {
+  const outerRing = surface.rings[0];
+  if (!outerRing || outerRing.length < 3) {
+    return [];
+  }
+  const targetNormal = getRingNormal(outerRing);
+  const axes = getProjectionAxes(targetNormal);
+  const points = [];
+  const flat = [];
+  const holes = [];
+
+  surface.rings.forEach((ring, index) => {
+    if (ring.length < 3) {
+      return;
+    }
+    if (index > 0) {
+      holes.push(points.length);
+    }
+    ring.forEach((point) => {
+      points.push(point);
+      flat.push(point[axes[0]], point[axes[1]]);
+    });
+  });
+
+  return earcut(flat, holes, 2).reduce((triangles, pointIndex, index, indexes) => {
+    if (index % 3 !== 0) {
+      return triangles;
+    }
+    let a = points[pointIndex];
+    let b = points[indexes[index + 1]];
+    let c = points[indexes[index + 2]];
+    let normal = getTriangleNormal(a, b, c);
+    if (!normal) {
+      return triangles;
+    }
+    if (dotProduct(normal, targetNormal) < 0) {
+      [b, c] = [c, b];
+      normal = getTriangleNormal(a, b, c);
+    }
+    if (!normal) {
+      return triangles;
+    }
+    triangles.push({ normal, vertices: [a, b, c] });
+    return triangles;
+  }, []);
+}
+
+function formatStlNumber(value) {
+  if (Math.abs(value) < 0.000001) {
+    return '0';
+  }
+  return Number(value.toFixed(6)).toString();
+}
+
+function getOutputBaseName(documentData) {
+  return (documentData.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
+}
+
+function buildStlText(documentData, dimensions) {
+  if (!dimensions) {
+    return '';
+  }
+  const name = getOutputBaseName(documentData);
+  const triangles = buildSurfacePreviewFaces(documentData.shapes, dimensions).flatMap(triangulateSurface);
+  const lines = [`solid ${name}`];
+  triangles.forEach(({ normal, vertices }) => {
+    lines.push(`  facet normal ${formatStlNumber(normal.x)} ${formatStlNumber(normal.y)} ${formatStlNumber(normal.z)}`);
+    lines.push('    outer loop');
+    vertices.forEach((vertex) => {
+      lines.push(`      vertex ${formatStlNumber(vertex.x)} ${formatStlNumber(vertex.y)} ${formatStlNumber(vertex.z)}`);
+    });
+    lines.push('    endloop');
+    lines.push('  endfacet');
+  });
+  lines.push(`endsolid ${name}`);
+  return lines.join('\n');
+}
+
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -1090,6 +1232,10 @@ function App() {
   const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const showingFaceControls = !showing3DControls && !outputOpen;
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
+  const stlText = useMemo(
+    () => (previewDimensions ? buildStlText(document, previewDimensions) : ''),
+    [document, previewDimensions],
+  );
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
@@ -1384,26 +1530,26 @@ function App() {
     setPreviewMenuOpen(false);
   }
 
-  async function copyJsonOutput() {
+  async function copyTextOutput(text) {
     if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(jsonText);
+      await navigator.clipboard.writeText(text);
       return;
     }
     const textArea = window.document.createElement('textarea');
-    textArea.value = jsonText;
+    textArea.value = text;
     window.document.body.appendChild(textArea);
     textArea.select();
     window.document.execCommand('copy');
     window.document.body.removeChild(textArea);
   }
 
-  function saveJsonOutput() {
-    const fileNameBase = (document.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
-    const blob = new Blob([jsonText], { type: 'application/json' });
+  function saveTextOutput(text, extension, type) {
+    const fileNameBase = getOutputBaseName(document);
+    const blob = new Blob([text], { type });
     const url = URL.createObjectURL(blob);
     const anchor = window.document.createElement('a');
     anchor.href = url;
-    anchor.download = `${fileNameBase}.json`;
+    anchor.download = `${fileNameBase}.${extension}`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
@@ -1523,9 +1669,13 @@ function App() {
           <OutputPanel
             format={outputFormat}
             jsonText={jsonText}
+            stlText={stlText}
+            stlReady={Boolean(previewDimensions)}
             onFormatChange={setOutputFormat}
-            onCopyJson={copyJsonOutput}
-            onSaveJson={saveJsonOutput}
+            onCopyJson={() => copyTextOutput(jsonText)}
+            onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
+            onCopyStl={() => copyTextOutput(stlText)}
+            onSaveStl={() => saveTextOutput(stlText, 'stl', 'model/stl')}
           />
         ) : null}
       </section>
@@ -1763,7 +1913,17 @@ function LoadPartDialog({ savedParts, selectedId, onSelect, onLoad, onCancel }) 
   );
 }
 
-function OutputPanel({ format, jsonText, onFormatChange, onCopyJson, onSaveJson }) {
+function OutputPanel({
+  format,
+  jsonText,
+  stlText,
+  stlReady,
+  onFormatChange,
+  onCopyJson,
+  onSaveJson,
+  onCopyStl,
+  onSaveStl,
+}) {
   return (
     <section className="output-panel" aria-label="出力">
       <header className="output-header">
@@ -1792,10 +1952,28 @@ function OutputPanel({ format, jsonText, onFormatChange, onCopyJson, onSaveJson 
           </div>
           <pre className="json-view">{jsonText}</pre>
         </div>
-      ) : (
+      ) : null}
+      {format === 'stl' ? (
+        stlReady ? (
+          <div className="output-content">
+            <div className="output-actions">
+              <button type="button" onClick={onCopyStl}>コピー</button>
+              <button type="button" onClick={onSaveStl}>保存</button>
+            </div>
+            <pre className="json-view">{stlText}</pre>
+          </div>
+        ) : (
+          <div className="output-placeholder">
+            3面をロックするとSTL出力できます。
+          </div>
+        )
+      ) : null}
+      {format === 'step' ? (
         <div className="output-placeholder">
-          {format.toUpperCase()} 出力は未実装です。
+          STEP 出力は未実装です。
         </div>
+      ) : (
+        null
       )}
     </section>
   );
