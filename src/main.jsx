@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-15';
+const APP_VERSION = 'proto-2026-05-31-plan-16';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
@@ -627,7 +627,18 @@ function getShapeSurfaceRing(shape, face, dimensions, opposite = false) {
   ];
 }
 
-function buildSurfacePreviewFaces(shapes, dimensions) {
+function buildRingWalls(frontRing, backRing, className) {
+  return frontRing.map((point, index) => {
+    const nextIndex = (index + 1) % frontRing.length;
+    return {
+      className,
+      rings: [[point, frontRing[nextIndex], backRing[nextIndex], backRing[index]]],
+      edge: false,
+    };
+  });
+}
+
+function buildSurfacePreviewFaces(shapes, dimensions, includeOpposite = false) {
   const facePairs = [
     { source: 'top', className: 'iso-preview-top', oppositeClassName: 'iso-preview-bottom' },
     { source: 'front', className: 'iso-preview-front', oppositeClassName: 'iso-preview-back' },
@@ -640,22 +651,33 @@ function buildSurfacePreviewFaces(shapes, dimensions) {
     const cutShapes = faceShapes.filter((shape) => shape.mode === 'cut');
 
     return addShapes.flatMap((shape) => {
+      const frontRing = getShapeSurfaceRing(shape, source, dimensions, false);
+      const backRing = getShapeSurfaceRing(shape, source, dimensions, true);
       const cutRings = cutShapes.map((cutShape) =>
         getShapeSurfaceRing(cutShape, source, dimensions, false),
       );
       const oppositeCutRings = cutShapes.map((cutShape) =>
         getShapeSurfaceRing(cutShape, source, dimensions, true),
       );
-      return [
+      const surfaces = [
         {
           className,
-          rings: [getShapeSurfaceRing(shape, source, dimensions, false), ...cutRings],
+          rings: [frontRing, ...cutRings],
+          edge: true,
         },
-        {
-          className: oppositeClassName,
-          rings: [getShapeSurfaceRing(shape, source, dimensions, true), ...oppositeCutRings],
-        },
+        ...buildRingWalls(frontRing, backRing, `iso-preview-side ${className}`),
+        ...cutRings.flatMap((ring, index) =>
+          buildRingWalls(ring, oppositeCutRings[index], 'iso-preview-cut-side'),
+        ),
       ];
+      if (includeOpposite) {
+        surfaces.push({
+          className: oppositeClassName,
+          rings: [backRing, ...oppositeCutRings],
+          edge: false,
+        });
+      }
+      return surfaces;
     });
   });
 }
@@ -1234,7 +1256,10 @@ function IsometricPreview({
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + (expanded ? 12 : 4) };
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
   const scale = (expanded ? 96 : 48) / maxSize;
-  const surfaces = useMemo(() => buildSurfacePreviewFaces(shapes, dimensions), [shapes, dimensions]);
+  const surfaces = useMemo(
+    () => buildSurfacePreviewFaces(shapes, dimensions, !transparent),
+    [shapes, dimensions, transparent],
+  );
   const projectedSurfaces = surfaces.map((surface) => {
     const projectedRings = surface.rings.map((ring) => ring.map((point) => {
       const rotated = rotatePoint(point, rotation);
@@ -1270,7 +1295,7 @@ function IsometricPreview({
       {projectedSurfaces.map((surface, index) => (
         <g key={`${surface.className}-${index}`}>
           <path className={surface.className} d={surface.path} fillRule="evenodd" />
-          {showEdges ? (
+          {showEdges && surface.edge !== false ? (
             <path className="iso-preview-outline-edge" d={surface.path} fill="none" />
           ) : null}
         </g>

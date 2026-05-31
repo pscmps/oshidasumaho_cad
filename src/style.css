@@ -287,6 +287,14 @@ input[type="range"] {
   fill: #b6c9f7;
 }
 
+.iso-preview-side {
+  fill: #d7dde5;
+}
+
+.iso-preview-cut-side {
+  fill: #edf1f5;
+}
+
 .iso-preview.grid-on polygon,
 .iso-preview.grid-on path {
   stroke: rgba(51, 65, 85, 0.62);
@@ -322,6 +330,14 @@ input[type="range"] {
 .iso-preview.transparent .iso-preview-back,
 .iso-preview.transparent .iso-preview-bottom {
   fill: rgba(255, 255, 255, 0.015);
+}
+
+.iso-preview.transparent .iso-preview-side {
+  fill: rgba(100, 116, 139, 0.08);
+}
+
+.iso-preview.transparent .iso-preview-cut-side {
+  fill: rgba(255, 255, 255, 0.035);
 }
 
 .iso-preview.transparent.grid-on polygon,
