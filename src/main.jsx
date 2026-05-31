@@ -6,7 +6,7 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-26';
+const APP_VERSION = 'proto-2026-05-31-plan-27';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const SECTION_SAMPLE_EPSILON = 0.001;
@@ -745,6 +745,38 @@ function subtractIntervals(baseIntervals, cutIntervals) {
   });
 }
 
+function intersectIntervalSets(firstIntervals, secondIntervals) {
+  const first = normalizeIntervals(firstIntervals);
+  const second = normalizeIntervals(secondIntervals);
+  const intersections = [];
+  let firstIndex = 0;
+  let secondIndex = 0;
+
+  while (firstIndex < first.length && secondIndex < second.length) {
+    const [firstStart, firstEnd] = first[firstIndex];
+    const [secondStart, secondEnd] = second[secondIndex];
+    const start = Math.max(firstStart, secondStart);
+    const end = Math.min(firstEnd, secondEnd);
+    if (end - start > 0.001) {
+      intersections.push([start, end]);
+    }
+    if (firstEnd < secondEnd) {
+      firstIndex += 1;
+    } else {
+      secondIndex += 1;
+    }
+  }
+
+  return normalizeIntervals(intersections);
+}
+
+function clampIntervalsToDimension(intervals, dimension) {
+  return normalizeIntervals(intervals.map(([start, end]) => [
+    clampValue(start, dimension.min, dimension.max),
+    clampValue(end, dimension.min, dimension.max),
+  ]));
+}
+
 function getRingLineIntervals(ring, fixedValue, fixedAxis) {
   const variableAxis = fixedAxis === 0 ? 1 : 0;
   const intersections = [];
@@ -838,41 +870,31 @@ function getExtrudedSurfacePoint(face, u, v, t, dimensions) {
   };
 }
 
-function getExtrusionStops(face, polygonsByFace, dimensions) {
+function getExtrusionIntervals(face, u, v, polygonsByFace, dimensions) {
   if (face === 'top') {
-    return getAxisStops([
-      ...collectPlanCoordinates(polygonsByFace.front, 1),
-      ...collectPlanCoordinates(polygonsByFace.right, 1),
-    ], dimensions.height);
-  }
-  if (face === 'front') {
-    return getAxisStops([
-      ...collectPlanCoordinates(polygonsByFace.top, 1),
-      ...collectPlanCoordinates(polygonsByFace.right, 0),
-    ], dimensions.depth);
-  }
-  return getAxisStops([
-    ...collectPlanCoordinates(polygonsByFace.top, 0),
-    ...collectPlanCoordinates(polygonsByFace.front, 0),
-  ], dimensions.width);
-}
-
-function isExtrusionIntervalValid(face, u, v, t, polygonsByFace) {
-  if (face === 'top') {
-    return (
-      pointInFacePolygons(polygonsByFace.front, u, t) &&
-      pointInFacePolygons(polygonsByFace.right, v, t)
+    return clampIntervalsToDimension(
+      intersectIntervalSets(
+        getLineIntervalsForPolygons(polygonsByFace.front, u, 0),
+        getLineIntervalsForPolygons(polygonsByFace.right, v, 0),
+      ),
+      dimensions.height,
     );
   }
   if (face === 'front') {
-    return (
-      pointInFacePolygons(polygonsByFace.top, u, t) &&
-      pointInFacePolygons(polygonsByFace.right, t, v)
+    return clampIntervalsToDimension(
+      intersectIntervalSets(
+        getLineIntervalsForPolygons(polygonsByFace.top, u, 0),
+        getLineIntervalsForPolygons(polygonsByFace.right, v, 1),
+      ),
+      dimensions.depth,
     );
   }
-  return (
-    pointInFacePolygons(polygonsByFace.top, t, u) &&
-    pointInFacePolygons(polygonsByFace.front, t, v)
+  return clampIntervalsToDimension(
+    intersectIntervalSets(
+      getLineIntervalsForPolygons(polygonsByFace.top, u, 1),
+      getLineIntervalsForPolygons(polygonsByFace.front, v, 1),
+    ),
+    dimensions.width,
   );
 }
 
@@ -892,7 +914,6 @@ function getConstrainedWallClass(face, point, next, fallbackClassName, dimension
 }
 
 function buildConstrainedRingWalls(planRing, face, className, polygonsByFace, dimensions) {
-  const stops = getExtrusionStops(face, polygonsByFace, dimensions);
   return planRing.flatMap((point, index) => {
     const next = planRing[(index + 1) % planRing.length];
     if (Math.abs(point[0] - next[0]) < 0.0001 || Math.abs(point[1] - next[1]) < 0.0001) {
@@ -901,12 +922,7 @@ function buildConstrainedRingWalls(planRing, face, className, polygonsByFace, di
     const u = (point[0] + next[0]) / 2;
     const v = (point[1] + next[1]) / 2;
     const wallClassName = getConstrainedWallClass(face, point, next, className, dimensions);
-    return stops.slice(0, -1).flatMap((start, stopIndex) => {
-      const end = stops[stopIndex + 1];
-      const t = (start + end) / 2;
-      if (!isExtrusionIntervalValid(face, u, v, t, polygonsByFace)) {
-        return [];
-      }
+    return getExtrusionIntervals(face, u, v, polygonsByFace, dimensions).map(([start, end]) => {
       return {
         className: wallClassName,
         rings: [[
