@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-11';
+const APP_VERSION = 'proto-2026-05-31-plan-12';
 const SOLID_PREVIEW_STEPS = 18;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
@@ -44,6 +44,7 @@ const initialDocument = {
   viewMode: 'faces',
   rotation: DEFAULT_ROTATION,
   transparent3D: false,
+  show3DGrid: true,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -62,6 +63,7 @@ function normalizeDocument(document) {
   const viewMode = document?.viewMode === '3d' ? '3d' : 'faces';
   const rotation = normalizeRotation(document?.rotation);
   const transparent3D = Boolean(document?.transparent3D);
+  const show3DGrid = document?.show3DGrid !== false;
   const areaLocks = FACE_ORDER.reduce((locks, face) => ({
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
@@ -86,6 +88,7 @@ function normalizeDocument(document) {
     viewMode,
     rotation,
     transparent3D,
+    show3DGrid,
     shapes,
   };
 }
@@ -641,6 +644,13 @@ function App() {
     }));
   }
 
+  function setShow3DGrid(show3DGrid) {
+    setDocument((current) => ({
+      ...current,
+      show3DGrid,
+    }));
+  }
+
   function updateShape(id, patch) {
     setPreview3DSelected(false);
     setDocument((current) => applyAreaLocks({
@@ -809,6 +819,7 @@ function App() {
           previewDimensions={previewDimensions}
           rotation={document.rotation}
           transparent3D={document.transparent3D}
+          show3DGrid={document.show3DGrid}
           viewMode={document.viewMode}
           preview3DSelected={preview3DSelected}
           onSelect={selectShape}
@@ -904,10 +915,12 @@ function App() {
           <RotationControls
             rotation={document.rotation}
             transparent={document.transparent3D}
+            showGrid={document.show3DGrid}
             onChange={updateRotation}
             onReset={() => setRotation(DEFAULT_ROTATION)}
             onView={(view) => setRotation(FACE_VIEW_ROTATIONS[view])}
             onTransparencyChange={setTransparent3D}
+            onGridChange={setShow3DGrid}
           />
         ) : null}
 
@@ -927,6 +940,7 @@ function Viewer({
   previewDimensions,
   rotation,
   transparent3D,
+  show3DGrid,
   viewMode,
   preview3DSelected,
   onSelect,
@@ -977,6 +991,7 @@ function Viewer({
             shapes={document.shapes}
             rotation={rotation}
             transparent={transparent3D}
+            showGrid={show3DGrid}
             expanded
             onDoubleSelect={on3DDoubleSelect}
           />
@@ -1012,6 +1027,7 @@ function Viewer({
                 shapes={document.shapes}
                 rotation={rotation}
                 transparent={transparent3D}
+                showGrid={show3DGrid}
                 selected={preview3DSelected}
                 onSelect={on3DSelect}
                 onDoubleSelect={on3DDoubleSelect}
@@ -1098,6 +1114,7 @@ function IsometricPreview({
   shapes,
   rotation,
   transparent = false,
+  showGrid = true,
   expanded = false,
   selected = false,
   onSelect,
@@ -1129,7 +1146,7 @@ function IsometricPreview({
 
   return (
     <g
-      className={`iso-preview ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''} ${transparent ? 'transparent' : ''}`}
+      className={`iso-preview ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''} ${transparent ? 'transparent' : ''} ${showGrid ? 'grid-on' : ''}`}
       aria-label="3Dプレビュー"
       onClick={(event) => {
         event.stopPropagation();
@@ -1448,10 +1465,12 @@ function ShapeEditor({
 function RotationControls({
   rotation,
   transparent,
+  showGrid,
   onChange,
   onReset,
   onView,
   onTransparencyChange,
+  onGridChange,
 }) {
   return (
     <section className="rotation-panel" aria-label="3D rotation controls">
@@ -1500,6 +1519,14 @@ function RotationControls({
             onChange={(event) => onTransparencyChange(event.target.checked)}
           />
           <span>透過</span>
+        </label>
+        <label className="grid-toggle">
+          <input
+            type="checkbox"
+            checked={showGrid}
+            onChange={(event) => onGridChange(event.target.checked)}
+          />
+          <span>グリッド</span>
         </label>
       </div>
     </section>

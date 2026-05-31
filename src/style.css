@@ -257,50 +257,60 @@ input[type="range"] {
 }
 
 .iso-preview polygon {
-  stroke: rgba(51, 65, 85, 0.7);
-  stroke-width: 0.55;
+  stroke: none;
+  stroke-width: 0;
   stroke-linejoin: round;
 }
 
 .iso-preview-top {
-  fill: rgba(37, 99, 235, 0.18);
+  fill: #86a8f5;
 }
 
 .iso-preview-front {
-  fill: rgba(234, 179, 8, 0.26);
+  fill: #f1cc55;
 }
 
 .iso-preview-right {
-  fill: rgba(220, 38, 38, 0.2);
+  fill: #ee8a8a;
 }
 
-.iso-preview-left,
-.iso-preview-back,
+.iso-preview-left {
+  fill: #f3bbbb;
+}
+
+.iso-preview-back {
+  fill: #f7dfa0;
+}
+
 .iso-preview-bottom {
-  fill: rgba(148, 163, 184, 0.24);
+  fill: #b6c9f7;
 }
 
-.iso-preview.transparent polygon {
-  fill: rgba(255, 255, 255, 0.04);
-  stroke: rgba(23, 33, 43, 0.5);
+.iso-preview.grid-on polygon {
+  stroke: rgba(51, 65, 85, 0.62);
+  stroke-width: 0.55;
 }
 
-.iso-preview:not(.transparent) .iso-preview-top {
-  fill: rgba(37, 99, 235, 0.52);
+.iso-preview.transparent .iso-preview-top {
+  fill: rgba(37, 99, 235, 0.14);
 }
 
-.iso-preview:not(.transparent) .iso-preview-front {
-  fill: rgba(234, 179, 8, 0.58);
+.iso-preview.transparent .iso-preview-front {
+  fill: rgba(234, 179, 8, 0.16);
 }
 
-.iso-preview:not(.transparent) .iso-preview-right {
-  fill: rgba(220, 38, 38, 0.5);
+.iso-preview.transparent .iso-preview-right {
+  fill: rgba(220, 38, 38, 0.14);
 }
 
-.iso-preview:not(.transparent) .iso-preview-left,
-.iso-preview:not(.transparent) .iso-preview-back,
-.iso-preview:not(.transparent) .iso-preview-bottom {
-  fill: rgba(148, 163, 184, 0.52);
+.iso-preview.transparent .iso-preview-left,
+.iso-preview.transparent .iso-preview-back,
+.iso-preview.transparent .iso-preview-bottom {
+  fill: rgba(255, 255, 255, 0.015);
+}
+
+.iso-preview.transparent.grid-on polygon {
+  stroke: rgba(23, 33, 43, 0.42);
 }
 
 .iso-preview text {
@@ -405,7 +415,8 @@ input[type="range"] {
   grid-row: 4;
 }
 
-.transparent-toggle {
+.transparent-toggle,
+.grid-toggle {
   min-height: 32px;
   display: inline-flex;
   align-items: center;
@@ -420,10 +431,16 @@ input[type="range"] {
   padding: 0 8px;
 }
 
-.transparent-toggle input {
+.transparent-toggle input,
+.grid-toggle input {
   width: 16px;
   height: 16px;
   padding: 0;
+}
+
+.grid-toggle {
+  grid-column: 3;
+  justify-self: stretch;
 }
 
 .final-outline {
