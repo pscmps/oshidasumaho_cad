@@ -6,10 +6,11 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-28';
+const APP_VERSION = 'proto-2026-05-31-plan-29';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
-const STL_CIRCLE_MESH_SEGMENTS = CIRCLE_MESH_SEGMENTS * 10;
+const STL_VOXEL_CELL_SIZE = 0.5;
+const STL_VOXEL_MAX_AXIS_STEPS = 180;
 const SECTION_SAMPLE_EPSILON = 0.001;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
@@ -497,6 +498,24 @@ function isVoxelSolid(shapes, dimensions, x, depth, height) {
 
 function getVoxelKey(xIndex, depthIndex, heightIndex) {
   return `${xIndex}:${depthIndex}:${heightIndex}`;
+}
+
+function getVoxelIndex(xIndex, yIndex, zIndex, stepCounts) {
+  return (zIndex * stepCounts.y + yIndex) * stepCounts.x + xIndex;
+}
+
+function hasVoxelCell(cells, stepCounts, xIndex, yIndex, zIndex) {
+  if (
+    xIndex < 0 ||
+    yIndex < 0 ||
+    zIndex < 0 ||
+    xIndex >= stepCounts.x ||
+    yIndex >= stepCounts.y ||
+    zIndex >= stepCounts.z
+  ) {
+    return false;
+  }
+  return cells[getVoxelIndex(xIndex, yIndex, zIndex, stepCounts)] === 1;
 }
 
 function getVoxelCorners(x0, x1, y0, y1, z0, z1) {
@@ -1130,6 +1149,19 @@ function getTriangleNormal(a, b, c) {
   return normalizeVector(crossProduct(subtractPoint(b, a), subtractPoint(c, a)));
 }
 
+function pushTriangle(triangles, a, b, c) {
+  const normal = getTriangleNormal(a, b, c);
+  if (!normal) {
+    return;
+  }
+  triangles.push({ normal, vertices: [a, b, c] });
+}
+
+function pushQuadTriangles(triangles, corners) {
+  pushTriangle(triangles, corners[0], corners[1], corners[2]);
+  pushTriangle(triangles, corners[0], corners[2], corners[3]);
+}
+
 function triangulateSurface(surface) {
   const outerRing = surface.rings[0];
   if (!outerRing || outerRing.length < 3) {
@@ -1188,14 +1220,90 @@ function getOutputBaseName(documentData) {
   return (documentData.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
 }
 
+function getStlVoxelGrid(dimensions) {
+  const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
+  const targetCellSize = Math.max(STL_VOXEL_CELL_SIZE, maxSize / STL_VOXEL_MAX_AXIS_STEPS);
+  const stepCounts = {
+    x: Math.max(1, Math.ceil(dimensions.width.size / targetCellSize)),
+    y: Math.max(1, Math.ceil(dimensions.depth.size / targetCellSize)),
+    z: Math.max(1, Math.ceil(dimensions.height.size / targetCellSize)),
+  };
+
+  return {
+    stepCounts,
+    cell: {
+      x: dimensions.width.size / stepCounts.x,
+      y: dimensions.depth.size / stepCounts.y,
+      z: dimensions.height.size / stepCounts.z,
+    },
+  };
+}
+
+function buildVoxelStlTriangles(shapes, dimensions) {
+  const { stepCounts, cell } = getStlVoxelGrid(dimensions);
+  const cells = new Uint8Array(stepCounts.x * stepCounts.y * stepCounts.z);
+  const triangles = [];
+
+  for (let xIndex = 0; xIndex < stepCounts.x; xIndex += 1) {
+    for (let yIndex = 0; yIndex < stepCounts.y; yIndex += 1) {
+      for (let zIndex = 0; zIndex < stepCounts.z; zIndex += 1) {
+        const x = dimensions.width.min + (xIndex + 0.5) * cell.x;
+        const depth = dimensions.depth.min + (yIndex + 0.5) * cell.y;
+        const height = dimensions.height.min + (zIndex + 0.5) * cell.z;
+        if (isVoxelSolid(shapes, dimensions, x, depth, height)) {
+          cells[getVoxelIndex(xIndex, yIndex, zIndex, stepCounts)] = 1;
+        }
+      }
+    }
+  }
+
+  const faceDefinitions = [
+    { neighbor: [0, 0, 1], indexes: [4, 5, 6, 7] },
+    { neighbor: [0, -1, 0], indexes: [0, 1, 5, 4] },
+    { neighbor: [1, 0, 0], indexes: [1, 2, 6, 5] },
+    { neighbor: [0, 0, -1], indexes: [0, 3, 2, 1] },
+    { neighbor: [0, 1, 0], indexes: [3, 7, 6, 2] },
+    { neighbor: [-1, 0, 0], indexes: [0, 4, 7, 3] },
+  ];
+
+  for (let xIndex = 0; xIndex < stepCounts.x; xIndex += 1) {
+    for (let yIndex = 0; yIndex < stepCounts.y; yIndex += 1) {
+      for (let zIndex = 0; zIndex < stepCounts.z; zIndex += 1) {
+        if (!hasVoxelCell(cells, stepCounts, xIndex, yIndex, zIndex)) {
+          continue;
+        }
+
+        const x0 = xIndex * cell.x - dimensions.width.size / 2;
+        const x1 = (xIndex + 1) * cell.x - dimensions.width.size / 2;
+        const y0 = yIndex * cell.y - dimensions.depth.size / 2;
+        const y1 = (yIndex + 1) * cell.y - dimensions.depth.size / 2;
+        const z0 = zIndex * cell.z - dimensions.height.size / 2;
+        const z1 = (zIndex + 1) * cell.z - dimensions.height.size / 2;
+        const corners = getVoxelCorners(x0, x1, y0, y1, z0, z1);
+
+        faceDefinitions.forEach((definition) => {
+          const [dx, dy, dz] = definition.neighbor;
+          if (hasVoxelCell(cells, stepCounts, xIndex + dx, yIndex + dy, zIndex + dz)) {
+            return;
+          }
+          pushQuadTriangles(
+            triangles,
+            definition.indexes.map((index) => corners[index]),
+          );
+        });
+      }
+    }
+  }
+
+  return triangles;
+}
+
 function buildStlText(documentData, dimensions) {
   if (!dimensions) {
     return '';
   }
   const name = getOutputBaseName(documentData);
-  const triangles = buildSurfacePreviewFaces(documentData.shapes, dimensions, {
-    circleSegments: STL_CIRCLE_MESH_SEGMENTS,
-  }).flatMap(triangulateSurface);
+  const triangles = buildVoxelStlTriangles(documentData.shapes, dimensions);
   const lines = [`solid ${name}`];
   triangles.forEach(({ normal, vertices }) => {
     lines.push(`  facet normal ${formatStlNumber(normal.x)} ${formatStlNumber(normal.y)} ${formatStlNumber(normal.z)}`);
@@ -1984,7 +2092,7 @@ function OutputPanel({
               </button>
             </div>
             <div className="output-placeholder">
-              STLは保存時に高解像度メッシュで生成します。
+              STLは保存時にスライサー向けの閉じたメッシュで生成します。
             </div>
           </div>
         ) : (
