@@ -236,6 +236,48 @@ input[type="range"] {
   opacity: 0.38;
 }
 
+.iso-preview {
+  pointer-events: none;
+}
+
+.iso-preview rect {
+  fill: #ffffff;
+  stroke: #c8d3df;
+  stroke-width: 1;
+}
+
+.iso-preview polygon {
+  stroke: #334155;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.iso-preview-top {
+  fill: rgba(37, 99, 235, 0.18);
+}
+
+.iso-preview-front {
+  fill: rgba(234, 179, 8, 0.26);
+}
+
+.iso-preview-right {
+  fill: rgba(220, 38, 38, 0.2);
+}
+
+.iso-preview-edge {
+  fill: none;
+  stroke: #17212b;
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+}
+
+.iso-preview text {
+  text-anchor: middle;
+  fill: #506174;
+  font-size: 9px;
+  font-weight: 900;
+}
+
 .final-outline {
   fill: none;
   stroke-linejoin: round;

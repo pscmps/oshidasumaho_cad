@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-05';
+const APP_VERSION = 'proto-2026-05-31-plan-06';
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -392,6 +392,48 @@ function getShapeControlLimits(shape, constraint, locked) {
   };
 }
 
+function getLockedRangeForDimension(document, dimension) {
+  const ranges = FACE_ORDER.flatMap((face) => {
+    if (!document.areaLocks?.[face]) {
+      return [];
+    }
+    const constraint = normalizeConstraint(document.areaLockConstraints?.[face]);
+    if (!constraint) {
+      return [];
+    }
+
+    return Object.entries(FACE_AXES[face])
+      .filter(([, axisDimension]) => axisDimension === dimension)
+      .map(([axis]) => ({
+        min: axis === 'x' ? constraint.minX : constraint.minY,
+        max: axis === 'x' ? constraint.maxX : constraint.maxY,
+      }));
+  });
+
+  if (!ranges.length) {
+    return null;
+  }
+
+  const min = Math.max(...ranges.map((range) => range.min));
+  const max = Math.min(...ranges.map((range) => range.max));
+  return max > min ? { min, max, size: max - min } : null;
+}
+
+function getLockedPreviewDimensions(document) {
+  if (!FACE_ORDER.every((face) => document.areaLocks?.[face])) {
+    return null;
+  }
+
+  const width = getLockedRangeForDimension(document, 'width');
+  const depth = getLockedRangeForDimension(document, 'depth');
+  const height = getLockedRangeForDimension(document, 'height');
+  if (!width || !depth || !height) {
+    return null;
+  }
+
+  return { width, depth, height };
+}
+
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -678,6 +720,10 @@ function Viewer({
     () => getAllDisplayConstraints({ ...document, areaLocks, areaLockConstraints }, faceBounds),
     [document, areaLocks, areaLockConstraints, faceBounds],
   );
+  const previewDimensions = useMemo(
+    () => getLockedPreviewDimensions({ ...document, areaLocks, areaLockConstraints }),
+    [document, areaLocks, areaLockConstraints],
+  );
 
   return (
     <div className="viewer-frame">
@@ -726,6 +772,9 @@ function Viewer({
             onToggle={onAreaLockToggle}
           />
         ))}
+        {!previewFace && previewDimensions ? (
+          <IsometricPreview dimensions={previewDimensions} />
+        ) : null}
       </svg>
       <div className="viewer-legend">
         {FACE_ORDER.map((face) => (
@@ -776,6 +825,45 @@ function AreaLockButton({ face, full, locked, disabled, onToggle }) {
       <rect width="50" height="24" rx="5" />
       <text x="25" y="16">エリア</text>
       <text x="43" y="16">🔒</text>
+    </g>
+  );
+}
+
+function IsometricPreview({ dimensions }) {
+  const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
+  const scale = 44 / maxSize;
+  const width = dimensions.width.size * scale;
+  const depth = dimensions.depth.size * scale;
+  const height = dimensions.height.size * scale;
+  const origin = { x: 258, y: 84 };
+  const xVector = { x: width * 0.62, y: width * 0.34 };
+  const dVector = { x: -depth * 0.62, y: depth * 0.34 };
+  const hVector = { x: 0, y: -height };
+  const add = (...points) => points.reduce((sum, point) => ({
+    x: sum.x + point.x,
+    y: sum.y + point.y,
+  }), { x: 0, y: 0 });
+  const p0 = origin;
+  const p1 = add(origin, xVector);
+  const p2 = add(origin, xVector, dVector);
+  const p3 = add(origin, dVector);
+  const p4 = add(origin, hVector);
+  const p5 = add(origin, xVector, hVector);
+  const p6 = add(origin, xVector, dVector, hVector);
+  const p7 = add(origin, dVector, hVector);
+  const points = (...items) => items.map((point) => `${point.x},${point.y}`).join(' ');
+
+  return (
+    <g className="iso-preview" aria-label="3Dプレビュー">
+      <rect x="198" y="6" width="120" height="120" rx="4" />
+      <polygon className="iso-preview-top" points={points(p4, p5, p6, p7)} />
+      <polygon className="iso-preview-right" points={points(p1, p2, p6, p5)} />
+      <polygon className="iso-preview-front" points={points(p0, p1, p5, p4)} />
+      <polyline className="iso-preview-edge" points={points(p0, p1, p2, p3, p0, p4, p5, p6, p7, p4)} />
+      <line className="iso-preview-edge" x1={p1.x} y1={p1.y} x2={p5.x} y2={p5.y} />
+      <line className="iso-preview-edge" x1={p2.x} y1={p2.y} x2={p6.x} y2={p6.y} />
+      <line className="iso-preview-edge" x1={p3.x} y1={p3.y} x2={p7.x} y2={p7.y} />
+      <text x="258" y="116">3D preview</text>
     </g>
   );
 }
