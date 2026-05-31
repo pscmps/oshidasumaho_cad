@@ -6,11 +6,12 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-29';
+const APP_VERSION = 'proto-2026-05-31-plan-30';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
 const STL_VOXEL_MAX_AXIS_STEPS = 180;
+const STL_VOXEL_MAX_CELLS = 12_000_000;
 const SECTION_SAMPLE_EPSILON = 0.001;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
@@ -1220,14 +1221,27 @@ function getOutputBaseName(documentData) {
   return (documentData.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
 }
 
-function getStlVoxelGrid(dimensions) {
+function getStlVoxelGrid(dimensions, resolutionFactor = 1) {
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
-  const targetCellSize = Math.max(STL_VOXEL_CELL_SIZE, maxSize / STL_VOXEL_MAX_AXIS_STEPS);
-  const stepCounts = {
+  const requestedFactor = clampValue(Number(resolutionFactor) || 1, 1, 20);
+  let targetCellSize = Math.max(
+    STL_VOXEL_CELL_SIZE / requestedFactor,
+    maxSize / (STL_VOXEL_MAX_AXIS_STEPS * requestedFactor),
+  );
+  let stepCounts = {
     x: Math.max(1, Math.ceil(dimensions.width.size / targetCellSize)),
     y: Math.max(1, Math.ceil(dimensions.depth.size / targetCellSize)),
     z: Math.max(1, Math.ceil(dimensions.height.size / targetCellSize)),
   };
+  const estimatedCells = stepCounts.x * stepCounts.y * stepCounts.z;
+  if (estimatedCells > STL_VOXEL_MAX_CELLS) {
+    targetCellSize *= Math.cbrt(estimatedCells / STL_VOXEL_MAX_CELLS);
+    stepCounts = {
+      x: Math.max(1, Math.ceil(dimensions.width.size / targetCellSize)),
+      y: Math.max(1, Math.ceil(dimensions.depth.size / targetCellSize)),
+      z: Math.max(1, Math.ceil(dimensions.height.size / targetCellSize)),
+    };
+  }
 
   return {
     stepCounts,
@@ -1239,8 +1253,8 @@ function getStlVoxelGrid(dimensions) {
   };
 }
 
-function buildVoxelStlTriangles(shapes, dimensions) {
-  const { stepCounts, cell } = getStlVoxelGrid(dimensions);
+function buildVoxelStlTriangles(shapes, dimensions, resolutionFactor = 1) {
+  const { stepCounts, cell } = getStlVoxelGrid(dimensions, resolutionFactor);
   const cells = new Uint8Array(stepCounts.x * stepCounts.y * stepCounts.z);
   const triangles = [];
 
@@ -1298,12 +1312,12 @@ function buildVoxelStlTriangles(shapes, dimensions) {
   return triangles;
 }
 
-function buildStlText(documentData, dimensions) {
+function buildStlText(documentData, dimensions, resolutionFactor = 1) {
   if (!dimensions) {
     return '';
   }
   const name = getOutputBaseName(documentData);
-  const triangles = buildVoxelStlTriangles(documentData.shapes, dimensions);
+  const triangles = buildVoxelStlTriangles(documentData.shapes, dimensions, resolutionFactor);
   const lines = [`solid ${name}`];
   triangles.forEach(({ normal, vertices }) => {
     lines.push(`  facet normal ${formatStlNumber(normal.x)} ${formatStlNumber(normal.y)} ${formatStlNumber(normal.z)}`);
@@ -1331,6 +1345,7 @@ function App() {
   const [saveName, setSaveName] = useState(document.partName ?? '');
   const [loadPartId, setLoadPartId] = useState('');
   const [stlSaving, setStlSaving] = useState(false);
+  const [stlResolution, setStlResolution] = useState(1);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
 
@@ -1680,7 +1695,7 @@ function App() {
     setStlSaving(true);
     try {
       await new Promise((resolve) => window.requestAnimationFrame(resolve));
-      saveTextOutput(buildStlText(document, previewDimensions), 'stl', 'model/stl');
+      saveTextOutput(buildStlText(document, previewDimensions, stlResolution), 'stl', 'model/stl');
     } finally {
       setStlSaving(false);
     }
@@ -1803,9 +1818,11 @@ function App() {
             jsonText={jsonText}
             stlReady={Boolean(previewDimensions)}
             stlSaving={stlSaving}
+            stlResolution={stlResolution}
             onFormatChange={setOutputFormat}
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
+            onStlResolutionChange={setStlResolution}
             onSaveStl={saveStlOutput}
           />
         ) : null}
@@ -2049,9 +2066,11 @@ function OutputPanel({
   jsonText,
   stlReady,
   stlSaving,
+  stlResolution,
   onFormatChange,
   onCopyJson,
   onSaveJson,
+  onStlResolutionChange,
   onSaveStl,
 }) {
   return (
@@ -2091,6 +2110,19 @@ function OutputPanel({
                 {stlSaving ? '生成中...' : '保存'}
               </button>
             </div>
+            <label className="stl-resolution-control">
+              <span>分割</span>
+              <input
+                type="range"
+                min="1"
+                max="20"
+                step="1"
+                value={stlResolution}
+                disabled={stlSaving}
+                onChange={(event) => onStlResolutionChange(Number(event.target.value))}
+              />
+              <strong>{stlResolution}x</strong>
+            </label>
             <div className="output-placeholder">
               STLは保存時にスライサー向けの閉じたメッシュで生成します。
             </div>
