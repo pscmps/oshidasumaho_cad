@@ -4,7 +4,7 @@ import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-17';
+const APP_VERSION = 'proto-2026-05-31-plan-18';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
@@ -668,55 +668,190 @@ function getPlanSurfaceRing(ring, face, dimensions, opposite = false) {
   return ring.map(([u, v]) => getSurfacePoint(face, u, v, dimensions, opposite));
 }
 
-function buildRingWalls(frontRing, backRing, className) {
-  return frontRing.map((point, index) => {
-    const nextIndex = (index + 1) % frontRing.length;
-    return {
-      className,
-      rings: [[point, frontRing[nextIndex], backRing[nextIndex], backRing[index]]],
-      edge: false,
-    };
+function isPointOnSegment(point, start, end) {
+  const [x, y] = point;
+  const [x1, y1] = start;
+  const [x2, y2] = end;
+  const cross = (x - x1) * (y2 - y1) - (y - y1) * (x2 - x1);
+  if (Math.abs(cross) > 0.0001) {
+    return false;
+  }
+  return (
+    x >= Math.min(x1, x2) - 0.0001 &&
+    x <= Math.max(x1, x2) + 0.0001 &&
+    y >= Math.min(y1, y2) - 0.0001 &&
+    y <= Math.max(y1, y2) + 0.0001
+  );
+}
+
+function pointInPlanRing(point, ring) {
+  let inside = false;
+  ring.forEach((start, index) => {
+    const end = ring[(index + 1) % ring.length];
+    if (isPointOnSegment(point, start, end)) {
+      inside = true;
+      return;
+    }
+    const intersects = ((start[1] > point[1]) !== (end[1] > point[1])) &&
+      point[0] < ((end[0] - start[0]) * (point[1] - start[1])) / (end[1] - start[1]) + start[0];
+    if (intersects) {
+      inside = !inside;
+    }
+  });
+  return inside;
+}
+
+function pointInFacePolygons(polygons, u, v) {
+  return polygons.some((polygon) => {
+    if (!pointInPlanRing([u, v], polygon[0])) {
+      return false;
+    }
+    return !polygon.slice(1).some((ring) => pointInPlanRing([u, v], ring));
   });
 }
 
-function buildSurfacePreviewFaces(shapes, dimensions, includeOpposite = false) {
-  const facePairs = [
-    { source: 'top', className: 'iso-preview-top', oppositeClassName: 'iso-preview-bottom' },
-    { source: 'front', className: 'iso-preview-front', oppositeClassName: 'iso-preview-back' },
-    { source: 'right', className: 'iso-preview-right', oppositeClassName: 'iso-preview-left' },
+function collectPlanCoordinates(polygons, axis) {
+  return polygons.flatMap((polygon) =>
+    polygon.flatMap((ring) => ring.map((point) => point[axis])),
+  );
+}
+
+function getAdaptiveAxisStops(values, dimension) {
+  return [...values, dimension.min, dimension.max]
+    .filter((value) => Number.isFinite(value))
+    .map((value) => clampValue(value, dimension.min, dimension.max))
+    .sort((a, b) => a - b)
+    .filter((value, index, sorted) => index === 0 || Math.abs(value - sorted[index - 1]) > 0.001);
+}
+
+function getCenteredPoint(x, y, z, dimensions) {
+  return {
+    x: centeredCoordinate(x, dimensions.width),
+    y: centeredCoordinate(y, dimensions.depth),
+    z: centeredCoordinate(z, dimensions.height),
+  };
+}
+
+function buildCellSurface(x0, x1, y0, y1, z0, z1, side, dimensions) {
+  const definitions = {
+    top: {
+      className: 'iso-preview-top',
+      edge: true,
+      points: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]],
+    },
+    bottom: {
+      className: 'iso-preview-bottom',
+      edge: false,
+      points: [[x0, y0, z0], [x0, y1, z0], [x1, y1, z0], [x1, y0, z0]],
+    },
+    front: {
+      className: 'iso-preview-front',
+      edge: true,
+      points: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]],
+    },
+    back: {
+      className: 'iso-preview-back',
+      edge: false,
+      points: [[x0, y1, z0], [x0, y1, z1], [x1, y1, z1], [x1, y1, z0]],
+    },
+    right: {
+      className: 'iso-preview-right',
+      edge: true,
+      points: [[x1, y0, z0], [x1, y1, z0], [x1, y1, z1], [x1, y0, z1]],
+    },
+    left: {
+      className: 'iso-preview-left',
+      edge: false,
+      points: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]],
+    },
+  };
+  const definition = definitions[side];
+  return {
+    className: definition.className,
+    rings: [definition.points.map(([x, y, z]) => getCenteredPoint(x, y, z, dimensions))],
+    edge: definition.edge,
+  };
+}
+
+function buildSurfacePreviewFaces(shapes, dimensions) {
+  const polygonsByFace = Object.fromEntries(
+    FACE_ORDER.map((face) => [
+      face,
+      getFaceBooleanPolygons(shapes.filter((shape) => normalizeFace(shape.face) === face)),
+    ]),
+  );
+  if (FACE_ORDER.some((face) => !polygonsByFace[face].length)) {
+    return [];
+  }
+
+  const xStops = getAdaptiveAxisStops([
+    ...collectPlanCoordinates(polygonsByFace.top, 0),
+    ...collectPlanCoordinates(polygonsByFace.front, 0),
+  ], dimensions.width);
+  const yStops = getAdaptiveAxisStops([
+    ...collectPlanCoordinates(polygonsByFace.top, 1),
+    ...collectPlanCoordinates(polygonsByFace.right, 0),
+  ], dimensions.depth);
+  const zStops = getAdaptiveAxisStops([
+    ...collectPlanCoordinates(polygonsByFace.front, 1),
+    ...collectPlanCoordinates(polygonsByFace.right, 1),
+  ], dimensions.height);
+
+  const solidCells = new Set();
+  const key = (xIndex, yIndex, zIndex) => `${xIndex}:${yIndex}:${zIndex}`;
+  for (let xIndex = 0; xIndex < xStops.length - 1; xIndex += 1) {
+    for (let yIndex = 0; yIndex < yStops.length - 1; yIndex += 1) {
+      for (let zIndex = 0; zIndex < zStops.length - 1; zIndex += 1) {
+        const x = (xStops[xIndex] + xStops[xIndex + 1]) / 2;
+        const y = (yStops[yIndex] + yStops[yIndex + 1]) / 2;
+        const z = (zStops[zIndex] + zStops[zIndex + 1]) / 2;
+        if (
+          pointInFacePolygons(polygonsByFace.top, x, y) &&
+          pointInFacePolygons(polygonsByFace.front, x, z) &&
+          pointInFacePolygons(polygonsByFace.right, y, z)
+        ) {
+          solidCells.add(key(xIndex, yIndex, zIndex));
+        }
+      }
+    }
+  }
+
+  const neighborDefinitions = [
+    { offset: [0, 0, 1], side: 'top' },
+    { offset: [0, 0, -1], side: 'bottom' },
+    { offset: [0, -1, 0], side: 'front' },
+    { offset: [0, 1, 0], side: 'back' },
+    { offset: [1, 0, 0], side: 'right' },
+    { offset: [-1, 0, 0], side: 'left' },
   ];
-
-  return facePairs.flatMap(({ source, className, oppositeClassName }) => {
-    const faceShapes = shapes.filter((shape) => normalizeFace(shape.face) === source);
-    const polygons = getFaceBooleanPolygons(faceShapes);
-
-    return polygons.flatMap((polygon) => {
-      const frontRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, false));
-      const backRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, true));
-      const surfaces = [
-        {
-          className,
-          rings: frontRings,
-          edge: true,
-        },
-        ...frontRings.flatMap((ring, index) =>
-          buildRingWalls(
-            ring,
-            backRings[index],
-            index === 0 ? `iso-preview-side ${className}` : 'iso-preview-cut-side',
-          ),
-        ),
-      ];
-      if (includeOpposite) {
-        surfaces.push({
-          className: oppositeClassName,
-          rings: backRings,
-          edge: false,
+  const surfaces = [];
+  for (let xIndex = 0; xIndex < xStops.length - 1; xIndex += 1) {
+    for (let yIndex = 0; yIndex < yStops.length - 1; yIndex += 1) {
+      for (let zIndex = 0; zIndex < zStops.length - 1; zIndex += 1) {
+        if (!solidCells.has(key(xIndex, yIndex, zIndex))) {
+          continue;
+        }
+        neighborDefinitions.forEach(({ offset, side }) => {
+          const neighborKey = key(xIndex + offset[0], yIndex + offset[1], zIndex + offset[2]);
+          if (solidCells.has(neighborKey)) {
+            return;
+          }
+          surfaces.push(buildCellSurface(
+            xStops[xIndex],
+            xStops[xIndex + 1],
+            yStops[yIndex],
+            yStops[yIndex + 1],
+            zStops[zIndex],
+            zStops[zIndex + 1],
+            side,
+            dimensions,
+          ));
         });
       }
-      return surfaces;
-    });
-  });
+    }
+  }
+
+  return surfaces;
 }
 
 function App() {
@@ -1275,6 +1410,16 @@ function getProjectedSurfacePath(rings) {
     .join(' ');
 }
 
+function getSurfaceEdgeKey(surface, ringIndex, pointIndex) {
+  const ring = surface.rings[ringIndex];
+  const nextIndex = (pointIndex + 1) % ring.length;
+  const pointKey = (point) => `${point.x.toFixed(4)}:${point.y.toFixed(4)}:${point.z.toFixed(4)}`;
+  return [
+    surface.className,
+    [pointKey(ring[pointIndex]), pointKey(ring[nextIndex])].sort().join('|'),
+  ].join('|');
+}
+
 function IsometricPreview({
   dimensions,
   shapes,
@@ -1293,7 +1438,7 @@ function IsometricPreview({
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + (expanded ? 12 : 4) };
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
   const scale = (expanded ? 96 : 48) / maxSize;
-  const surfaces = useMemo(() => buildSurfacePreviewFaces(shapes, dimensions, true), [shapes, dimensions]);
+  const surfaces = useMemo(() => buildSurfacePreviewFaces(shapes, dimensions), [shapes, dimensions]);
   const projectedSurfaces = surfaces.map((surface) => {
     const projectedRings = surface.rings.map((ring) => ring.map((point) => {
       const rotated = rotatePoint(point, rotation);
@@ -1308,9 +1453,22 @@ function IsometricPreview({
     return {
       ...surface,
       depth,
+      projectedRings,
       path: getProjectedSurfacePath(projectedRings),
     };
   }).sort((a, b) => b.depth - a.depth);
+  const edgeUsage = new Map();
+  surfaces.forEach((surface) => {
+    if (surface.edge === false) {
+      return;
+    }
+    surface.rings.forEach((ring, ringIndex) => {
+      ring.forEach((_, pointIndex) => {
+        const key = getSurfaceEdgeKey(surface, ringIndex, pointIndex);
+        edgeUsage.set(key, (edgeUsage.get(key) || 0) + 1);
+      });
+    });
+  });
 
   return (
     <g
@@ -1329,8 +1487,24 @@ function IsometricPreview({
       {projectedSurfaces.map((surface, index) => (
         <g key={`${surface.className}-${index}`}>
           <path className={surface.className} d={surface.path} fillRule="evenodd" />
-          {showEdges && surface.edge !== false ? (
-            <path className="iso-preview-outline-edge" d={surface.path} fill="none" />
+          {showEdges && surface.edge !== false ? surface.projectedRings.flatMap((ring, ringIndex) =>
+            ring.map((point, pointIndex) => {
+              const key = getSurfaceEdgeKey(surface, ringIndex, pointIndex);
+              if (edgeUsage.get(key) !== 1) {
+                return null;
+              }
+              const next = ring[(pointIndex + 1) % ring.length];
+              return (
+                <line
+                  key={`${index}-${ringIndex}-${pointIndex}`}
+                  className="iso-preview-outline-edge"
+                  x1={point.sx}
+                  y1={point.sy}
+                  x2={next.sx}
+                  y2={next.sy}
+                />
+              );
+            }),
           ) : null}
         </g>
       ))}
