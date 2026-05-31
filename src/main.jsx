@@ -6,9 +6,10 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-27';
+const APP_VERSION = 'proto-2026-05-31-plan-28';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
+const STL_CIRCLE_MESH_SEGMENTS = CIRCLE_MESH_SEGMENTS * 10;
 const SECTION_SAMPLE_EPSILON = 0.001;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
@@ -583,10 +584,10 @@ function centeredCoordinate(value, dimension) {
   return value - dimension.min - dimension.size / 2;
 }
 
-function getShapePlanRing(shape) {
+function getShapePlanRing(shape, circleSegments = CIRCLE_MESH_SEGMENTS) {
   if (shape.type === 'circle') {
-    return Array.from({ length: CIRCLE_MESH_SEGMENTS }, (_, index) => {
-      const angle = (Math.PI * 2 * index) / CIRCLE_MESH_SEGMENTS;
+    return Array.from({ length: circleSegments }, (_, index) => {
+      const angle = (Math.PI * 2 * index) / circleSegments;
       return [
         shape.x + Math.cos(angle) * shape.r,
         shape.y + Math.sin(angle) * shape.r,
@@ -602,8 +603,8 @@ function getShapePlanRing(shape) {
   ];
 }
 
-function getShapeMultiPolygon(shape) {
-  return [[getShapePlanRing(shape)]];
+function getShapeMultiPolygon(shape, circleSegments = CIRCLE_MESH_SEGMENTS) {
+  return [[getShapePlanRing(shape, circleSegments)]];
 }
 
 function ringsEqualPoint(first, second) {
@@ -618,9 +619,9 @@ function normalizePlanRing(ring) {
   return normalized;
 }
 
-function getFaceBooleanPolygons(faceShapes) {
+function getFaceBooleanPolygons(faceShapes, circleSegments = CIRCLE_MESH_SEGMENTS) {
   const solid = faceShapes.reduce((result, shape) => {
-    const shapePolygon = getShapeMultiPolygon(shape);
+    const shapePolygon = getShapeMultiPolygon(shape, circleSegments);
     if (shape.mode === 'add') {
       return normalizeMultiPolygon(
         result.length ? polygonClipping.union(result, shapePolygon) : shapePolygon,
@@ -985,11 +986,15 @@ function buildSectionSurfaces(stops, dimension, getSectionPolygons, plane, negat
   });
 }
 
-function buildSurfacePreviewFaces(shapes, dimensions) {
+function buildSurfacePreviewFaces(shapes, dimensions, options = {}) {
+  const circleSegments = options.circleSegments ?? CIRCLE_MESH_SEGMENTS;
   const polygonsByFace = Object.fromEntries(
     FACE_ORDER.map((face) => [
       face,
-      getFaceBooleanPolygons(shapes.filter((shape) => normalizeFace(shape.face) === face)),
+      getFaceBooleanPolygons(
+        shapes.filter((shape) => normalizeFace(shape.face) === face),
+        circleSegments,
+      ),
     ]),
   );
   if (FACE_ORDER.some((face) => !polygonsByFace[face].length)) {
@@ -1188,7 +1193,9 @@ function buildStlText(documentData, dimensions) {
     return '';
   }
   const name = getOutputBaseName(documentData);
-  const triangles = buildSurfacePreviewFaces(documentData.shapes, dimensions).flatMap(triangulateSurface);
+  const triangles = buildSurfacePreviewFaces(documentData.shapes, dimensions, {
+    circleSegments: STL_CIRCLE_MESH_SEGMENTS,
+  }).flatMap(triangulateSurface);
   const lines = [`solid ${name}`];
   triangles.forEach(({ normal, vertices }) => {
     lines.push(`  facet normal ${formatStlNumber(normal.x)} ${formatStlNumber(normal.y)} ${formatStlNumber(normal.z)}`);
@@ -1215,6 +1222,7 @@ function App() {
   const [partDialog, setPartDialog] = useState(null);
   const [saveName, setSaveName] = useState(document.partName ?? '');
   const [loadPartId, setLoadPartId] = useState('');
+  const [stlSaving, setStlSaving] = useState(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
 
@@ -1231,10 +1239,6 @@ function App() {
   const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const showingFaceControls = !showing3DControls && !outputOpen;
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
-  const stlText = useMemo(
-    () => (previewDimensions ? buildStlText(document, previewDimensions) : ''),
-    [document, previewDimensions],
-  );
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
@@ -1560,6 +1564,20 @@ function App() {
     URL.revokeObjectURL(url);
   }
 
+  async function saveStlOutput() {
+    if (!previewDimensions || stlSaving) {
+      return;
+    }
+
+    setStlSaving(true);
+    try {
+      await new Promise((resolve) => window.requestAnimationFrame(resolve));
+      saveTextOutput(buildStlText(document, previewDimensions), 'stl', 'model/stl');
+    } finally {
+      setStlSaving(false);
+    }
+  }
+
   return (
     <main className="app-shell">
       <section className="viewer-panel" aria-label="CAD viewer">
@@ -1675,13 +1693,12 @@ function App() {
           <OutputPanel
             format={outputFormat}
             jsonText={jsonText}
-            stlText={stlText}
             stlReady={Boolean(previewDimensions)}
+            stlSaving={stlSaving}
             onFormatChange={setOutputFormat}
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
-            onCopyStl={() => copyTextOutput(stlText)}
-            onSaveStl={() => saveTextOutput(stlText, 'stl', 'model/stl')}
+            onSaveStl={saveStlOutput}
           />
         ) : null}
       </section>
@@ -1922,12 +1939,11 @@ function LoadPartDialog({ savedParts, selectedId, onSelect, onLoad, onCancel }) 
 function OutputPanel({
   format,
   jsonText,
-  stlText,
   stlReady,
+  stlSaving,
   onFormatChange,
   onCopyJson,
   onSaveJson,
-  onCopyStl,
   onSaveStl,
 }) {
   return (
@@ -1963,10 +1979,13 @@ function OutputPanel({
         stlReady ? (
           <div className="output-content">
             <div className="output-actions">
-              <button type="button" onClick={onCopyStl}>コピー</button>
-              <button type="button" onClick={onSaveStl}>保存</button>
+              <button type="button" onClick={onSaveStl} disabled={stlSaving}>
+                {stlSaving ? '生成中...' : '保存'}
+              </button>
             </div>
-            <pre className="json-view">{stlText}</pre>
+            <div className="output-placeholder">
+              STLは保存時に高解像度メッシュで生成します。
+            </div>
           </div>
         ) : (
           <div className="output-placeholder">
