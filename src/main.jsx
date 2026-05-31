@@ -10,6 +10,11 @@ const FACE_LABELS = {
   front: '正面',
   right: '右側面',
 };
+const FACE_AXES = {
+  top: { x: 'width', y: 'depth' },
+  front: { x: 'width', y: 'height' },
+  right: { x: 'depth', y: 'height' },
+};
 const DEFAULT_AREA_LOCKS = {
   top: false,
   front: false,
@@ -133,7 +138,18 @@ function getAllFaceBounds(shapes) {
 }
 
 function getFaceConstraint(face, faceBounds) {
-  const constraint = {
+  const sourceBoundsByFace = Object.fromEntries(
+    FACE_ORDER.map((sourceFace) => [
+      sourceFace,
+      sourceFace === face ? null : faceBounds[sourceFace],
+    ]),
+  );
+
+  return getProjectedConstraint(face, sourceBoundsByFace);
+}
+
+function createEmptyConstraint() {
+  return {
     minX: 0,
     maxX: 120,
     minY: 0,
@@ -141,34 +157,55 @@ function getFaceConstraint(face, faceBounds) {
     constrainedX: false,
     constrainedY: false,
   };
-  const topBounds = faceBounds.top;
-  const frontBounds = faceBounds.front;
-  const rightBounds = faceBounds.right;
+}
 
-  if (face === 'top' && frontBounds) {
-    constraint.minX = frontBounds.minX;
-    constraint.maxX = frontBounds.maxX;
-    constraint.constrainedX = true;
-  }
-  if (face === 'front') {
-    if (topBounds) {
-      constraint.minX = topBounds.minX;
-      constraint.maxX = topBounds.maxX;
-      constraint.constrainedX = true;
+function getProjectedConstraint(targetFace, sourceBoundsByFace) {
+  const constraint = createEmptyConstraint();
+
+  FACE_ORDER.forEach((sourceFace) => {
+    const sourceBounds = sourceBoundsByFace[sourceFace];
+    if (!sourceBounds) {
+      return;
     }
-    if (rightBounds) {
-      constraint.minY = rightBounds.minY;
-      constraint.maxY = rightBounds.maxY;
-      constraint.constrainedY = true;
-    }
-  }
-  if (face === 'right' && frontBounds) {
-    constraint.minY = frontBounds.minY;
-    constraint.maxY = frontBounds.maxY;
-    constraint.constrainedY = true;
-  }
+
+    applyProjectedAxisConstraint(constraint, targetFace, sourceFace, 'x', sourceBounds);
+    applyProjectedAxisConstraint(constraint, targetFace, sourceFace, 'y', sourceBounds);
+  });
 
   return constraint;
+}
+
+function applyProjectedAxisConstraint(constraint, targetFace, sourceFace, sourceAxis, sourceBounds) {
+  const sourceDimension = FACE_AXES[sourceFace][sourceAxis];
+  const targetAxis = Object.entries(FACE_AXES[targetFace])
+    .find(([, dimension]) => dimension === sourceDimension)?.[0];
+  if (!targetAxis) {
+    return;
+  }
+
+  const min = sourceAxis === 'x' ? sourceBounds.minX : sourceBounds.minY;
+  const max = sourceAxis === 'x' ? sourceBounds.maxX : sourceBounds.maxY;
+  if (targetAxis === 'x') {
+    constraint.minX = Math.max(constraint.minX, min);
+    constraint.maxX = Math.min(constraint.maxX, max);
+    constraint.constrainedX = true;
+  } else {
+    constraint.minY = Math.max(constraint.minY, min);
+    constraint.maxY = Math.min(constraint.maxY, max);
+    constraint.constrainedY = true;
+  }
+}
+
+function getLockConstraintForBounds(bounds) {
+  if (!bounds) {
+    return null;
+  }
+
+  return {
+    ...bounds,
+    constrainedX: true,
+    constrainedY: true,
+  };
 }
 
 function normalizeConstraint(constraint) {
@@ -188,17 +225,42 @@ function normalizeConstraint(constraint) {
 
 function getDocumentFaceConstraint(document, face, faceBounds = getAllFaceBounds(document.shapes)) {
   const normalizedFace = normalizeFace(face);
-  const savedConstraint = normalizeConstraint(document.areaLockConstraints?.[normalizedFace]);
-  if (document.areaLocks?.[normalizedFace] && savedConstraint) {
-    return savedConstraint;
-  }
+  const sourceBoundsByFace = Object.fromEntries(
+    FACE_ORDER.map((sourceFace) => {
+      const savedConstraint = normalizeConstraint(document.areaLockConstraints?.[sourceFace]);
+      if (document.areaLocks?.[sourceFace] && savedConstraint) {
+        return [sourceFace, savedConstraint];
+      }
+      return [sourceFace, sourceFace === normalizedFace ? null : faceBounds[sourceFace]];
+    }),
+  );
 
-  return getFaceConstraint(normalizedFace, faceBounds);
+  return getProjectedConstraint(normalizedFace, sourceBoundsByFace);
+}
+
+function getLockedFaceConstraint(document, face) {
+  const normalizedFace = normalizeFace(face);
+  const sourceBoundsByFace = Object.fromEntries(
+    FACE_ORDER.map((sourceFace) => [
+      sourceFace,
+      document.areaLocks?.[sourceFace]
+        ? normalizeConstraint(document.areaLockConstraints?.[sourceFace])
+        : null,
+    ]),
+  );
+
+  return getProjectedConstraint(normalizedFace, sourceBoundsByFace);
 }
 
 function getAllDisplayConstraints(document, faceBounds = getAllFaceBounds(document.shapes)) {
   return Object.fromEntries(
     FACE_ORDER.map((face) => [face, getDocumentFaceConstraint(document, face, faceBounds)]),
+  );
+}
+
+function getAllLockedConstraints(document) {
+  return Object.fromEntries(
+    FACE_ORDER.map((face) => [face, getLockedFaceConstraint(document, face)]),
   );
 }
 
@@ -219,15 +281,31 @@ function isShapeWithinConstraint(shape, constraint) {
   );
 }
 
-function canLockFace(shapes, face, faceBounds = getAllFaceBounds(shapes)) {
-  const constraint = getFaceConstraint(face, faceBounds);
-  if (!hasAreaConstraint(constraint)) {
+function canLockFace(document, face, faceBounds = getAllFaceBounds(document.shapes)) {
+  const normalizedFace = normalizeFace(face);
+  const sourceConstraint = getLockConstraintForBounds(faceBounds[normalizedFace]);
+  if (!sourceConstraint) {
     return false;
   }
 
-  return shapes
-    .filter((shape) => normalizeFace(shape.face) === face)
-    .every((shape) => isShapeWithinConstraint(shape, constraint));
+  const proposedDocument = {
+    ...document,
+    areaLocks: {
+      ...DEFAULT_AREA_LOCKS,
+      ...document.areaLocks,
+      [normalizedFace]: true,
+    },
+    areaLockConstraints: {
+      ...DEFAULT_AREA_LOCK_CONSTRAINTS,
+      ...document.areaLockConstraints,
+      [normalizedFace]: sourceConstraint,
+    },
+  };
+  const lockedConstraints = getAllLockedConstraints(proposedDocument);
+
+  return document.shapes.every((shape) =>
+    isShapeWithinConstraint(shape, lockedConstraints[normalizeFace(shape.face)]),
+  );
 }
 
 function clampValue(value, min, max) {
@@ -269,15 +347,16 @@ function constrainShape(shape, constraint) {
 }
 
 function applyAreaLocks(document) {
-  const faceBounds = getAllFaceBounds(document.shapes);
+  const lockedConstraints = getAllLockedConstraints(document);
   return {
     ...document,
     shapes: document.shapes.map((shape) => {
       const face = normalizeFace(shape.face);
-      if (!document.areaLocks?.[face]) {
+      const constraint = lockedConstraints[face];
+      if (!hasAreaConstraint(constraint)) {
         return shape;
       }
-      return constrainShape(shape, getDocumentFaceConstraint(document, face, faceBounds));
+      return constrainShape(shape, constraint);
     }),
   };
 }
@@ -325,13 +404,10 @@ function App() {
   const activeFace = normalizeFace(document.activeFace);
   const activeShapes = document.shapes.filter((shape) => normalizeFace(shape.face) === activeFace);
   const faceBounds = useMemo(() => getAllFaceBounds(document.shapes), [document.shapes]);
-  const faceConstraints = useMemo(
-    () => getAllDisplayConstraints(document, faceBounds),
-    [document, faceBounds],
-  );
+  const lockedConstraints = useMemo(() => getAllLockedConstraints(document), [document]);
   const areaLockAvailability = useMemo(
-    () => Object.fromEntries(FACE_ORDER.map((face) => [face, canLockFace(document.shapes, face, faceBounds)])),
-    [document.shapes, faceBounds],
+    () => Object.fromEntries(FACE_ORDER.map((face) => [face, canLockFace(document, face, faceBounds)])),
+    [document, faceBounds],
   );
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
 
@@ -368,10 +444,11 @@ function App() {
         }
         const nextShape = { ...shape, ...patch };
         const face = normalizeFace(nextShape.face);
-        if (!current.areaLocks?.[face]) {
+        const constraint = getLockedFaceConstraint(current, face);
+        if (!hasAreaConstraint(constraint)) {
           return nextShape;
         }
-        return constrainShape(nextShape, getDocumentFaceConstraint(current, face, getAllFaceBounds(current.shapes)));
+        return constrainShape(nextShape, constraint);
       }),
     }));
   }
@@ -384,8 +461,9 @@ function App() {
         type === 'rect'
           ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add', face }
           : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face };
-      const shape = current.areaLocks?.[face]
-        ? constrainShape(shapeBase, getDocumentFaceConstraint(current, face, getAllFaceBounds(current.shapes)))
+      const constraint = getLockedFaceConstraint(current, face);
+      const shape = hasAreaConstraint(constraint)
+        ? constrainShape(shapeBase, constraint)
         : shapeBase;
       setSelectedId(id);
       return applyAreaLocks({ ...current, shapes: [...current.shapes, shape] });
@@ -446,8 +524,8 @@ function App() {
         ...current.areaLockConstraints,
       };
       const nextLockValue = !currentLocks[normalizedFace];
-      const nextConstraint = getFaceConstraint(normalizedFace, getAllFaceBounds(current.shapes));
-      if (nextLockValue && !canLockFace(current.shapes, normalizedFace)) {
+      const nextConstraint = getLockConstraintForBounds(getFaceBounds(current.shapes, normalizedFace));
+      if (nextLockValue && !canLockFace(current, normalizedFace)) {
         return current;
       }
 
@@ -551,8 +629,8 @@ function App() {
               index={index}
               total={activeShapes.length}
               selected={shape.id === selectedId}
-              locked={Boolean(document.areaLocks?.[normalizeFace(shape.face)])}
-              constraint={faceConstraints[normalizeFace(shape.face)]}
+              locked={hasAreaConstraint(lockedConstraints[normalizeFace(shape.face)])}
+              constraint={lockedConstraints[normalizeFace(shape.face)]}
               onSelect={() => selectShape(shape.id)}
               onChange={(patch) => updateShape(shape.id, patch)}
               onMove={moveShape}
