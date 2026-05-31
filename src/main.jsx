@@ -6,7 +6,7 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-32';
+const APP_VERSION = 'proto-2026-06-01-step-brep-01';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -1536,6 +1536,17 @@ function createStepWriter() {
   };
 }
 
+function formatStepRefList(refs, chunkSize = 48) {
+  if (refs.length <= chunkSize) {
+    return `(${refs.join(',')})`;
+  }
+  const chunks = [];
+  for (let index = 0; index < refs.length; index += chunkSize) {
+    chunks.push(refs.slice(index, index + chunkSize).join(','));
+  }
+  return `(\n${chunks.join(',\n')}\n)`;
+}
+
 function buildStepText(documentData, dimensions, resolutionFactor = 1) {
   if (!dimensions) {
     return '';
@@ -1545,7 +1556,8 @@ function buildStepText(documentData, dimensions, resolutionFactor = 1) {
   const safeName = escapeStepString(name);
   const triangles = buildMarchingStlTriangles(documentData.shapes, dimensions, resolutionFactor);
   const writer = createStepWriter();
-  const pointIds = new Map();
+  const verticesByPoint = new Map();
+  const edgesByKey = new Map();
   const faceIds = [];
 
   const applicationContext = writer.add("APPLICATION_CONTEXT('automotive design')");
@@ -1566,38 +1578,88 @@ function buildStepText(documentData, dimensions, resolutionFactor = 1) {
   const uncertainty = writer.add(`UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0001),${lengthUnit},'distance_accuracy_value','')`);
   const context = writer.add(`(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((${uncertainty})) GLOBAL_UNIT_ASSIGNED_CONTEXT((${lengthUnit},${angleUnit},${solidAngleUnit})) REPRESENTATION_CONTEXT('',''))`);
 
-  const getPointId = (point) => {
+  const getVertexData = (point) => {
     const key = `${formatStepNumber(point.x)}:${formatStepNumber(point.y)}:${formatStepNumber(point.z)}`;
-    const existingId = pointIds.get(key);
-    if (existingId) {
-      return existingId;
+    const existingData = verticesByPoint.get(key);
+    if (existingData) {
+      return existingData;
     }
     const pointId = writer.add(
       `CARTESIAN_POINT('',(${formatStepNumber(point.x)},${formatStepNumber(point.y)},${formatStepNumber(point.z)}))`,
     );
-    pointIds.set(key, pointId);
-    return pointId;
+    const vertexId = writer.add(`VERTEX_POINT('',${pointId})`);
+    const data = { key, point, pointId, vertexId };
+    verticesByPoint.set(key, data);
+    return data;
+  };
+
+  const getDirectionId = (vector) =>
+    writer.add(`DIRECTION('',(${formatStepNumber(vector.x)},${formatStepNumber(vector.y)},${formatStepNumber(vector.z)}))`);
+
+  const getEdgeData = (start, end) => {
+    const [first, second] = [start, end].sort((a, b) => a.key.localeCompare(b.key));
+    const edgeKey = `${first.key}|${second.key}`;
+    const existingEdge = edgesByKey.get(edgeKey);
+    if (existingEdge) {
+      return existingEdge;
+    }
+    const direction = normalizeVector(subtractPoint(second.point, first.point));
+    if (!direction) {
+      return null;
+    }
+    const directionId = getDirectionId(direction);
+    const vectorId = writer.add(`VECTOR('',${directionId},1.)`);
+    const lineId = writer.add(`LINE('',${first.pointId},${vectorId})`);
+    const edgeId = writer.add(`EDGE_CURVE('',${first.vertexId},${second.vertexId},${lineId},.T.)`);
+    const data = { key: edgeKey, startKey: first.key, endKey: second.key, edgeId };
+    edgesByKey.set(edgeKey, data);
+    return data;
   };
 
   triangles.forEach(({ vertices }) => {
-    const pointRefs = vertices.map(getPointId);
-    if (new Set(pointRefs).size < 3) {
+    const vertexData = vertices.map(getVertexData);
+    if (new Set(vertexData.map((vertex) => vertex.key)).size < 3) {
       return;
     }
-    const loop = writer.add(`POLY_LOOP('',(${pointRefs.join(',')}))`);
+    const normal = getTriangleNormal(vertices[0], vertices[1], vertices[2]);
+    const xAxis = normalizeVector(subtractPoint(vertices[1], vertices[0]));
+    if (!normal || !xAxis) {
+      return;
+    }
+    const orientedEdges = [
+      [vertexData[0], vertexData[1]],
+      [vertexData[1], vertexData[2]],
+      [vertexData[2], vertexData[0]],
+    ].map(([start, end]) => {
+      const edge = getEdgeData(start, end);
+      if (!edge) {
+        return null;
+      }
+      const orientation = edge.startKey === start.key && edge.endKey === end.key ? '.T.' : '.F.';
+      return writer.add(`ORIENTED_EDGE('',*,*,${edge.edgeId},${orientation})`);
+    });
+    if (orientedEdges.some((edge) => !edge)) {
+      return;
+    }
+
+    const loop = writer.add(`EDGE_LOOP('',${formatStepRefList(orientedEdges, 12)})`);
     const bound = writer.add(`FACE_OUTER_BOUND('',${loop},.T.)`);
-    faceIds.push(writer.add(`FACE('',(${bound}),.T.)`));
+    const normalDirection = getDirectionId(normal);
+    const xDirection = getDirectionId(xAxis);
+    const faceAxis = writer.add(`AXIS2_PLACEMENT_3D('',${vertexData[0].pointId},${normalDirection},${xDirection})`);
+    const plane = writer.add(`PLANE('',${faceAxis})`);
+    faceIds.push(writer.add(`ADVANCED_FACE('',(${bound}),${plane},.T.)`));
   });
 
-  const shell = writer.add(`CLOSED_SHELL('',(${faceIds.join(',')}))`);
-  const brep = writer.add(`FACETED_BREP('${safeName}',${shell})`);
+  const shell = writer.add(`CLOSED_SHELL('',${formatStepRefList(faceIds)})`);
+  const brep = writer.add(`MANIFOLD_SOLID_BREP('${safeName}',${shell})`);
   const representation = writer.add(`ADVANCED_BREP_SHAPE_REPRESENTATION('${safeName}',(${axisPlacement},${brep}),${context})`);
   writer.add(`SHAPE_DEFINITION_REPRESENTATION(${productDefinitionShape},${representation})`);
 
   return [
     'ISO-10303-21;',
     'HEADER;',
-    "FILE_DESCRIPTION(('Faceted STEP generated by Oshida Smartphone CAD'),'2;1');",
+    "FILE_DESCRIPTION(('Advanced B-rep STEP generated by Oshida Smartphone CAD'),'2;1');",
     `FILE_NAME('${safeName}.step','${new Date().toISOString()}',('Oshida Smartphone CAD'),(''),'Oshida Smartphone CAD','Oshida Smartphone CAD','');`,
     "FILE_SCHEMA(('AUTOMOTIVE_DESIGN_CC2'));",
     'ENDSEC;',
@@ -2450,7 +2512,7 @@ function OutputPanel({
             </div>
             {meshResolutionControl}
             <div className="output-placeholder">
-              STEPは保存時にfaceted B-repとして生成します。
+              STEPは保存時にadvanced B-repとして生成します。
             </div>
           </div>
         ) : (
