@@ -253,8 +253,8 @@ input[type="range"] {
 }
 
 .iso-preview polygon {
-  stroke: #334155;
-  stroke-width: 1.2;
+  stroke: rgba(51, 65, 85, 0.7);
+  stroke-width: 0.55;
   stroke-linejoin: round;
 }
 
@@ -270,11 +270,10 @@ input[type="range"] {
   fill: rgba(220, 38, 38, 0.2);
 }
 
-.iso-preview-edge {
-  fill: none;
-  stroke: #17212b;
-  stroke-width: 1.4;
-  stroke-linejoin: round;
+.iso-preview-left,
+.iso-preview-back,
+.iso-preview-bottom {
+  fill: rgba(148, 163, 184, 0.24);
 }
 
 .iso-preview text {

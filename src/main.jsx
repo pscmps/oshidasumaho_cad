@@ -3,7 +3,8 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-09';
+const APP_VERSION = 'proto-2026-05-31-plan-10';
+const SOLID_PREVIEW_STEPS = 18;
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -448,6 +449,117 @@ function getLockedPreviewDimensions(document) {
   return { width, depth, height };
 }
 
+function pointInShape(shape, x, y) {
+  if (shape.type === 'circle') {
+    return ((x - shape.x) ** 2) + ((y - shape.y) ** 2) <= shape.r ** 2;
+  }
+
+  return x >= shape.x && x <= shape.x + shape.w && y >= shape.y && y <= shape.y + shape.h;
+}
+
+function pointInFaceSolid(shapes, face, x, y) {
+  const faceShapes = shapes.filter((shape) => normalizeFace(shape.face) === face);
+  const added = faceShapes.some((shape) => shape.mode === 'add' && pointInShape(shape, x, y));
+  if (!added) {
+    return false;
+  }
+
+  return !faceShapes.some((shape) => shape.mode === 'cut' && pointInShape(shape, x, y));
+}
+
+function isVoxelSolid(shapes, dimensions, x, depth, height) {
+  return (
+    pointInFaceSolid(shapes, 'top', x, depth) &&
+    pointInFaceSolid(shapes, 'front', x, height) &&
+    pointInFaceSolid(shapes, 'right', depth, height)
+  );
+}
+
+function getVoxelKey(xIndex, depthIndex, heightIndex) {
+  return `${xIndex}:${depthIndex}:${heightIndex}`;
+}
+
+function getVoxelCorners(x0, x1, y0, y1, z0, z1) {
+  return [
+    { x: x0, y: y0, z: z0 },
+    { x: x1, y: y0, z: z0 },
+    { x: x1, y: y1, z: z0 },
+    { x: x0, y: y1, z: z0 },
+    { x: x0, y: y0, z: z1 },
+    { x: x1, y: y0, z: z1 },
+    { x: x1, y: y1, z: z1 },
+    { x: x0, y: y1, z: z1 },
+  ];
+}
+
+function buildSolidPreviewFaces(shapes, dimensions) {
+  const stepCounts = {
+    x: SOLID_PREVIEW_STEPS,
+    y: SOLID_PREVIEW_STEPS,
+    z: SOLID_PREVIEW_STEPS,
+  };
+  const cell = {
+    x: dimensions.width.size / stepCounts.x,
+    y: dimensions.depth.size / stepCounts.y,
+    z: dimensions.height.size / stepCounts.z,
+  };
+  const solidCells = new Set();
+
+  for (let xIndex = 0; xIndex < stepCounts.x; xIndex += 1) {
+    for (let yIndex = 0; yIndex < stepCounts.y; yIndex += 1) {
+      for (let zIndex = 0; zIndex < stepCounts.z; zIndex += 1) {
+        const x = dimensions.width.min + (xIndex + 0.5) * cell.x;
+        const depth = dimensions.depth.min + (yIndex + 0.5) * cell.y;
+        const height = dimensions.height.min + (zIndex + 0.5) * cell.z;
+        if (isVoxelSolid(shapes, dimensions, x, depth, height)) {
+          solidCells.add(getVoxelKey(xIndex, yIndex, zIndex));
+        }
+      }
+    }
+  }
+
+  const faceDefinitions = [
+    { neighbor: [0, 0, 1], className: 'iso-preview-top', indexes: [4, 5, 6, 7] },
+    { neighbor: [0, -1, 0], className: 'iso-preview-front', indexes: [0, 1, 5, 4] },
+    { neighbor: [1, 0, 0], className: 'iso-preview-right', indexes: [1, 2, 6, 5] },
+    { neighbor: [0, 0, -1], className: 'iso-preview-bottom', indexes: [0, 3, 2, 1] },
+    { neighbor: [0, 1, 0], className: 'iso-preview-back', indexes: [3, 2, 6, 7] },
+    { neighbor: [-1, 0, 0], className: 'iso-preview-left', indexes: [0, 3, 7, 4] },
+  ];
+  const faces = [];
+
+  for (let xIndex = 0; xIndex < stepCounts.x; xIndex += 1) {
+    for (let yIndex = 0; yIndex < stepCounts.y; yIndex += 1) {
+      for (let zIndex = 0; zIndex < stepCounts.z; zIndex += 1) {
+        if (!solidCells.has(getVoxelKey(xIndex, yIndex, zIndex))) {
+          continue;
+        }
+
+        const x0 = xIndex * cell.x - dimensions.width.size / 2;
+        const x1 = (xIndex + 1) * cell.x - dimensions.width.size / 2;
+        const y0 = yIndex * cell.y - dimensions.depth.size / 2;
+        const y1 = (yIndex + 1) * cell.y - dimensions.depth.size / 2;
+        const z0 = zIndex * cell.z - dimensions.height.size / 2;
+        const z1 = (zIndex + 1) * cell.z - dimensions.height.size / 2;
+        const corners = getVoxelCorners(x0, x1, y0, y1, z0, z1);
+
+        faceDefinitions.forEach((definition) => {
+          const [dx, dy, dz] = definition.neighbor;
+          const neighborKey = getVoxelKey(xIndex + dx, yIndex + dy, zIndex + dz);
+          if (!solidCells.has(neighborKey)) {
+            faces.push({
+              className: definition.className,
+              corners: definition.indexes.map((index) => corners[index]),
+            });
+          }
+        });
+      }
+    }
+  }
+
+  return faces;
+}
+
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -827,6 +939,7 @@ function Viewer({
         {is3DMode ? (
           <IsometricPreview
             dimensions={previewDimensions}
+            shapes={document.shapes}
             rotation={rotation}
             expanded
             onDoubleSelect={on3DDoubleSelect}
@@ -860,6 +973,7 @@ function Viewer({
             {!previewFace && previewDimensions ? (
               <IsometricPreview
                 dimensions={previewDimensions}
+                shapes={document.shapes}
                 rotation={rotation}
                 selected={preview3DSelected}
                 onSelect={on3DSelect}
@@ -944,6 +1058,7 @@ function rotatePoint(point, rotation) {
 
 function IsometricPreview({
   dimensions,
+  shapes,
   rotation,
   expanded = false,
   selected = false,
@@ -956,36 +1071,23 @@ function IsometricPreview({
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + (expanded ? 12 : 4) };
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
   const scale = (expanded ? 96 : 48) / maxSize;
-  const width = dimensions.width.size;
-  const depth = dimensions.depth.size;
-  const height = dimensions.height.size;
-  const vertices = [
-    { x: -width / 2, y: -depth / 2, z: -height / 2 },
-    { x: width / 2, y: -depth / 2, z: -height / 2 },
-    { x: width / 2, y: depth / 2, z: -height / 2 },
-    { x: -width / 2, y: depth / 2, z: -height / 2 },
-    { x: -width / 2, y: -depth / 2, z: height / 2 },
-    { x: width / 2, y: -depth / 2, z: height / 2 },
-    { x: width / 2, y: depth / 2, z: height / 2 },
-    { x: -width / 2, y: depth / 2, z: height / 2 },
-  ].map((point) => {
-    const rotated = rotatePoint(point, rotation);
+  const faces = useMemo(() => buildSolidPreviewFaces(shapes, dimensions), [shapes, dimensions]);
+  const projectedFaces = faces.map((face) => {
+    const points = face.corners.map((point) => {
+      const rotated = rotatePoint(point, rotation);
+      return {
+        ...rotated,
+        sx: center.x + rotated.x * scale,
+        sy: center.y - rotated.z * scale,
+      };
+    });
+    const depth = points.reduce((sum, point) => sum + point.y, 0) / points.length;
     return {
-      ...rotated,
-      sx: center.x + rotated.x * scale,
-      sy: center.y - rotated.z * scale,
+      ...face,
+      depth,
+      points: points.map((point) => `${point.sx},${point.sy}`).join(' '),
     };
-  });
-  const faces = [
-    { className: 'iso-preview-top', indexes: [4, 5, 6, 7] },
-    { className: 'iso-preview-right', indexes: [1, 2, 6, 5] },
-    { className: 'iso-preview-front', indexes: [0, 1, 5, 4] },
-  ].sort((a, b) => {
-    const aDepth = a.indexes.reduce((sum, index) => sum + vertices[index].y, 0) / a.indexes.length;
-    const bDepth = b.indexes.reduce((sum, index) => sum + vertices[index].y, 0) / b.indexes.length;
-    return bDepth - aDepth;
-  });
-  const points = (indexes) => indexes.map((index) => `${vertices[index].sx},${vertices[index].sy}`).join(' ');
+  }).sort((a, b) => b.depth - a.depth);
 
   return (
     <g
@@ -1001,13 +1103,9 @@ function IsometricPreview({
       }}
     >
       <rect x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
-      {faces.map((face) => (
-        <polygon key={face.className} className={face.className} points={points(face.indexes)} />
+      {projectedFaces.map((face, index) => (
+        <polygon key={`${face.className}-${index}`} className={face.className} points={face.points} />
       ))}
-      <polyline className="iso-preview-edge" points={points([0, 1, 2, 3, 0, 4, 5, 6, 7, 4])} />
-      <line className="iso-preview-edge" x1={vertices[1].sx} y1={vertices[1].sy} x2={vertices[5].sx} y2={vertices[5].sy} />
-      <line className="iso-preview-edge" x1={vertices[2].sx} y1={vertices[2].sy} x2={vertices[6].sx} y2={vertices[6].sy} />
-      <line className="iso-preview-edge" x1={vertices[3].sx} y1={vertices[3].sy} x2={vertices[7].sx} y2={vertices[7].sy} />
       <text x={box.x + box.width / 2} y={box.labelY}>3D preview</text>
     </g>
   );
