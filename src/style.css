@@ -99,8 +99,49 @@ input[type="range"] {
   font-weight: 700;
 }
 
-.viewer-toolbar span:last-child {
-  margin-left: auto;
+.viewer-toolbar {
+  justify-content: space-between;
+  position: relative;
+}
+
+.viewer-toolbar-info {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  min-width: 0;
+}
+
+.viewer-menu {
+  position: relative;
+}
+
+.viewer-menu-button {
+  min-width: 32px;
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.viewer-menu-popover {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  display: grid;
+  gap: 4px;
+  min-width: 104px;
+  padding: 6px;
+  border: 1px solid #c9d3df;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+}
+
+.viewer-menu-popover button {
+  min-height: 30px;
+  padding: 0 10px;
+  justify-content: flex-start;
 }
 
 .final-face.face-top,
@@ -579,7 +620,7 @@ h1 {
 
 .document-controls {
   display: grid;
-  grid-template-columns: auto minmax(120px, 1fr) auto auto;
+  grid-template-columns: minmax(120px, max-content);
   gap: 8px;
   align-items: end;
   margin-bottom: 12px;

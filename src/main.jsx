@@ -4,7 +4,7 @@ import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-20';
+const APP_VERSION = 'proto-2026-05-31-plan-21';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const SECTION_SAMPLE_EPSILON = 0.001;
@@ -1046,6 +1046,7 @@ function App() {
   const [preview3DSelected, setPreview3DSelected] = useState(false);
   const [fullPreviewFace, setFullPreviewFace] = useState(null);
   const [jsonOpen, setJsonOpen] = useState(false);
+  const [previewMenuOpen, setPreviewMenuOpen] = useState(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
 
@@ -1240,6 +1241,10 @@ function App() {
   function resetDocument() {
     setDocument(initialDocument);
     setSelectedId(initialDocument.shapes[0].id);
+    setPreview3DSelected(false);
+    setFullPreviewFace(null);
+    setJsonOpen(false);
+    setPreviewMenuOpen(false);
   }
 
   function setActiveFace(face) {
@@ -1295,28 +1300,35 @@ function App() {
           show3DEdges={document.show3DEdges}
           viewMode={document.viewMode}
           preview3DSelected={preview3DSelected}
+          menuOpen={previewMenuOpen}
           onSelect={selectShape}
           onFaceSelect={setActiveFace}
           onFaceDoubleSelect={toggleFullPreview}
           onAreaLockToggle={toggleAreaLock}
           on3DSelect={select3DPreview}
           on3DDoubleSelect={toggle3DPreview}
+          onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
+          onReset={resetDocument}
+          onJsonToggle={() => {
+            setJsonOpen((open) => !open);
+            setPreviewMenuOpen(false);
+          }}
         />
       </section>
 
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
-        <header className="control-header">
-          <div>
-            <p className="eyebrow">Oshida Smartphone CAD</p>
-            <h1>図形配置</h1>
-          </div>
-          {!showing3DControls ? (
+        {!showing3DControls ? (
+          <header className="control-header">
+            <div>
+              <p className="eyebrow">Oshida Smartphone CAD</p>
+              <h1>図形配置</h1>
+            </div>
             <div className="header-actions">
               <button type="button" onClick={() => addShape('rect')}>+四角</button>
               <button type="button" onClick={() => addShape('circle')}>+円</button>
             </div>
-          ) : null}
-        </header>
+          </header>
+        ) : null}
 
         {!showing3DControls ? (
           <div className="document-controls">
@@ -1326,22 +1338,6 @@ function App() {
                 {FACE_LABELS[activeFace]}
               </strong>
             </div>
-            <label>
-              押し出し
-              <input
-                type="number"
-                min="1"
-                value={document.extrude}
-                onChange={(event) =>
-                  updateDocument({ extrude: Number(event.target.value) || 1 })
-                }
-              />
-              <span>mm</span>
-            </label>
-            <button type="button" onClick={resetDocument}>初期化</button>
-            <button type="button" onClick={() => setJsonOpen((open) => !open)}>
-              JSON
-            </button>
           </div>
         ) : null}
 
@@ -1419,12 +1415,16 @@ function Viewer({
   show3DEdges,
   viewMode,
   preview3DSelected,
+  menuOpen,
   onSelect,
   onFaceSelect,
   onFaceDoubleSelect,
   onAreaLockToggle,
   on3DSelect,
   on3DDoubleSelect,
+  onMenuToggle,
+  onReset,
+  onJsonToggle,
 }) {
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
@@ -1441,9 +1441,27 @@ function Viewer({
   return (
     <div className="viewer-frame">
       <div className="viewer-toolbar">
-        <span>3面図</span>
-        <span>{APP_VERSION}</span>
-        <span>{document.extrude}mm extrude</span>
+        <div className="viewer-toolbar-info">
+          <span>3面図</span>
+          <span>{APP_VERSION}</span>
+        </div>
+        <div className="viewer-menu">
+          <button
+            type="button"
+            className="viewer-menu-button"
+            aria-label="プレビューメニュー"
+            aria-expanded={menuOpen}
+            onClick={onMenuToggle}
+          >
+            ☰
+          </button>
+          {menuOpen ? (
+            <div className="viewer-menu-popover">
+              <button type="button" onClick={onReset}>初期化</button>
+              <button type="button" onClick={onJsonToggle}>JSON</button>
+            </div>
+          ) : null}
+        </div>
       </div>
       <svg className="tri-view" viewBox="0 0 326 268" role="img" aria-label="3面配置図">
         <defs>
