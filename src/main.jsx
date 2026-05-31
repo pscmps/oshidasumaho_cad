@@ -1,9 +1,10 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
+import polygonClipping from 'polygon-clipping';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-16';
+const APP_VERSION = 'proto-2026-05-31-plan-17';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
@@ -605,26 +606,66 @@ function getSurfacePoint(face, u, v, dimensions, opposite = false) {
   };
 }
 
-function getShapeSurfaceRing(shape, face, dimensions, opposite = false) {
+function getShapePlanRing(shape) {
   if (shape.type === 'circle') {
     return Array.from({ length: CIRCLE_MESH_SEGMENTS }, (_, index) => {
       const angle = (Math.PI * 2 * index) / CIRCLE_MESH_SEGMENTS;
-      return getSurfacePoint(
-        face,
+      return [
         shape.x + Math.cos(angle) * shape.r,
         shape.y + Math.sin(angle) * shape.r,
-        dimensions,
-        opposite,
-      );
+      ];
     });
   }
 
   return [
-    getSurfacePoint(face, shape.x, shape.y, dimensions, opposite),
-    getSurfacePoint(face, shape.x + shape.w, shape.y, dimensions, opposite),
-    getSurfacePoint(face, shape.x + shape.w, shape.y + shape.h, dimensions, opposite),
-    getSurfacePoint(face, shape.x, shape.y + shape.h, dimensions, opposite),
+    [shape.x, shape.y],
+    [shape.x + shape.w, shape.y],
+    [shape.x + shape.w, shape.y + shape.h],
+    [shape.x, shape.y + shape.h],
   ];
+}
+
+function getShapeMultiPolygon(shape) {
+  return [[getShapePlanRing(shape)]];
+}
+
+function ringsEqualPoint(first, second) {
+  return Math.abs(first[0] - second[0]) < 0.0001 && Math.abs(first[1] - second[1]) < 0.0001;
+}
+
+function normalizePlanRing(ring) {
+  const normalized = ring.filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+  if (normalized.length > 1 && ringsEqualPoint(normalized[0], normalized[normalized.length - 1])) {
+    return normalized.slice(0, -1);
+  }
+  return normalized;
+}
+
+function getFaceBooleanPolygons(faceShapes) {
+  const addPolygons = faceShapes
+    .filter((shape) => shape.mode === 'add')
+    .map(getShapeMultiPolygon);
+  if (!addPolygons.length) {
+    return [];
+  }
+
+  const solid = addPolygons.length === 1
+    ? addPolygons[0]
+    : polygonClipping.union(...addPolygons);
+  const cutPolygons = faceShapes
+    .filter((shape) => shape.mode === 'cut')
+    .map(getShapeMultiPolygon);
+  const booleanResult = cutPolygons.length
+    ? polygonClipping.difference(solid, ...cutPolygons)
+    : solid;
+
+  return booleanResult
+    .map((polygon) => polygon.map(normalizePlanRing).filter((ring) => ring.length >= 3))
+    .filter((polygon) => polygon.length);
+}
+
+function getPlanSurfaceRing(ring, face, dimensions, opposite = false) {
+  return ring.map(([u, v]) => getSurfacePoint(face, u, v, dimensions, opposite));
 }
 
 function buildRingWalls(frontRing, backRing, className) {
@@ -647,33 +688,29 @@ function buildSurfacePreviewFaces(shapes, dimensions, includeOpposite = false) {
 
   return facePairs.flatMap(({ source, className, oppositeClassName }) => {
     const faceShapes = shapes.filter((shape) => normalizeFace(shape.face) === source);
-    const addShapes = faceShapes.filter((shape) => shape.mode === 'add');
-    const cutShapes = faceShapes.filter((shape) => shape.mode === 'cut');
+    const polygons = getFaceBooleanPolygons(faceShapes);
 
-    return addShapes.flatMap((shape) => {
-      const frontRing = getShapeSurfaceRing(shape, source, dimensions, false);
-      const backRing = getShapeSurfaceRing(shape, source, dimensions, true);
-      const cutRings = cutShapes.map((cutShape) =>
-        getShapeSurfaceRing(cutShape, source, dimensions, false),
-      );
-      const oppositeCutRings = cutShapes.map((cutShape) =>
-        getShapeSurfaceRing(cutShape, source, dimensions, true),
-      );
+    return polygons.flatMap((polygon) => {
+      const frontRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, false));
+      const backRings = polygon.map((ring) => getPlanSurfaceRing(ring, source, dimensions, true));
       const surfaces = [
         {
           className,
-          rings: [frontRing, ...cutRings],
+          rings: frontRings,
           edge: true,
         },
-        ...buildRingWalls(frontRing, backRing, `iso-preview-side ${className}`),
-        ...cutRings.flatMap((ring, index) =>
-          buildRingWalls(ring, oppositeCutRings[index], 'iso-preview-cut-side'),
+        ...frontRings.flatMap((ring, index) =>
+          buildRingWalls(
+            ring,
+            backRings[index],
+            index === 0 ? `iso-preview-side ${className}` : 'iso-preview-cut-side',
+          ),
         ),
       ];
       if (includeOpposite) {
         surfaces.push({
           className: oppositeClassName,
-          rings: [backRing, ...oppositeCutRings],
+          rings: backRings,
           edge: false,
         });
       }
@@ -1256,10 +1293,7 @@ function IsometricPreview({
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + (expanded ? 12 : 4) };
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
   const scale = (expanded ? 96 : 48) / maxSize;
-  const surfaces = useMemo(
-    () => buildSurfacePreviewFaces(shapes, dimensions, !transparent),
-    [shapes, dimensions, transparent],
-  );
+  const surfaces = useMemo(() => buildSurfacePreviewFaces(shapes, dimensions, true), [shapes, dimensions]);
   const projectedSurfaces = surfaces.map((surface) => {
     const projectedRings = surface.rings.map((ring) => ring.map((point) => {
       const rotated = rotatePoint(point, rotation);
