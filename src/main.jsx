@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-07';
+const APP_VERSION = 'proto-2026-05-31-plan-08';
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -451,6 +451,7 @@ function getLockedPreviewDimensions(document) {
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
+  const [preview3DSelected, setPreview3DSelected] = useState(false);
   const [fullPreviewFace, setFullPreviewFace] = useState(null);
   const [jsonOpen, setJsonOpen] = useState(false);
   const controlPanelRef = useRef(null);
@@ -502,6 +503,7 @@ function App() {
   }
 
   function updateShape(id, patch) {
+    setPreview3DSelected(false);
     setDocument((current) => applyAreaLocks({
       ...current,
       activeFace: patch.face ? normalizeFace(patch.face) : current.activeFace,
@@ -521,6 +523,7 @@ function App() {
   }
 
   function addShape(type) {
+    setPreview3DSelected(false);
     setDocument((current) => {
       const id = getNextId(current.shapes);
       const face = normalizeFace(current.activeFace);
@@ -538,6 +541,7 @@ function App() {
   }
 
   function removeShape(id) {
+    setPreview3DSelected(false);
     setDocument((current) => {
       const nextShapes = current.shapes.filter((shape) => shape.id !== id);
       if (selectedId === id) {
@@ -548,6 +552,7 @@ function App() {
   }
 
   function selectShape(id) {
+    setPreview3DSelected(false);
     if (!id) {
       setSelectedId(null);
       return;
@@ -583,6 +588,7 @@ function App() {
   }
 
   function toggleAreaLock(face) {
+    setPreview3DSelected(false);
     const normalizedFace = normalizeFace(face);
     setDocument((current) => {
       const currentLocks = { ...DEFAULT_AREA_LOCKS, ...current.areaLocks };
@@ -616,11 +622,13 @@ function App() {
   }
 
   function setActiveFace(face) {
+    setPreview3DSelected(false);
     updateDocument({ activeFace: normalizeFace(face) });
     setSelectedId(null);
   }
 
   function toggleFullPreview(face) {
+    setPreview3DSelected(false);
     const normalizedFace = normalizeFace(face);
     updateDocument({ activeFace: normalizedFace });
     setSelectedId(null);
@@ -635,6 +643,16 @@ function App() {
       ...current,
       viewMode: current.viewMode === '3d' ? 'faces' : '3d',
     }));
+    setFullPreviewFace(null);
+    setSelectedId(null);
+    setPreview3DSelected(true);
+  }
+
+  function select3DPreview() {
+    if (!previewDimensions) {
+      return;
+    }
+    setPreview3DSelected(true);
     setFullPreviewFace(null);
     setSelectedId(null);
   }
@@ -652,10 +670,12 @@ function App() {
           previewDimensions={previewDimensions}
           rotation={document.rotation}
           viewMode={document.viewMode}
+          preview3DSelected={preview3DSelected}
           onSelect={selectShape}
           onFaceSelect={setActiveFace}
           onFaceDoubleSelect={toggleFullPreview}
           onAreaLockToggle={toggleAreaLock}
+          on3DSelect={select3DPreview}
           on3DDoubleSelect={toggle3DPreview}
         />
       </section>
@@ -732,7 +752,7 @@ function App() {
           </p>
         )}
 
-        {document.viewMode === '3d' && previewDimensions ? (
+        {(document.viewMode === '3d' || preview3DSelected) && previewDimensions ? (
           <RotationControls rotation={document.rotation} onChange={updateRotation} />
         ) : null}
 
@@ -752,10 +772,12 @@ function Viewer({
   previewDimensions,
   rotation,
   viewMode,
+  preview3DSelected,
   onSelect,
   onFaceSelect,
   onFaceDoubleSelect,
   onAreaLockToggle,
+  on3DSelect,
   on3DDoubleSelect,
 }) {
   const activeFace = normalizeFace(document.activeFace);
@@ -830,6 +852,8 @@ function Viewer({
               <IsometricPreview
                 dimensions={previewDimensions}
                 rotation={rotation}
+                selected={preview3DSelected}
+                onSelect={on3DSelect}
                 onDoubleSelect={on3DDoubleSelect}
               />
             ) : null}
@@ -913,6 +937,8 @@ function IsometricPreview({
   dimensions,
   rotation,
   expanded = false,
+  selected = false,
+  onSelect,
   onDoubleSelect,
 }) {
   const box = expanded
@@ -954,8 +980,12 @@ function IsometricPreview({
 
   return (
     <g
-      className={`iso-preview ${expanded ? 'expanded' : ''}`}
+      className={`iso-preview ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''}`}
       aria-label="3Dプレビュー"
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect?.();
+      }}
       onDoubleClick={(event) => {
         event.stopPropagation();
         onDoubleSelect();

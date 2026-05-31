@@ -246,6 +246,12 @@ input[type="range"] {
   stroke-width: 1;
 }
 
+.iso-preview.selected rect,
+.iso-preview.expanded rect {
+  stroke: #17212b;
+  stroke-width: 3;
+}
+
 .iso-preview polygon {
   stroke: #334155;
   stroke-width: 1.2;
