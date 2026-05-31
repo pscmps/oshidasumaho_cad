@@ -871,8 +871,63 @@ h1 {
   font-weight: 700;
 }
 
+.output-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.output-header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.output-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.output-tabs button {
+  min-height: 34px;
+}
+
+.output-tabs button.active {
+  border-color: #17212b;
+  background: #17212b;
+  color: #ffffff;
+}
+
+.output-content {
+  display: grid;
+  gap: 10px;
+}
+
+.output-actions {
+  display: flex;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.output-actions button {
+  min-width: 76px;
+  min-height: 32px;
+  padding: 0 12px;
+}
+
+.output-placeholder {
+  display: grid;
+  min-height: 120px;
+  place-items: center;
+  border: 1px dashed #c9d3df;
+  border-radius: 8px;
+  color: #66788a;
+  font-weight: 800;
+}
+
 .json-view {
-  margin: 12px 0 0;
+  margin: 0;
   border: 1px solid #d1d9e3;
   border-radius: 8px;
   background: #111827;

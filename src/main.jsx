@@ -5,7 +5,7 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-23';
+const APP_VERSION = 'proto-2026-05-31-plan-24';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const SECTION_SAMPLE_EPSILON = 0.001;
@@ -1067,7 +1067,8 @@ function App() {
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
   const [preview3DSelected, setPreview3DSelected] = useState(false);
   const [fullPreviewFace, setFullPreviewFace] = useState(null);
-  const [jsonOpen, setJsonOpen] = useState(false);
+  const [outputOpen, setOutputOpen] = useState(false);
+  const [outputFormat, setOutputFormat] = useState('json');
   const [previewMenuOpen, setPreviewMenuOpen] = useState(false);
   const [savedParts, setSavedParts] = useState(loadSavedParts);
   const [partDialog, setPartDialog] = useState(null);
@@ -1086,7 +1087,8 @@ function App() {
     [document, faceBounds],
   );
   const previewDimensions = useMemo(() => getLockedPreviewDimensions(document), [document]);
-  const showing3DControls = Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
+  const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
+  const showingFaceControls = !showing3DControls && !outputOpen;
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
 
   useEffect(() => {
@@ -1152,6 +1154,7 @@ function App() {
 
   function updateShape(id, patch) {
     setPreview3DSelected(false);
+    setOutputOpen(false);
     setDocument((current) => applyAreaLocks({
       ...current,
       activeFace: patch.face ? normalizeFace(patch.face) : current.activeFace,
@@ -1172,6 +1175,7 @@ function App() {
 
   function addShape(type) {
     setPreview3DSelected(false);
+    setOutputOpen(false);
     setDocument((current) => {
       const id = getNextId(current.shapes);
       const face = normalizeFace(current.activeFace);
@@ -1190,6 +1194,7 @@ function App() {
 
   function removeShape(id) {
     setPreview3DSelected(false);
+    setOutputOpen(false);
     setDocument((current) => {
       const nextShapes = current.shapes.filter((shape) => shape.id !== id);
       if (selectedId === id) {
@@ -1201,6 +1206,7 @@ function App() {
 
   function selectShape(id) {
     setPreview3DSelected(false);
+    setOutputOpen(false);
     if (!id) {
       setSelectedId(null);
       return;
@@ -1237,6 +1243,7 @@ function App() {
 
   function toggleAreaLock(face) {
     setPreview3DSelected(false);
+    setOutputOpen(false);
     const normalizedFace = normalizeFace(face);
     setDocument((current) => {
       const currentLocks = { ...DEFAULT_AREA_LOCKS, ...current.areaLocks };
@@ -1269,7 +1276,7 @@ function App() {
     setSelectedId(initialDocument.shapes[0].id);
     setPreview3DSelected(false);
     setFullPreviewFace(null);
-    setJsonOpen(false);
+    setOutputOpen(false);
     setPreviewMenuOpen(false);
     setPartDialog(null);
   }
@@ -1324,19 +1331,21 @@ function App() {
     setSelectedId(nextDocument.shapes[0]?.id ?? null);
     setPreview3DSelected(false);
     setFullPreviewFace(null);
-    setJsonOpen(false);
+    setOutputOpen(false);
     setPartDialog(null);
     setPreviewMenuOpen(false);
   }
 
   function setActiveFace(face) {
     setPreview3DSelected(false);
+    setOutputOpen(false);
     updateDocument({ activeFace: normalizeFace(face) });
     setSelectedId(null);
   }
 
   function toggleFullPreview(face) {
     setPreview3DSelected(false);
+    setOutputOpen(false);
     const normalizedFace = normalizeFace(face);
     updateDocument({ activeFace: normalizedFace });
     setSelectedId(null);
@@ -1354,6 +1363,7 @@ function App() {
     setFullPreviewFace(null);
     setSelectedId(null);
     setPreview3DSelected(true);
+    setOutputOpen(false);
   }
 
   function select3DPreview() {
@@ -1363,6 +1373,39 @@ function App() {
     setPreview3DSelected(true);
     setFullPreviewFace(null);
     setSelectedId(null);
+    setOutputOpen(false);
+  }
+
+  function openOutputPanel() {
+    setOutputOpen(true);
+    setOutputFormat('json');
+    setSelectedId(null);
+    setPreview3DSelected(false);
+    setPreviewMenuOpen(false);
+  }
+
+  async function copyJsonOutput() {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(jsonText);
+      return;
+    }
+    const textArea = window.document.createElement('textarea');
+    textArea.value = jsonText;
+    window.document.body.appendChild(textArea);
+    textArea.select();
+    window.document.execCommand('copy');
+    window.document.body.removeChild(textArea);
+  }
+
+  function saveJsonOutput() {
+    const fileNameBase = (document.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
+    const blob = new Blob([jsonText], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const anchor = window.document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${fileNameBase}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -1391,17 +1434,14 @@ function App() {
           on3DDoubleSelect={toggle3DPreview}
           onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
           onReset={resetDocument}
-          onJsonToggle={() => {
-            setJsonOpen((open) => !open);
-            setPreviewMenuOpen(false);
-          }}
+          onOutputOpen={openOutputPanel}
           onSaveOpen={openSaveDialog}
           onLoadOpen={openLoadDialog}
         />
       </section>
 
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
-        {!showing3DControls ? (
+        {showingFaceControls ? (
           <header className="control-header">
             <div>
               <p className="eyebrow">Oshida Smartphone CAD</p>
@@ -1414,7 +1454,7 @@ function App() {
           </header>
         ) : null}
 
-        {!showing3DControls ? (
+        {showingFaceControls ? (
           <div className="document-controls">
             <div className="active-face-control" aria-label="配置面">
               <span>配置面</span>
@@ -1425,7 +1465,7 @@ function App() {
           </div>
         ) : null}
 
-        {!showing3DControls ? (
+        {showingFaceControls ? (
           <div className="shape-list">
             {activeShapes.map((shape, index) => (
               <ShapeEditor
@@ -1452,7 +1492,7 @@ function App() {
           </div>
         ) : null}
 
-        {!showing3DControls ? (
+        {showingFaceControls ? (
           selectedShape ? (
             <p className="selection-note">
               選択中: {FACE_LABELS[normalizeFace(selectedShape.face)]} / {getShapeLabel(selectedShape)}
@@ -1479,7 +1519,15 @@ function App() {
           />
         ) : null}
 
-        {jsonOpen ? <pre className="json-view">{jsonText}</pre> : null}
+        {outputOpen ? (
+          <OutputPanel
+            format={outputFormat}
+            jsonText={jsonText}
+            onFormatChange={setOutputFormat}
+            onCopyJson={copyJsonOutput}
+            onSaveJson={saveJsonOutput}
+          />
+        ) : null}
       </section>
       {partDialog === 'save' ? (
         <SavePartDialog
@@ -1525,7 +1573,7 @@ function Viewer({
   on3DDoubleSelect,
   onMenuToggle,
   onReset,
-  onJsonToggle,
+  onOutputOpen,
   onSaveOpen,
   onLoadOpen,
 }) {
@@ -1562,8 +1610,8 @@ function Viewer({
             <div className="viewer-menu-popover">
               <button type="button" onClick={onSaveOpen}>保存</button>
               <button type="button" onClick={onLoadOpen}>呼び出し</button>
+              <button type="button" onClick={onOutputOpen}>出力</button>
               <button type="button" onClick={onReset}>初期化</button>
-              <button type="button" onClick={onJsonToggle}>JSON</button>
             </div>
           ) : null}
         </div>
@@ -1712,6 +1760,44 @@ function LoadPartDialog({ savedParts, selectedId, onSelect, onLoad, onCancel }) 
         </div>
       </form>
     </div>
+  );
+}
+
+function OutputPanel({ format, jsonText, onFormatChange, onCopyJson, onSaveJson }) {
+  return (
+    <section className="output-panel" aria-label="出力">
+      <header className="output-header">
+        <div>
+          <p className="eyebrow">Oshida Smartphone CAD</p>
+          <h1>出力</h1>
+        </div>
+      </header>
+      <div className="output-tabs" role="tablist" aria-label="出力形式">
+        {['json', 'stl', 'step'].map((item) => (
+          <button
+            key={item}
+            type="button"
+            className={format === item ? 'active' : ''}
+            onClick={() => onFormatChange(item)}
+          >
+            {item.toUpperCase()}
+          </button>
+        ))}
+      </div>
+      {format === 'json' ? (
+        <div className="output-content">
+          <div className="output-actions">
+            <button type="button" onClick={onCopyJson}>コピー</button>
+            <button type="button" onClick={onSaveJson}>保存</button>
+          </div>
+          <pre className="json-view">{jsonText}</pre>
+        </div>
+      ) : (
+        <div className="output-placeholder">
+          {format.toUpperCase()} 出力は未実装です。
+        </div>
+      )}
+    </section>
   );
 }
 
