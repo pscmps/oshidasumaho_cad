@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-30-plan-04';
+const APP_VERSION = 'proto-2026-05-31-plan-05';
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -15,11 +15,17 @@ const DEFAULT_AREA_LOCKS = {
   front: false,
   right: false,
 };
+const DEFAULT_AREA_LOCK_CONSTRAINTS = {
+  top: null,
+  front: null,
+  right: null,
+};
 
 const initialDocument = {
   extrude: 12,
   activeFace: 'top',
   areaLocks: DEFAULT_AREA_LOCKS,
+  areaLockConstraints: DEFAULT_AREA_LOCK_CONSTRAINTS,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -39,6 +45,10 @@ function normalizeDocument(document) {
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
   }), DEFAULT_AREA_LOCKS);
+  const areaLockConstraints = FACE_ORDER.reduce((constraints, face) => ({
+    ...constraints,
+    [face]: normalizeConstraint(document?.areaLockConstraints?.[face]),
+  }), DEFAULT_AREA_LOCK_CONSTRAINTS);
   const shapes = Array.isArray(document?.shapes)
     ? document.shapes.map((shape) => ({
         ...shape,
@@ -51,6 +61,7 @@ function normalizeDocument(document) {
     ...document,
     activeFace,
     areaLocks,
+    areaLockConstraints,
     shapes,
   };
 }
@@ -160,6 +171,37 @@ function getFaceConstraint(face, faceBounds) {
   return constraint;
 }
 
+function normalizeConstraint(constraint) {
+  if (!constraint) {
+    return null;
+  }
+
+  return {
+    minX: clampRangeValue(Number(constraint.minX) || 0),
+    maxX: clampRangeValue(Number(constraint.maxX) || 120),
+    minY: clampRangeValue(Number(constraint.minY) || 0),
+    maxY: clampRangeValue(Number(constraint.maxY) || 120),
+    constrainedX: Boolean(constraint.constrainedX),
+    constrainedY: Boolean(constraint.constrainedY),
+  };
+}
+
+function getDocumentFaceConstraint(document, face, faceBounds = getAllFaceBounds(document.shapes)) {
+  const normalizedFace = normalizeFace(face);
+  const savedConstraint = normalizeConstraint(document.areaLockConstraints?.[normalizedFace]);
+  if (document.areaLocks?.[normalizedFace] && savedConstraint) {
+    return savedConstraint;
+  }
+
+  return getFaceConstraint(normalizedFace, faceBounds);
+}
+
+function getAllDisplayConstraints(document, faceBounds = getAllFaceBounds(document.shapes)) {
+  return Object.fromEntries(
+    FACE_ORDER.map((face) => [face, getDocumentFaceConstraint(document, face, faceBounds)]),
+  );
+}
+
 function hasAreaConstraint(constraint) {
   return (
     (constraint.constrainedX && constraint.maxX > constraint.minX) ||
@@ -235,7 +277,7 @@ function applyAreaLocks(document) {
       if (!document.areaLocks?.[face]) {
         return shape;
       }
-      return constrainShape(shape, getFaceConstraint(face, faceBounds));
+      return constrainShape(shape, getDocumentFaceConstraint(document, face, faceBounds));
     }),
   };
 }
@@ -283,6 +325,10 @@ function App() {
   const activeFace = normalizeFace(document.activeFace);
   const activeShapes = document.shapes.filter((shape) => normalizeFace(shape.face) === activeFace);
   const faceBounds = useMemo(() => getAllFaceBounds(document.shapes), [document.shapes]);
+  const faceConstraints = useMemo(
+    () => getAllDisplayConstraints(document, faceBounds),
+    [document, faceBounds],
+  );
   const areaLockAvailability = useMemo(
     () => Object.fromEntries(FACE_ORDER.map((face) => [face, canLockFace(document.shapes, face, faceBounds)])),
     [document.shapes, faceBounds],
@@ -325,7 +371,7 @@ function App() {
         if (!current.areaLocks?.[face]) {
           return nextShape;
         }
-        return constrainShape(nextShape, getFaceConstraint(face, getAllFaceBounds(current.shapes)));
+        return constrainShape(nextShape, getDocumentFaceConstraint(current, face, getAllFaceBounds(current.shapes)));
       }),
     }));
   }
@@ -339,7 +385,7 @@ function App() {
           ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add', face }
           : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face };
       const shape = current.areaLocks?.[face]
-        ? constrainShape(shapeBase, getFaceConstraint(face, getAllFaceBounds(current.shapes)))
+        ? constrainShape(shapeBase, getDocumentFaceConstraint(current, face, getAllFaceBounds(current.shapes)))
         : shapeBase;
       setSelectedId(id);
       return applyAreaLocks({ ...current, shapes: [...current.shapes, shape] });
@@ -395,7 +441,12 @@ function App() {
     const normalizedFace = normalizeFace(face);
     setDocument((current) => {
       const currentLocks = { ...DEFAULT_AREA_LOCKS, ...current.areaLocks };
+      const currentConstraints = {
+        ...DEFAULT_AREA_LOCK_CONSTRAINTS,
+        ...current.areaLockConstraints,
+      };
       const nextLockValue = !currentLocks[normalizedFace];
+      const nextConstraint = getFaceConstraint(normalizedFace, getAllFaceBounds(current.shapes));
       if (nextLockValue && !canLockFace(current.shapes, normalizedFace)) {
         return current;
       }
@@ -405,6 +456,10 @@ function App() {
         areaLocks: {
           ...currentLocks,
           [normalizedFace]: nextLockValue,
+        },
+        areaLockConstraints: {
+          ...currentConstraints,
+          [normalizedFace]: nextLockValue ? nextConstraint : null,
         },
       });
     });
@@ -435,6 +490,7 @@ function App() {
           selectedId={selectedId}
           fullPreviewFace={fullPreviewFace}
           areaLocks={document.areaLocks}
+          areaLockConstraints={document.areaLockConstraints}
           areaLockAvailability={areaLockAvailability}
           onSelect={selectShape}
           onFaceSelect={setActiveFace}
@@ -496,7 +552,7 @@ function App() {
               total={activeShapes.length}
               selected={shape.id === selectedId}
               locked={Boolean(document.areaLocks?.[normalizeFace(shape.face)])}
-              constraint={getFaceConstraint(normalizeFace(shape.face), faceBounds)}
+              constraint={faceConstraints[normalizeFace(shape.face)]}
               onSelect={() => selectShape(shape.id)}
               onChange={(patch) => updateShape(shape.id, patch)}
               onMove={moveShape}
@@ -526,6 +582,7 @@ function Viewer({
   selectedId,
   fullPreviewFace,
   areaLocks,
+  areaLockConstraints,
   areaLockAvailability,
   onSelect,
   onFaceSelect,
@@ -538,6 +595,10 @@ function Viewer({
   const faceBounds = useMemo(
     () => Object.fromEntries(FACE_ORDER.map((face) => [face, getFaceBounds(document.shapes, face)])),
     [document.shapes],
+  );
+  const faceConstraints = useMemo(
+    () => getAllDisplayConstraints({ ...document, areaLocks, areaLockConstraints }, faceBounds),
+    [document, areaLocks, areaLockConstraints, faceBounds],
   );
 
   return (
@@ -570,7 +631,7 @@ function Viewer({
             active={face === activeFace}
             full={Boolean(previewFace)}
             shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
-            faceBounds={faceBounds}
+            constraint={faceConstraints[face]}
             selectedId={selectedId}
             onSelect={onSelect}
             onFaceSelect={onFaceSelect}
@@ -659,7 +720,7 @@ function FacePlan({
   active,
   full,
   shapes,
-  faceBounds,
+  constraint,
   selectedId,
   onSelect,
   onFaceSelect,
@@ -696,7 +757,7 @@ function FacePlan({
         height="120"
         mask={`url(#body-mask-${face})`}
       />
-      <ConstraintOverlay face={face} faceBounds={faceBounds} />
+      <ConstraintOverlay constraint={constraint} />
       {shapes.map((shape) => (
         <FinalOutline key={`outline-${shape.id}`} shape={shape} />
       ))}
@@ -713,25 +774,13 @@ function FacePlan({
   );
 }
 
-function ConstraintOverlay({ face, faceBounds }) {
+function ConstraintOverlay({ constraint }) {
   const overlays = [];
-  const topBounds = faceBounds.top;
-  const frontBounds = faceBounds.front;
-  const rightBounds = faceBounds.right;
-
-  if (face === 'top' && frontBounds) {
-    overlays.push(...getOutsideXRects(frontBounds));
+  if (constraint?.constrainedX) {
+    overlays.push(...getOutsideXRects(constraint));
   }
-  if (face === 'front') {
-    if (topBounds) {
-      overlays.push(...getOutsideXRects(topBounds));
-    }
-    if (rightBounds) {
-      overlays.push(...getOutsideYRects(rightBounds));
-    }
-  }
-  if (face === 'right' && frontBounds) {
-    overlays.push(...getOutsideYRects(frontBounds));
+  if (constraint?.constrainedY) {
+    overlays.push(...getOutsideYRects(constraint));
   }
 
   return overlays.map((rect, index) => (
