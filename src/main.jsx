@@ -6,7 +6,7 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-06-01-save-ui-01';
+const APP_VERSION = 'proto-2026-06-01-save-ui-02';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -2424,56 +2424,64 @@ function OutputPanel({
       <header className="output-header">
         <div>
           <p className="eyebrow">Oshida Smartphone CAD</p>
-          <h1>保存</h1>
+          <h1>{format === 'help' ? 'ヘルプ' : '保存'}</h1>
         </div>
       </header>
-      <div className="part-storage-panel">
-        <label className="part-name-field">
-          <span>名前</span>
-          <input
-            type="text"
-            value={partName}
-            onChange={(event) => onPartNameChange(event.target.value)}
-          />
-        </label>
-        <label className="saved-part-field">
-          <span>web保存データ</span>
-          <select
-            value={selectedSavedPartId}
-            disabled={!hasSavedParts}
-            onChange={(event) => onSavedPartSelect(event.target.value)}
-          >
-            {hasSavedParts ? savedParts.map((part) => (
-              <option key={part.id} value={part.id}>{part.name}</option>
-            )) : (
-              <option value="">保存データなし</option>
-            )}
-          </select>
-        </label>
-        <div className="saved-part-actions">
-          <button type="button" onClick={onLoadPart} disabled={!hasSavedParts || !selectedSavedPartId}>
-            呼び出し
-          </button>
-          <button type="button" onClick={onDeleteSavedPart} disabled={!hasSavedParts || !selectedSavedPartId}>
-            削除
-          </button>
-        </div>
-        <p className="web-save-warning">
-          web保存はブラウザ内に保存されます。キャッシュやサイトデータを消すと削除されます。
-        </p>
-      </div>
-      <div className="output-tabs" role="tablist" aria-label="保存形式">
-        {['json', 'stl', 'step', 'help'].map((item) => (
-          <button
-            key={item}
-            type="button"
-            className={format === item ? 'active' : ''}
-            onClick={() => onFormatChange(item)}
-          >
-            {item === 'help' ? 'ヘルプ' : item.toUpperCase()}
-          </button>
-        ))}
-      </div>
+      {format !== 'help' ? (
+        <>
+          <div className="part-storage-panel save-panel">
+            <h2>保存</h2>
+            <label className="part-name-field">
+              <span>名前</span>
+              <input
+                type="text"
+                value={partName}
+                onChange={(event) => onPartNameChange(event.target.value)}
+              />
+            </label>
+            <p className="web-save-warning">
+              web保存はブラウザ内に保存されます。キャッシュやサイトデータを消すと削除されます。
+            </p>
+          </div>
+          <div className="part-storage-panel load-panel">
+            <h2>web保存データ</h2>
+            <label className="saved-part-field">
+              <span>呼び出しデータ</span>
+              <select
+                value={selectedSavedPartId}
+                disabled={!hasSavedParts}
+                onChange={(event) => onSavedPartSelect(event.target.value)}
+              >
+                {hasSavedParts ? savedParts.map((part) => (
+                  <option key={part.id} value={part.id}>{part.name}</option>
+                )) : (
+                  <option value="">保存データなし</option>
+                )}
+              </select>
+            </label>
+            <div className="saved-part-actions">
+              <button type="button" onClick={onLoadPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+                呼び出し
+              </button>
+              <button type="button" onClick={onDeleteSavedPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+                削除
+              </button>
+            </div>
+          </div>
+          <div className="output-tabs" role="tablist" aria-label="保存形式">
+            {['json', 'stl', 'step'].map((item) => (
+              <button
+                key={item}
+                type="button"
+                className={format === item ? 'active' : ''}
+                onClick={() => onFormatChange(item)}
+              >
+                {item.toUpperCase()}
+              </button>
+            ))}
+          </div>
+        </>
+      ) : null}
       {format === 'json' ? (
           <div className="output-content">
             <div className="output-actions">
@@ -2552,6 +2560,14 @@ function HelpPanel() {
         <li>JSONは現在の編集データです。ファイル保存とweb保存ができます。</li>
         <li>STLはスライサー向けのメッシュとして保存します。</li>
         <li>STEPはCAD向けのB-repとして保存します。</li>
+      </ul>
+      <h2>ロックのヒント</h2>
+      <ul>
+        <li>ロックは、その面の外形範囲を他の面へ反映して、3Dとして矛盾しない配置範囲を固定する機能です。</li>
+        <li>ロックできない時は、他の面の図形が灰色の禁止エリアにはみ出していないか確認してください。</li>
+        <li>cut図形で外形を凹ませる場合は、図形の順番が影響します。後ろのaddは前のcutを上書きできます。</li>
+        <li>上面は幅と奥行き、正面は幅と高さ、右側面は奥行きと高さに影響します。</li>
+        <li>3面すべてをロックすると、3DプレビューとSTL/STEP保存が使えるようになります。</li>
       </ul>
     </div>
   );
