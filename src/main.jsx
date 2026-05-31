@@ -6,12 +6,13 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-30';
+const APP_VERSION = 'proto-2026-05-31-plan-31';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
 const STL_VOXEL_MAX_AXIS_STEPS = 180;
 const STL_VOXEL_MAX_CELLS = 12_000_000;
+const STL_RESOLUTION_MAX = 20;
 const SECTION_SAMPLE_EPSILON = 0.001;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
@@ -489,6 +490,34 @@ function pointInFaceSolid(shapes, face, x, y) {
   }, false);
 }
 
+function getShapeSignedDistance(shape, x, y) {
+  if (shape.type === 'circle') {
+    return shape.r - Math.hypot(x - shape.x, y - shape.y);
+  }
+
+  const left = shape.x;
+  const right = shape.x + shape.w;
+  const top = shape.y;
+  const bottom = shape.y + shape.h;
+  const outsideX = Math.max(left - x, 0, x - right);
+  const outsideY = Math.max(top - y, 0, y - bottom);
+  if (outsideX > 0 || outsideY > 0) {
+    return -Math.hypot(outsideX, outsideY);
+  }
+
+  return Math.min(x - left, right - x, y - top, bottom - y);
+}
+
+function getFaceSignedDistance(faceShapes, x, y) {
+  return faceShapes.reduce((distance, shape) => {
+    const shapeDistance = getShapeSignedDistance(shape, x, y);
+    if (shape.mode === 'add') {
+      return Math.max(distance, shapeDistance);
+    }
+    return Math.min(distance, -shapeDistance);
+  }, -1_000_000);
+}
+
 function isVoxelSolid(shapes, dimensions, x, depth, height) {
   return (
     pointInFaceSolid(shapes, 'top', x, depth) &&
@@ -499,24 +528,6 @@ function isVoxelSolid(shapes, dimensions, x, depth, height) {
 
 function getVoxelKey(xIndex, depthIndex, heightIndex) {
   return `${xIndex}:${depthIndex}:${heightIndex}`;
-}
-
-function getVoxelIndex(xIndex, yIndex, zIndex, stepCounts) {
-  return (zIndex * stepCounts.y + yIndex) * stepCounts.x + xIndex;
-}
-
-function hasVoxelCell(cells, stepCounts, xIndex, yIndex, zIndex) {
-  if (
-    xIndex < 0 ||
-    yIndex < 0 ||
-    zIndex < 0 ||
-    xIndex >= stepCounts.x ||
-    yIndex >= stepCounts.y ||
-    zIndex >= stepCounts.z
-  ) {
-    return false;
-  }
-  return cells[getVoxelIndex(xIndex, yIndex, zIndex, stepCounts)] === 1;
 }
 
 function getVoxelCorners(x0, x1, y0, y1, z0, z1) {
@@ -1150,19 +1161,6 @@ function getTriangleNormal(a, b, c) {
   return normalizeVector(crossProduct(subtractPoint(b, a), subtractPoint(c, a)));
 }
 
-function pushTriangle(triangles, a, b, c) {
-  const normal = getTriangleNormal(a, b, c);
-  if (!normal) {
-    return;
-  }
-  triangles.push({ normal, vertices: [a, b, c] });
-}
-
-function pushQuadTriangles(triangles, corners) {
-  pushTriangle(triangles, corners[0], corners[1], corners[2]);
-  pushTriangle(triangles, corners[0], corners[2], corners[3]);
-}
-
 function triangulateSurface(surface) {
   const outerRing = surface.rings[0];
   if (!outerRing || outerRing.length < 3) {
@@ -1221,88 +1219,268 @@ function getOutputBaseName(documentData) {
   return (documentData.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
 }
 
-function getStlVoxelGrid(dimensions, resolutionFactor = 1) {
+function getStlBaseCellSize(dimensions) {
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
-  const requestedFactor = clampValue(Number(resolutionFactor) || 1, 1, 20);
-  let targetCellSize = Math.max(
-    STL_VOXEL_CELL_SIZE / requestedFactor,
-    maxSize / (STL_VOXEL_MAX_AXIS_STEPS * requestedFactor),
-  );
-  let stepCounts = {
-    x: Math.max(1, Math.ceil(dimensions.width.size / targetCellSize)),
-    y: Math.max(1, Math.ceil(dimensions.depth.size / targetCellSize)),
-    z: Math.max(1, Math.ceil(dimensions.height.size / targetCellSize)),
+  return Math.max(STL_VOXEL_CELL_SIZE, maxSize / STL_VOXEL_MAX_AXIS_STEPS);
+}
+
+function getStlSpanStepCounts(dimensions, cellSize) {
+  return {
+    x: Math.max(1, Math.ceil(dimensions.width.size / cellSize)),
+    y: Math.max(1, Math.ceil(dimensions.depth.size / cellSize)),
+    z: Math.max(1, Math.ceil(dimensions.height.size / cellSize)),
   };
-  const estimatedCells = stepCounts.x * stepCounts.y * stepCounts.z;
-  if (estimatedCells > STL_VOXEL_MAX_CELLS) {
-    targetCellSize *= Math.cbrt(estimatedCells / STL_VOXEL_MAX_CELLS);
-    stepCounts = {
-      x: Math.max(1, Math.ceil(dimensions.width.size / targetCellSize)),
-      y: Math.max(1, Math.ceil(dimensions.depth.size / targetCellSize)),
-      z: Math.max(1, Math.ceil(dimensions.height.size / targetCellSize)),
-    };
+}
+
+function getStlResolutionMax(dimensions) {
+  if (!dimensions) {
+    return 1;
   }
+
+  const baseCellSize = getStlBaseCellSize(dimensions);
+  const baseSteps = getStlSpanStepCounts(dimensions, baseCellSize);
+  const baseCells = baseSteps.x * baseSteps.y * baseSteps.z;
+  const maxByCells = Math.cbrt(STL_VOXEL_MAX_CELLS / Math.max(1, baseCells));
+  return Math.max(1, Math.min(STL_RESOLUTION_MAX, Math.floor(maxByCells * 10) / 10));
+}
+
+function getStlVoxelGrid(dimensions, resolutionFactor = 1) {
+  const resolutionMax = getStlResolutionMax(dimensions);
+  const requestedFactor = clampValue(Number(resolutionFactor) || 1, 1, resolutionMax);
+  const targetCellSize = getStlBaseCellSize(dimensions) / requestedFactor;
+  const spanSteps = getStlSpanStepCounts(dimensions, targetCellSize);
+  const cell = {
+    x: dimensions.width.size / spanSteps.x,
+    y: dimensions.depth.size / spanSteps.y,
+    z: dimensions.height.size / spanSteps.z,
+  };
+  const stepCounts = {
+    x: spanSteps.x + 2,
+    y: spanSteps.y + 2,
+    z: spanSteps.z + 2,
+  };
 
   return {
     stepCounts,
-    cell: {
-      x: dimensions.width.size / stepCounts.x,
-      y: dimensions.depth.size / stepCounts.y,
-      z: dimensions.height.size / stepCounts.z,
+    pointCounts: {
+      x: stepCounts.x + 1,
+      y: stepCounts.y + 1,
+      z: stepCounts.z + 1,
+    },
+    cell,
+    origin: {
+      x: dimensions.width.min - cell.x,
+      y: dimensions.depth.min - cell.y,
+      z: dimensions.height.min - cell.z,
     },
   };
 }
 
-function buildVoxelStlTriangles(shapes, dimensions, resolutionFactor = 1) {
-  const { stepCounts, cell } = getStlVoxelGrid(dimensions, resolutionFactor);
-  const cells = new Uint8Array(stepCounts.x * stepCounts.y * stepCounts.z);
-  const triangles = [];
+function getGridPointIndex(xIndex, yIndex, zIndex, pointCounts) {
+  return (zIndex * pointCounts.y + yIndex) * pointCounts.x + xIndex;
+}
 
-  for (let xIndex = 0; xIndex < stepCounts.x; xIndex += 1) {
-    for (let yIndex = 0; yIndex < stepCounts.y; yIndex += 1) {
-      for (let zIndex = 0; zIndex < stepCounts.z; zIndex += 1) {
-        const x = dimensions.width.min + (xIndex + 0.5) * cell.x;
-        const depth = dimensions.depth.min + (yIndex + 0.5) * cell.y;
-        const height = dimensions.height.min + (zIndex + 0.5) * cell.z;
-        if (isVoxelSolid(shapes, dimensions, x, depth, height)) {
-          cells[getVoxelIndex(xIndex, yIndex, zIndex, stepCounts)] = 1;
-        }
+function createStlAxisValues(count, start, step) {
+  return Array.from({ length: count }, (_, index) => start + index * step);
+}
+
+function createFaceDistanceGrid(faceShapes, firstValues, secondValues) {
+  const distances = new Float32Array(firstValues.length * secondValues.length);
+  secondValues.forEach((second, secondIndex) => {
+    firstValues.forEach((first, firstIndex) => {
+      distances[secondIndex * firstValues.length + firstIndex] =
+        getFaceSignedDistance(faceShapes, first, second);
+    });
+  });
+  return distances;
+}
+
+function getCenteredStlPoint(x, y, z, dimensions) {
+  return {
+    x: centeredCoordinate(x, dimensions.width),
+    y: centeredCoordinate(y, dimensions.depth),
+    z: centeredCoordinate(z, dimensions.height),
+  };
+}
+
+function getFaceShapesByFace(shapes) {
+  return Object.fromEntries(
+    FACE_ORDER.map((face) => [
+      face,
+      shapes.filter((shape) => normalizeFace(shape.face) === face),
+    ]),
+  );
+}
+
+function getSolidSignedDistance(faceShapesByFace, dimensions, point) {
+  const x = point.x + dimensions.width.min + dimensions.width.size / 2;
+  const y = point.y + dimensions.depth.min + dimensions.depth.size / 2;
+  const z = point.z + dimensions.height.min + dimensions.height.size / 2;
+  return Math.min(
+    getFaceSignedDistance(faceShapesByFace.top, x, y),
+    getFaceSignedDistance(faceShapesByFace.front, x, z),
+    getFaceSignedDistance(faceShapesByFace.right, y, z),
+  );
+}
+
+function createStlField(shapes, dimensions, resolutionFactor) {
+  const grid = getStlVoxelGrid(dimensions, resolutionFactor);
+  const { pointCounts, cell, origin } = grid;
+  const xValues = createStlAxisValues(pointCounts.x, origin.x, cell.x);
+  const yValues = createStlAxisValues(pointCounts.y, origin.y, cell.y);
+  const zValues = createStlAxisValues(pointCounts.z, origin.z, cell.z);
+  const faceShapesByFace = getFaceShapesByFace(shapes);
+  const topDistances = createFaceDistanceGrid(faceShapesByFace.top, xValues, yValues);
+  const frontDistances = createFaceDistanceGrid(faceShapesByFace.front, xValues, zValues);
+  const rightDistances = createFaceDistanceGrid(faceShapesByFace.right, yValues, zValues);
+  const values = new Float32Array(pointCounts.x * pointCounts.y * pointCounts.z);
+
+  for (let zIndex = 0; zIndex < pointCounts.z; zIndex += 1) {
+    for (let yIndex = 0; yIndex < pointCounts.y; yIndex += 1) {
+      for (let xIndex = 0; xIndex < pointCounts.x; xIndex += 1) {
+        values[getGridPointIndex(xIndex, yIndex, zIndex, pointCounts)] = Math.min(
+          topDistances[yIndex * pointCounts.x + xIndex],
+          frontDistances[zIndex * pointCounts.x + xIndex],
+          rightDistances[zIndex * pointCounts.y + yIndex],
+        );
       }
     }
   }
 
-  const faceDefinitions = [
-    { neighbor: [0, 0, 1], indexes: [4, 5, 6, 7] },
-    { neighbor: [0, -1, 0], indexes: [0, 1, 5, 4] },
-    { neighbor: [1, 0, 0], indexes: [1, 2, 6, 5] },
-    { neighbor: [0, 0, -1], indexes: [0, 3, 2, 1] },
-    { neighbor: [0, 1, 0], indexes: [3, 7, 6, 2] },
-    { neighbor: [-1, 0, 0], indexes: [0, 4, 7, 3] },
-  ];
+  return { ...grid, xValues, yValues, zValues, values, faceShapesByFace };
+}
 
-  for (let xIndex = 0; xIndex < stepCounts.x; xIndex += 1) {
+function getStlCorner(field, dimensions, xIndex, yIndex, zIndex) {
+  const { pointCounts, xValues, yValues, zValues, values } = field;
+  return {
+    value: values[getGridPointIndex(xIndex, yIndex, zIndex, pointCounts)],
+    point: getCenteredStlPoint(xValues[xIndex], yValues[yIndex], zValues[zIndex], dimensions),
+  };
+}
+
+function interpolateStlCorner(first, second) {
+  const ratio = first.value / (first.value - second.value);
+  return {
+    x: first.point.x + (second.point.x - first.point.x) * ratio,
+    y: first.point.y + (second.point.y - first.point.y) * ratio,
+    z: first.point.z + (second.point.z - first.point.z) * ratio,
+  };
+}
+
+function pushOrientedStlTriangle(triangles, a, b, c, faceShapesByFace, dimensions, epsilon) {
+  let normal = getTriangleNormal(a, b, c);
+  if (!normal) {
+    return;
+  }
+
+  const center = {
+    x: (a.x + b.x + c.x) / 3,
+    y: (a.y + b.y + c.y) / 3,
+    z: (a.z + b.z + c.z) / 3,
+  };
+  const positiveSide = {
+    x: center.x + normal.x * epsilon,
+    y: center.y + normal.y * epsilon,
+    z: center.z + normal.z * epsilon,
+  };
+  const negativeSide = {
+    x: center.x - normal.x * epsilon,
+    y: center.y - normal.y * epsilon,
+    z: center.z - normal.z * epsilon,
+  };
+
+  if (
+    getSolidSignedDistance(faceShapesByFace, dimensions, positiveSide) >
+    getSolidSignedDistance(faceShapesByFace, dimensions, negativeSide)
+  ) {
+    [b, c] = [c, b];
+    normal = getTriangleNormal(a, b, c);
+  }
+  if (!normal) {
+    return;
+  }
+  triangles.push({ normal, vertices: [a, b, c] });
+}
+
+function pushMarchingTetraTriangles(triangles, corners, faceShapesByFace, dimensions, epsilon) {
+  const inside = [];
+  const outside = [];
+  corners.forEach((corner, index) => {
+    if (corner.value >= 0) {
+      inside.push(index);
+    } else {
+      outside.push(index);
+    }
+  });
+
+  if (inside.length === 0 || inside.length === 4) {
+    return;
+  }
+
+  const edgePoint = (firstIndex, secondIndex) =>
+    interpolateStlCorner(corners[firstIndex], corners[secondIndex]);
+
+  if (inside.length === 1 || inside.length === 3) {
+    const source = inside.length === 1 ? inside[0] : outside[0];
+    const targets = inside.length === 1 ? outside : inside;
+    const points = targets.map((target) => edgePoint(source, target));
+    pushOrientedStlTriangle(triangles, points[0], points[1], points[2], faceShapesByFace, dimensions, epsilon);
+    return;
+  }
+
+  const [firstInside, secondInside] = inside;
+  const [firstOutside, secondOutside] = outside;
+  const points = [
+    edgePoint(firstInside, firstOutside),
+    edgePoint(secondInside, firstOutside),
+    edgePoint(secondInside, secondOutside),
+    edgePoint(firstInside, secondOutside),
+  ];
+  pushOrientedStlTriangle(triangles, points[0], points[1], points[2], faceShapesByFace, dimensions, epsilon);
+  pushOrientedStlTriangle(triangles, points[0], points[2], points[3], faceShapesByFace, dimensions, epsilon);
+}
+
+function buildMarchingStlTriangles(shapes, dimensions, resolutionFactor = 1) {
+  const field = createStlField(shapes, dimensions, resolutionFactor);
+  const { stepCounts, cell, faceShapesByFace } = field;
+  const triangles = [];
+  const cornerOffsets = [
+    [0, 0, 0],
+    [1, 0, 0],
+    [1, 1, 0],
+    [0, 1, 0],
+    [0, 0, 1],
+    [1, 0, 1],
+    [1, 1, 1],
+    [0, 1, 1],
+  ];
+  const tetrahedra = [
+    [0, 5, 1, 6],
+    [0, 1, 2, 6],
+    [0, 2, 3, 6],
+    [0, 3, 7, 6],
+    [0, 7, 4, 6],
+    [0, 4, 5, 6],
+  ];
+  const epsilon = Math.min(cell.x, cell.y, cell.z) * 0.25;
+
+  for (let zIndex = 0; zIndex < stepCounts.z; zIndex += 1) {
     for (let yIndex = 0; yIndex < stepCounts.y; yIndex += 1) {
-      for (let zIndex = 0; zIndex < stepCounts.z; zIndex += 1) {
-        if (!hasVoxelCell(cells, stepCounts, xIndex, yIndex, zIndex)) {
+      for (let xIndex = 0; xIndex < stepCounts.x; xIndex += 1) {
+        const cubeCorners = cornerOffsets.map(([dx, dy, dz]) =>
+          getStlCorner(field, dimensions, xIndex + dx, yIndex + dy, zIndex + dz),
+        );
+        const insideCount = cubeCorners.filter((corner) => corner.value >= 0).length;
+        if (insideCount === 0 || insideCount === 8) {
           continue;
         }
-
-        const x0 = xIndex * cell.x - dimensions.width.size / 2;
-        const x1 = (xIndex + 1) * cell.x - dimensions.width.size / 2;
-        const y0 = yIndex * cell.y - dimensions.depth.size / 2;
-        const y1 = (yIndex + 1) * cell.y - dimensions.depth.size / 2;
-        const z0 = zIndex * cell.z - dimensions.height.size / 2;
-        const z1 = (zIndex + 1) * cell.z - dimensions.height.size / 2;
-        const corners = getVoxelCorners(x0, x1, y0, y1, z0, z1);
-
-        faceDefinitions.forEach((definition) => {
-          const [dx, dy, dz] = definition.neighbor;
-          if (hasVoxelCell(cells, stepCounts, xIndex + dx, yIndex + dy, zIndex + dz)) {
-            return;
-          }
-          pushQuadTriangles(
+        tetrahedra.forEach((tetrahedron) => {
+          pushMarchingTetraTriangles(
             triangles,
-            definition.indexes.map((index) => corners[index]),
+            tetrahedron.map((cornerIndex) => cubeCorners[cornerIndex]),
+            faceShapesByFace,
+            dimensions,
+            epsilon,
           );
         });
       }
@@ -1317,7 +1495,7 @@ function buildStlText(documentData, dimensions, resolutionFactor = 1) {
     return '';
   }
   const name = getOutputBaseName(documentData);
-  const triangles = buildVoxelStlTriangles(documentData.shapes, dimensions, resolutionFactor);
+  const triangles = buildMarchingStlTriangles(documentData.shapes, dimensions, resolutionFactor);
   const lines = [`solid ${name}`];
   triangles.forEach(({ normal, vertices }) => {
     lines.push(`  facet normal ${formatStlNumber(normal.x)} ${formatStlNumber(normal.y)} ${formatStlNumber(normal.z)}`);
@@ -1359,6 +1537,7 @@ function App() {
     [document, faceBounds],
   );
   const previewDimensions = useMemo(() => getLockedPreviewDimensions(document), [document]);
+  const stlResolutionMax = useMemo(() => getStlResolutionMax(previewDimensions), [previewDimensions]);
   const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const showingFaceControls = !showing3DControls && !outputOpen;
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
@@ -1366,6 +1545,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
   }, [document]);
+
+  useEffect(() => {
+    setStlResolution((current) => Math.min(current, stlResolutionMax));
+  }, [stlResolutionMax]);
 
   useEffect(() => {
     const editor = editorRefs.current.get(selectedId);
@@ -1819,6 +2002,7 @@ function App() {
             stlReady={Boolean(previewDimensions)}
             stlSaving={stlSaving}
             stlResolution={stlResolution}
+            stlResolutionMax={stlResolutionMax}
             onFormatChange={setOutputFormat}
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
@@ -2067,6 +2251,7 @@ function OutputPanel({
   stlReady,
   stlSaving,
   stlResolution,
+  stlResolutionMax,
   onFormatChange,
   onCopyJson,
   onSaveJson,
@@ -2115,13 +2300,13 @@ function OutputPanel({
               <input
                 type="range"
                 min="1"
-                max="20"
-                step="1"
+                max={stlResolutionMax}
+                step="0.1"
                 value={stlResolution}
-                disabled={stlSaving}
+                disabled={stlSaving || stlResolutionMax <= 1}
                 onChange={(event) => onStlResolutionChange(Number(event.target.value))}
               />
-              <strong>{stlResolution}x</strong>
+              <strong>{stlResolution.toFixed(1)}x</strong>
             </label>
             <div className="output-placeholder">
               STLは保存時にスライサー向けの閉じたメッシュで生成します。
