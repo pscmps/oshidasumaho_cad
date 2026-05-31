@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-08';
+const APP_VERSION = 'proto-2026-05-31-plan-09';
 const FACE_ORDER = ['top', 'front', 'right'];
 const FACE_LABELS = {
   top: '上面',
@@ -467,6 +467,7 @@ function App() {
     [document, faceBounds],
   );
   const previewDimensions = useMemo(() => getLockedPreviewDimensions(document), [document]);
+  const showing3DControls = Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
 
   useEffect(() => {
@@ -686,73 +687,81 @@ function App() {
             <p className="eyebrow">Oshida Smartphone CAD</p>
             <h1>図形配置</h1>
           </div>
-          <div className="header-actions">
-            <button type="button" onClick={() => addShape('rect')}>+四角</button>
-            <button type="button" onClick={() => addShape('circle')}>+円</button>
-          </div>
+          {!showing3DControls ? (
+            <div className="header-actions">
+              <button type="button" onClick={() => addShape('rect')}>+四角</button>
+              <button type="button" onClick={() => addShape('circle')}>+円</button>
+            </div>
+          ) : null}
         </header>
 
-        <div className="document-controls">
-          <div className="active-face-control" aria-label="配置面">
-            <span>配置面</span>
-            <strong className={`face-label face-${activeFace}`}>
-              {FACE_LABELS[activeFace]}
-            </strong>
-          </div>
-          <label>
-            押し出し
-            <input
-              type="number"
-              min="1"
-              value={document.extrude}
-              onChange={(event) =>
-                updateDocument({ extrude: Number(event.target.value) || 1 })
-              }
-            />
-            <span>mm</span>
-          </label>
-          <button type="button" onClick={resetDocument}>初期化</button>
-          <button type="button" onClick={() => setJsonOpen((open) => !open)}>
-            JSON
-          </button>
-        </div>
-
-        <div className="shape-list">
-          {activeShapes.map((shape, index) => (
-            <ShapeEditor
-              key={shape.id}
-              editorRef={(node) => {
-                if (node) {
-                  editorRefs.current.set(shape.id, node);
-                } else {
-                  editorRefs.current.delete(shape.id);
+        {!showing3DControls ? (
+          <div className="document-controls">
+            <div className="active-face-control" aria-label="配置面">
+              <span>配置面</span>
+              <strong className={`face-label face-${activeFace}`}>
+                {FACE_LABELS[activeFace]}
+              </strong>
+            </div>
+            <label>
+              押し出し
+              <input
+                type="number"
+                min="1"
+                value={document.extrude}
+                onChange={(event) =>
+                  updateDocument({ extrude: Number(event.target.value) || 1 })
                 }
-              }}
-              shape={shape}
-              index={index}
-              total={activeShapes.length}
-              selected={shape.id === selectedId}
-              locked={hasAreaConstraint(lockedConstraints[normalizeFace(shape.face)])}
-              constraint={lockedConstraints[normalizeFace(shape.face)]}
-              onSelect={() => selectShape(shape.id)}
-              onChange={(patch) => updateShape(shape.id, patch)}
-              onMove={moveShape}
-              onRemove={removeShape}
-            />
-          ))}
-        </div>
+              />
+              <span>mm</span>
+            </label>
+            <button type="button" onClick={resetDocument}>初期化</button>
+            <button type="button" onClick={() => setJsonOpen((open) => !open)}>
+              JSON
+            </button>
+          </div>
+        ) : null}
 
-        {selectedShape ? (
-          <p className="selection-note">
-            選択中: {FACE_LABELS[normalizeFace(selectedShape.face)]} / {getShapeLabel(selectedShape)}
-          </p>
-        ) : (
-          <p className="selection-note">
-            {FACE_LABELS[activeFace]}の図形: {activeShapes.length}件
-          </p>
-        )}
+        {!showing3DControls ? (
+          <div className="shape-list">
+            {activeShapes.map((shape, index) => (
+              <ShapeEditor
+                key={shape.id}
+                editorRef={(node) => {
+                  if (node) {
+                    editorRefs.current.set(shape.id, node);
+                  } else {
+                    editorRefs.current.delete(shape.id);
+                  }
+                }}
+                shape={shape}
+                index={index}
+                total={activeShapes.length}
+                selected={shape.id === selectedId}
+                locked={hasAreaConstraint(lockedConstraints[normalizeFace(shape.face)])}
+                constraint={lockedConstraints[normalizeFace(shape.face)]}
+                onSelect={() => selectShape(shape.id)}
+                onChange={(patch) => updateShape(shape.id, patch)}
+                onMove={moveShape}
+                onRemove={removeShape}
+              />
+            ))}
+          </div>
+        ) : null}
 
-        {(document.viewMode === '3d' || preview3DSelected) && previewDimensions ? (
+        {!showing3DControls ? (
+          selectedShape ? (
+            <p className="selection-note">
+              選択中: {FACE_LABELS[normalizeFace(selectedShape.face)]} / {getShapeLabel(selectedShape)}
+            </p>
+          ) : (
+            <p className="selection-note">
+              {FACE_LABELS[activeFace]}の図形: {activeShapes.length}件
+            </p>
+          )
+        ) : null}
+
+        {showing3DControls ? (
           <RotationControls rotation={document.rotation} onChange={updateRotation} />
         ) : null}
 
@@ -828,7 +837,7 @@ function Viewer({
               <FacePlan
                 key={face}
                 face={face}
-                active={face === activeFace}
+                active={!preview3DSelected && face === activeFace}
                 full={Boolean(previewFace)}
                 shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
                 constraint={faceConstraints[face]}
