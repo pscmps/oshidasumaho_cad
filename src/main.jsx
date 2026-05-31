@@ -3,8 +3,9 @@ import { createRoot } from 'react-dom/client';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
-const APP_VERSION = 'proto-2026-05-31-plan-14';
-const SOLID_PREVIEW_STEPS = 48;
+const APP_VERSION = 'proto-2026-05-31-plan-15';
+const SOLID_PREVIEW_STEPS = 18;
+const CIRCLE_MESH_SEGMENTS = 64;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
   top: { x: 90, y: 0, z: 0 },
@@ -578,6 +579,87 @@ function buildSolidPreviewFaces(shapes, dimensions) {
   return faces;
 }
 
+function centeredCoordinate(value, dimension) {
+  return value - dimension.min - dimension.size / 2;
+}
+
+function getSurfacePoint(face, u, v, dimensions, opposite = false) {
+  if (face === 'top') {
+    return {
+      x: centeredCoordinate(u, dimensions.width),
+      y: centeredCoordinate(v, dimensions.depth),
+      z: opposite ? -dimensions.height.size / 2 : dimensions.height.size / 2,
+    };
+  }
+  if (face === 'front') {
+    return {
+      x: centeredCoordinate(u, dimensions.width),
+      y: opposite ? dimensions.depth.size / 2 : -dimensions.depth.size / 2,
+      z: centeredCoordinate(v, dimensions.height),
+    };
+  }
+  return {
+    x: opposite ? -dimensions.width.size / 2 : dimensions.width.size / 2,
+    y: centeredCoordinate(u, dimensions.depth),
+    z: centeredCoordinate(v, dimensions.height),
+  };
+}
+
+function getShapeSurfaceRing(shape, face, dimensions, opposite = false) {
+  if (shape.type === 'circle') {
+    return Array.from({ length: CIRCLE_MESH_SEGMENTS }, (_, index) => {
+      const angle = (Math.PI * 2 * index) / CIRCLE_MESH_SEGMENTS;
+      return getSurfacePoint(
+        face,
+        shape.x + Math.cos(angle) * shape.r,
+        shape.y + Math.sin(angle) * shape.r,
+        dimensions,
+        opposite,
+      );
+    });
+  }
+
+  return [
+    getSurfacePoint(face, shape.x, shape.y, dimensions, opposite),
+    getSurfacePoint(face, shape.x + shape.w, shape.y, dimensions, opposite),
+    getSurfacePoint(face, shape.x + shape.w, shape.y + shape.h, dimensions, opposite),
+    getSurfacePoint(face, shape.x, shape.y + shape.h, dimensions, opposite),
+  ];
+}
+
+function buildSurfacePreviewFaces(shapes, dimensions) {
+  const facePairs = [
+    { source: 'top', className: 'iso-preview-top', oppositeClassName: 'iso-preview-bottom' },
+    { source: 'front', className: 'iso-preview-front', oppositeClassName: 'iso-preview-back' },
+    { source: 'right', className: 'iso-preview-right', oppositeClassName: 'iso-preview-left' },
+  ];
+
+  return facePairs.flatMap(({ source, className, oppositeClassName }) => {
+    const faceShapes = shapes.filter((shape) => normalizeFace(shape.face) === source);
+    const addShapes = faceShapes.filter((shape) => shape.mode === 'add');
+    const cutShapes = faceShapes.filter((shape) => shape.mode === 'cut');
+
+    return addShapes.flatMap((shape) => {
+      const cutRings = cutShapes.map((cutShape) =>
+        getShapeSurfaceRing(cutShape, source, dimensions, false),
+      );
+      const oppositeCutRings = cutShapes.map((cutShape) =>
+        getShapeSurfaceRing(cutShape, source, dimensions, true),
+      );
+      return [
+        {
+          className,
+          rings: [getShapeSurfaceRing(shape, source, dimensions, false), ...cutRings],
+        },
+        {
+          className: oppositeClassName,
+          rings: [getShapeSurfaceRing(shape, source, dimensions, true), ...oppositeCutRings],
+        },
+      ];
+    });
+  });
+}
+
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -1125,6 +1207,15 @@ function rotatePoint(point, rotation) {
   return { x: nextX, y: nextY, z };
 }
 
+function getProjectedSurfacePath(rings) {
+  return rings
+    .map((ring) => ring
+      .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.sx} ${point.sy}`)
+      .join(' '))
+    .map((path) => `${path} Z`)
+    .join(' ');
+}
+
 function IsometricPreview({
   dimensions,
   shapes,
@@ -1143,45 +1234,24 @@ function IsometricPreview({
   const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + (expanded ? 12 : 4) };
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
   const scale = (expanded ? 96 : 48) / maxSize;
-  const faces = useMemo(() => buildSolidPreviewFaces(shapes, dimensions), [shapes, dimensions]);
-  const projectedFaces = faces.map((face) => {
-    const points = face.corners.map((point) => {
+  const surfaces = useMemo(() => buildSurfacePreviewFaces(shapes, dimensions), [shapes, dimensions]);
+  const projectedSurfaces = surfaces.map((surface) => {
+    const projectedRings = surface.rings.map((ring) => ring.map((point) => {
       const rotated = rotatePoint(point, rotation);
       return {
         ...rotated,
         sx: center.x + rotated.x * scale,
         sy: center.y - rotated.z * scale,
       };
-    });
-    const depth = points.reduce((sum, point) => sum + point.y, 0) / points.length;
+    }));
+    const projectedPoints = projectedRings.flat();
+    const depth = projectedPoints.reduce((sum, point) => sum + point.y, 0) / projectedPoints.length;
     return {
-      ...face,
+      ...surface,
       depth,
-      projectedCorners: points,
-      points: points.map((point) => `${point.sx},${point.sy}`).join(' '),
+      path: getProjectedSurfacePath(projectedRings),
     };
   }).sort((a, b) => b.depth - a.depth);
-  const pointKey = (point) => `${point.x.toFixed(4)}:${point.y.toFixed(4)}:${point.z.toFixed(4)}`;
-  const edgeKey = (face, index) => {
-    const nextIndex = (index + 1) % face.corners.length;
-    return [
-      face.className,
-      [pointKey(face.corners[index]), pointKey(face.corners[nextIndex])].sort().join('|'),
-    ].join('|');
-  };
-  const edgeUsage = useMemo(() => {
-    if (!showEdges) {
-      return new Map();
-    }
-    const edgeMap = new Map();
-    projectedFaces.forEach((face) => {
-      face.corners.forEach((_, index) => {
-        const key = edgeKey(face, index);
-        edgeMap.set(key, (edgeMap.get(key) || 0) + 1);
-      });
-    });
-    return edgeMap;
-  }, [projectedFaces, showEdges]);
 
   return (
     <g
@@ -1197,25 +1267,12 @@ function IsometricPreview({
       }}
     >
       <rect className="iso-preview-frame" x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
-      {projectedFaces.map((face, faceIndex) => (
-        <g key={`${face.className}-${faceIndex}`}>
-          <polygon className={face.className} points={face.points} />
-          {showEdges ? face.projectedCorners.map((point, index) => {
-            if (edgeUsage.get(edgeKey(face, index)) !== 1) {
-              return null;
-            }
-            const next = face.projectedCorners[(index + 1) % face.projectedCorners.length];
-            return (
-              <line
-                key={`${face.className}-${faceIndex}-edge-${index}`}
-                className="iso-preview-outline-edge"
-                x1={point.sx}
-                y1={point.sy}
-                x2={next.sx}
-                y2={next.sy}
-              />
-            );
-          }) : null}
+      {projectedSurfaces.map((surface, index) => (
+        <g key={`${surface.className}-${index}`}>
+          <path className={surface.className} d={surface.path} fillRule="evenodd" />
+          {showEdges ? (
+            <path className="iso-preview-outline-edge" d={surface.path} fill="none" />
+          ) : null}
         </g>
       ))}
       <text x={box.x + box.width / 2} y={box.labelY}>3D preview</text>
