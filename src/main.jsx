@@ -6,7 +6,7 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-06-01-step-brep-01';
+const APP_VERSION = 'proto-2026-06-01-save-ui-01';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -1679,12 +1679,12 @@ function App() {
   const [outputFormat, setOutputFormat] = useState('json');
   const [previewMenuOpen, setPreviewMenuOpen] = useState(false);
   const [savedParts, setSavedParts] = useState(loadSavedParts);
-  const [partDialog, setPartDialog] = useState(null);
   const [saveName, setSaveName] = useState(document.partName ?? '');
   const [loadPartId, setLoadPartId] = useState('');
   const [stlSaving, setStlSaving] = useState(false);
   const [stepSaving, setStepSaving] = useState(false);
   const [stlResolution, setStlResolution] = useState(1);
+  const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
 
@@ -1706,6 +1706,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
   }, [document]);
+
+  useEffect(() => {
+    setSaveName(document.partName ?? '');
+  }, [document.partName]);
 
   useEffect(() => {
     setStlResolution((current) => Math.min(current, stlResolutionMax));
@@ -1901,26 +1905,32 @@ function App() {
     setFullPreviewFace(null);
     setOutputOpen(false);
     setPreviewMenuOpen(false);
-    setPartDialog(null);
+    setResetConfirmOpen(false);
   }
 
-  function openSaveDialog() {
-    setSaveName(document.partName ?? '');
-    setPartDialog('save');
+  function openSavePanel(format = 'json') {
+    setOutputOpen(true);
+    setOutputFormat(format);
+    setSelectedId(null);
+    setPreview3DSelected(false);
     setPreviewMenuOpen(false);
   }
 
-  function openLoadDialog() {
-    setLoadPartId(savedParts[0]?.id ?? '');
-    setPartDialog('load');
+  function openHelpPanel() {
+    openSavePanel('help');
+  }
+
+  function requestScreenReset() {
+    setResetConfirmOpen(true);
     setPreviewMenuOpen(false);
   }
 
-  function closePartDialog() {
-    setPartDialog(null);
+  function updatePartName(name) {
+    setSaveName(name);
+    setDocument((current) => ({ ...current, partName: name }));
   }
 
-  function savePart() {
+  function savePartToWeb() {
     const name = saveName.trim();
     if (!name) {
       return;
@@ -1941,7 +1951,7 @@ function App() {
     setSavedParts(nextSavedParts);
     storeSavedParts(nextSavedParts);
     setDocument(nextDocument);
-    setPartDialog(null);
+    setLoadPartId(nextPart.id);
   }
 
   function loadPart() {
@@ -1954,9 +1964,17 @@ function App() {
     setSelectedId(nextDocument.shapes[0]?.id ?? null);
     setPreview3DSelected(false);
     setFullPreviewFace(null);
-    setOutputOpen(false);
-    setPartDialog(null);
     setPreviewMenuOpen(false);
+  }
+
+  function deleteSavedPart() {
+    if (!loadPartId) {
+      return;
+    }
+    const nextSavedParts = savedParts.filter((part) => part.id !== loadPartId);
+    setSavedParts(nextSavedParts);
+    storeSavedParts(nextSavedParts);
+    setLoadPartId(nextSavedParts[0]?.id ?? '');
   }
 
   function setActiveFace(face) {
@@ -1997,14 +2015,6 @@ function App() {
     setFullPreviewFace(null);
     setSelectedId(null);
     setOutputOpen(false);
-  }
-
-  function openOutputPanel() {
-    setOutputOpen(true);
-    setOutputFormat('json');
-    setSelectedId(null);
-    setPreview3DSelected(false);
-    setPreviewMenuOpen(false);
   }
 
   async function copyTextOutput(text) {
@@ -2084,10 +2094,9 @@ function App() {
           on3DSelect={select3DPreview}
           on3DDoubleSelect={toggle3DPreview}
           onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
-          onReset={resetDocument}
-          onOutputOpen={openOutputPanel}
-          onSaveOpen={openSaveDialog}
-          onLoadOpen={openLoadDialog}
+          onReset={requestScreenReset}
+          onSaveOpen={() => openSavePanel('json')}
+          onHelpOpen={openHelpPanel}
         />
       </section>
 
@@ -2179,30 +2188,31 @@ function App() {
             stepSaving={stepSaving}
             stlResolution={stlResolution}
             stlResolutionMax={stlResolutionMax}
+            partName={saveName}
+            savedParts={savedParts}
+            selectedSavedPartId={loadPartId}
             onFormatChange={setOutputFormat}
+            onPartNameChange={updatePartName}
+            onSavedPartSelect={setLoadPartId}
+            onLoadPart={loadPart}
+            onDeleteSavedPart={deleteSavedPart}
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
+            onSaveWeb={savePartToWeb}
             onStlResolutionChange={setStlResolution}
             onSaveStl={saveStlOutput}
             onSaveStep={saveStepOutput}
           />
         ) : null}
       </section>
-      {partDialog === 'save' ? (
-        <SavePartDialog
-          name={saveName}
-          onNameChange={setSaveName}
-          onSave={savePart}
-          onCancel={closePartDialog}
-        />
-      ) : null}
-      {partDialog === 'load' ? (
-        <LoadPartDialog
-          savedParts={savedParts}
-          selectedId={loadPartId}
-          onSelect={setLoadPartId}
-          onLoad={loadPart}
-          onCancel={closePartDialog}
+      {resetConfirmOpen ? (
+        <ConfirmDialog
+          title="画面リセット"
+          message="本当に画面をリセットしますか？"
+          confirmLabel="はい"
+          cancelLabel="いいえ"
+          onConfirm={resetDocument}
+          onCancel={() => setResetConfirmOpen(false)}
         />
       ) : null}
     </main>
@@ -2232,9 +2242,8 @@ function Viewer({
   on3DDoubleSelect,
   onMenuToggle,
   onReset,
-  onOutputOpen,
   onSaveOpen,
-  onLoadOpen,
+  onHelpOpen,
 }) {
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
@@ -2268,9 +2277,8 @@ function Viewer({
           {menuOpen ? (
             <div className="viewer-menu-popover">
               <button type="button" onClick={onSaveOpen}>保存</button>
-              <button type="button" onClick={onLoadOpen}>呼び出し</button>
-              <button type="button" onClick={onOutputOpen}>出力</button>
-              <button type="button" onClick={onReset}>初期化</button>
+              <button type="button" onClick={onHelpOpen}>ヘルプ</button>
+              <button type="button" onClick={onReset}>画面リセット</button>
             </div>
           ) : null}
         </div>
@@ -2348,76 +2356,24 @@ function Viewer({
   );
 }
 
-function SavePartDialog({ name, onNameChange, onSave, onCancel }) {
+function ConfirmDialog({ title, message, confirmLabel, cancelLabel, onConfirm, onCancel }) {
   return (
     <div className="dialog-backdrop" role="presentation">
-      <form
+      <div
         className="part-dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="部品保存"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onSave();
-        }}
+        aria-label={title}
       >
         <header>
-          <h2>保存</h2>
+          <h2>{title}</h2>
         </header>
-        <label className="dialog-field">
-          <span>名前</span>
-          <input
-            type="text"
-            value={name}
-            autoFocus
-            onChange={(event) => onNameChange(event.target.value)}
-          />
-        </label>
+        <p className="dialog-message">{message}</p>
         <div className="dialog-actions">
-          <button type="submit" disabled={!name.trim()}>save</button>
-          <button type="button" onClick={onCancel}>cancel</button>
+          <button type="button" onClick={onConfirm}>{confirmLabel}</button>
+          <button type="button" onClick={onCancel}>{cancelLabel}</button>
         </div>
-      </form>
-    </div>
-  );
-}
-
-function LoadPartDialog({ savedParts, selectedId, onSelect, onLoad, onCancel }) {
-  const hasSavedParts = savedParts.length > 0;
-  return (
-    <div className="dialog-backdrop" role="presentation">
-      <form
-        className="part-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-label="部品呼び出し"
-        onSubmit={(event) => {
-          event.preventDefault();
-          onLoad();
-        }}
-      >
-        <header>
-          <h2>呼び出し</h2>
-        </header>
-        <label className="dialog-field">
-          <span>保存データ</span>
-          <select
-            value={selectedId}
-            disabled={!hasSavedParts}
-            onChange={(event) => onSelect(event.target.value)}
-          >
-            {hasSavedParts ? savedParts.map((part) => (
-              <option key={part.id} value={part.id}>{part.name}</option>
-            )) : (
-              <option value="">保存データなし</option>
-            )}
-          </select>
-        </label>
-        <div className="dialog-actions">
-          <button type="submit" disabled={!hasSavedParts || !selectedId}>load</button>
-          <button type="button" onClick={onCancel}>cancel</button>
-        </div>
-      </form>
+      </div>
     </div>
   );
 }
@@ -2430,14 +2386,23 @@ function OutputPanel({
   stepSaving,
   stlResolution,
   stlResolutionMax,
+  partName,
+  savedParts,
+  selectedSavedPartId,
   onFormatChange,
+  onPartNameChange,
+  onSavedPartSelect,
+  onLoadPart,
+  onDeleteSavedPart,
   onCopyJson,
   onSaveJson,
+  onSaveWeb,
   onStlResolutionChange,
   onSaveStl,
   onSaveStep,
 }) {
   const meshSaving = stlSaving || stepSaving;
+  const hasSavedParts = savedParts.length > 0;
   const meshResolutionControl = (
     <label className="stl-resolution-control">
       <span>分割</span>
@@ -2455,33 +2420,69 @@ function OutputPanel({
   );
 
   return (
-    <section className="output-panel" aria-label="出力">
+    <section className="output-panel" aria-label="保存">
       <header className="output-header">
         <div>
           <p className="eyebrow">Oshida Smartphone CAD</p>
-          <h1>出力</h1>
+          <h1>保存</h1>
         </div>
       </header>
-      <div className="output-tabs" role="tablist" aria-label="出力形式">
-        {['json', 'stl', 'step'].map((item) => (
+      <div className="part-storage-panel">
+        <label className="part-name-field">
+          <span>名前</span>
+          <input
+            type="text"
+            value={partName}
+            onChange={(event) => onPartNameChange(event.target.value)}
+          />
+        </label>
+        <label className="saved-part-field">
+          <span>web保存データ</span>
+          <select
+            value={selectedSavedPartId}
+            disabled={!hasSavedParts}
+            onChange={(event) => onSavedPartSelect(event.target.value)}
+          >
+            {hasSavedParts ? savedParts.map((part) => (
+              <option key={part.id} value={part.id}>{part.name}</option>
+            )) : (
+              <option value="">保存データなし</option>
+            )}
+          </select>
+        </label>
+        <div className="saved-part-actions">
+          <button type="button" onClick={onLoadPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+            呼び出し
+          </button>
+          <button type="button" onClick={onDeleteSavedPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+            削除
+          </button>
+        </div>
+        <p className="web-save-warning">
+          web保存はブラウザ内に保存されます。キャッシュやサイトデータを消すと削除されます。
+        </p>
+      </div>
+      <div className="output-tabs" role="tablist" aria-label="保存形式">
+        {['json', 'stl', 'step', 'help'].map((item) => (
           <button
             key={item}
             type="button"
             className={format === item ? 'active' : ''}
             onClick={() => onFormatChange(item)}
           >
-            {item.toUpperCase()}
+            {item === 'help' ? 'ヘルプ' : item.toUpperCase()}
           </button>
         ))}
       </div>
       {format === 'json' ? (
-        <div className="output-content">
-          <div className="output-actions">
-            <button type="button" onClick={onCopyJson}>コピー</button>
-            <button type="button" onClick={onSaveJson}>保存</button>
+          <div className="output-content">
+            <div className="output-actions">
+              <button type="button" onClick={onCopyJson}>コピー</button>
+              <button type="button" onClick={onSaveJson}>保存</button>
+              <button type="button" onClick={onSaveWeb} disabled={!partName.trim()}>web保存</button>
+            </div>
+            <pre className="json-view">{jsonText}</pre>
           </div>
-          <pre className="json-view">{jsonText}</pre>
-        </div>
       ) : null}
       {format === 'stl' ? (
         stlReady ? (
@@ -2498,7 +2499,7 @@ function OutputPanel({
           </div>
         ) : (
           <div className="output-placeholder">
-            3面をロックするとSTL出力できます。
+            3面をロックするとSTL保存できます。
           </div>
         )
       ) : null}
@@ -2517,11 +2518,42 @@ function OutputPanel({
           </div>
         ) : (
           <div className="output-placeholder">
-            3面をロックするとSTEP出力できます。
+            3面をロックするとSTEP保存できます。
           </div>
         )
       ) : null}
+      {format === 'help' ? (
+        <HelpPanel />
+      ) : null}
     </section>
+  );
+}
+
+function HelpPanel() {
+  return (
+    <div className="help-panel">
+      <h2>基本の流れ</h2>
+      <ol>
+        <li>上面に図形を置き、エリアをロックします。</li>
+        <li>正面に図形を置き、エリアをロックします。</li>
+        <li>右側面に図形を置き、エリアをロックします。</li>
+        <li>3面すべてが成り立つと、右上に3Dプレビューが表示されます。</li>
+      </ol>
+      <h2>操作</h2>
+      <ul>
+        <li>図形をタップすると、その図形の編集UIへ移動します。</li>
+        <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
+        <li>面をダブルタップすると、その面だけを拡大表示します。もう一度ダブルタップすると3面図へ戻ります。</li>
+        <li>3Dプレビューをタップすると、回転・透過・グリッド・エッジの表示を調整できます。</li>
+        <li>3Dプレビューをダブルタップすると、3D表示を拡大します。</li>
+      </ul>
+      <h2>保存</h2>
+      <ul>
+        <li>JSONは現在の編集データです。ファイル保存とweb保存ができます。</li>
+        <li>STLはスライサー向けのメッシュとして保存します。</li>
+        <li>STEPはCAD向けのB-repとして保存します。</li>
+      </ul>
+    </div>
   );
 }
 
