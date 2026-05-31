@@ -6,7 +6,7 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-06-01-save-ui-02';
+const APP_VERSION = 'proto-2026-06-01-save-ui-03';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -1920,6 +1920,11 @@ function App() {
     openSavePanel('help');
   }
 
+  function openLoadPanel() {
+    openSavePanel('load');
+    setLoadPartId((current) => current || savedParts[0]?.id || '');
+  }
+
   function requestScreenReset() {
     setResetConfirmOpen(true);
     setPreviewMenuOpen(false);
@@ -2096,6 +2101,7 @@ function App() {
           onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
           onReset={requestScreenReset}
           onSaveOpen={() => openSavePanel('json')}
+          onLoadOpen={openLoadPanel}
           onHelpOpen={openHelpPanel}
         />
       </section>
@@ -2243,6 +2249,7 @@ function Viewer({
   onMenuToggle,
   onReset,
   onSaveOpen,
+  onLoadOpen,
   onHelpOpen,
 }) {
   const activeFace = normalizeFace(document.activeFace);
@@ -2277,6 +2284,7 @@ function Viewer({
           {menuOpen ? (
             <div className="viewer-menu-popover">
               <button type="button" onClick={onSaveOpen}>保存</button>
+              <button type="button" onClick={onLoadOpen}>呼び出し</button>
               <button type="button" onClick={onHelpOpen}>ヘルプ</button>
               <button type="button" onClick={onReset}>画面リセット</button>
             </div>
@@ -2424,10 +2432,10 @@ function OutputPanel({
       <header className="output-header">
         <div>
           <p className="eyebrow">Oshida Smartphone CAD</p>
-          <h1>{format === 'help' ? 'ヘルプ' : '保存'}</h1>
+          <h1>{format === 'help' ? 'ヘルプ' : format === 'load' ? '呼び出し' : '保存'}</h1>
         </div>
       </header>
-      {format !== 'help' ? (
+      {format !== 'help' && format !== 'load' ? (
         <>
           <div className="part-storage-panel save-panel">
             <h2>保存</h2>
@@ -2443,31 +2451,6 @@ function OutputPanel({
               web保存はブラウザ内に保存されます。キャッシュやサイトデータを消すと削除されます。
             </p>
           </div>
-          <div className="part-storage-panel load-panel">
-            <h2>web保存データ</h2>
-            <label className="saved-part-field">
-              <span>呼び出しデータ</span>
-              <select
-                value={selectedSavedPartId}
-                disabled={!hasSavedParts}
-                onChange={(event) => onSavedPartSelect(event.target.value)}
-              >
-                {hasSavedParts ? savedParts.map((part) => (
-                  <option key={part.id} value={part.id}>{part.name}</option>
-                )) : (
-                  <option value="">保存データなし</option>
-                )}
-              </select>
-            </label>
-            <div className="saved-part-actions">
-              <button type="button" onClick={onLoadPart} disabled={!hasSavedParts || !selectedSavedPartId}>
-                呼び出し
-              </button>
-              <button type="button" onClick={onDeleteSavedPart} disabled={!hasSavedParts || !selectedSavedPartId}>
-                削除
-              </button>
-            </div>
-          </div>
           <div className="output-tabs" role="tablist" aria-label="保存形式">
             {['json', 'stl', 'step'].map((item) => (
               <button
@@ -2481,6 +2464,33 @@ function OutputPanel({
             ))}
           </div>
         </>
+      ) : null}
+      {format === 'load' ? (
+        <div className="part-storage-panel load-panel">
+          <h2>web保存データ</h2>
+          <label className="saved-part-field">
+            <span>呼び出しデータ</span>
+            <select
+              value={selectedSavedPartId}
+              disabled={!hasSavedParts}
+              onChange={(event) => onSavedPartSelect(event.target.value)}
+            >
+              {hasSavedParts ? savedParts.map((part) => (
+                <option key={part.id} value={part.id}>{part.name}</option>
+              )) : (
+                <option value="">保存データなし</option>
+              )}
+            </select>
+          </label>
+          <div className="saved-part-actions">
+            <button type="button" onClick={onLoadPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+              呼び出し
+            </button>
+            <button type="button" onClick={onDeleteSavedPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+              削除
+            </button>
+          </div>
+        </div>
       ) : null}
       {format === 'json' ? (
           <div className="output-content">
