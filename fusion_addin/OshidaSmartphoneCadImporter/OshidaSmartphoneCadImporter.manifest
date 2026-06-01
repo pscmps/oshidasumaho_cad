@@ -1,0 +1,10 @@
+{
+  "autodeskProduct": "Fusion360",
+  "type": "addin",
+  "author": "pscmps",
+  "description": {
+    "": "Import Oshida Smartphone CAD JSON and reconstruct the part as Fusion solids."
+  },
+  "supportedOS": "windows|mac",
+  "editEnabled": true
+}
