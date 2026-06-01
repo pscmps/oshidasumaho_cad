@@ -6,13 +6,17 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-06-01-save-ui-03';
+const APP_VERSION = 'proto-2026-06-01-step-light-01';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
 const STL_VOXEL_MAX_AXIS_STEPS = 180;
 const STL_VOXEL_MAX_CELLS = 12_000_000;
 const STL_RESOLUTION_MAX = 20;
+const STEP_VOXEL_CELL_SIZE = 1.5;
+const STEP_VOXEL_MAX_AXIS_STEPS = 80;
+const STEP_VOXEL_MAX_CELLS = 250_000;
+const STEP_RESOLUTION_MAX = 1.5;
 const SECTION_SAMPLE_EPSILON = 0.001;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
@@ -1231,9 +1235,23 @@ function getOutputBaseName(documentData) {
   return (documentData.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
 }
 
-function getStlBaseCellSize(dimensions) {
+const STL_MESH_OPTIONS = {
+  baseCellSize: STL_VOXEL_CELL_SIZE,
+  maxAxisSteps: STL_VOXEL_MAX_AXIS_STEPS,
+  maxCells: STL_VOXEL_MAX_CELLS,
+  resolutionMax: STL_RESOLUTION_MAX,
+};
+
+const STEP_MESH_OPTIONS = {
+  baseCellSize: STEP_VOXEL_CELL_SIZE,
+  maxAxisSteps: STEP_VOXEL_MAX_AXIS_STEPS,
+  maxCells: STEP_VOXEL_MAX_CELLS,
+  resolutionMax: STEP_RESOLUTION_MAX,
+};
+
+function getMeshBaseCellSize(dimensions, options = STL_MESH_OPTIONS) {
   const maxSize = Math.max(dimensions.width.size, dimensions.depth.size, dimensions.height.size);
-  return Math.max(STL_VOXEL_CELL_SIZE, maxSize / STL_VOXEL_MAX_AXIS_STEPS);
+  return Math.max(options.baseCellSize, maxSize / options.maxAxisSteps);
 }
 
 function getStlSpanStepCounts(dimensions, cellSize) {
@@ -1244,22 +1262,22 @@ function getStlSpanStepCounts(dimensions, cellSize) {
   };
 }
 
-function getStlResolutionMax(dimensions) {
+function getMeshResolutionMax(dimensions, options = STL_MESH_OPTIONS) {
   if (!dimensions) {
     return 1;
   }
 
-  const baseCellSize = getStlBaseCellSize(dimensions);
+  const baseCellSize = getMeshBaseCellSize(dimensions, options);
   const baseSteps = getStlSpanStepCounts(dimensions, baseCellSize);
   const baseCells = baseSteps.x * baseSteps.y * baseSteps.z;
-  const maxByCells = Math.cbrt(STL_VOXEL_MAX_CELLS / Math.max(1, baseCells));
-  return Math.max(1, Math.min(STL_RESOLUTION_MAX, Math.floor(maxByCells * 10) / 10));
+  const maxByCells = Math.cbrt(options.maxCells / Math.max(1, baseCells));
+  return Math.max(1, Math.min(options.resolutionMax, Math.floor(maxByCells * 10) / 10));
 }
 
-function getStlVoxelGrid(dimensions, resolutionFactor = 1) {
-  const resolutionMax = getStlResolutionMax(dimensions);
+function getStlVoxelGrid(dimensions, resolutionFactor = 1, options = STL_MESH_OPTIONS) {
+  const resolutionMax = getMeshResolutionMax(dimensions, options);
   const requestedFactor = clampValue(Number(resolutionFactor) || 1, 1, resolutionMax);
-  const targetCellSize = getStlBaseCellSize(dimensions) / requestedFactor;
+  const targetCellSize = getMeshBaseCellSize(dimensions, options) / requestedFactor;
   const spanSteps = getStlSpanStepCounts(dimensions, targetCellSize);
   const cell = {
     x: dimensions.width.size / spanSteps.x,
@@ -1335,8 +1353,8 @@ function getSolidSignedDistance(faceShapesByFace, dimensions, point) {
   );
 }
 
-function createStlField(shapes, dimensions, resolutionFactor) {
-  const grid = getStlVoxelGrid(dimensions, resolutionFactor);
+function createStlField(shapes, dimensions, resolutionFactor, options = STL_MESH_OPTIONS) {
+  const grid = getStlVoxelGrid(dimensions, resolutionFactor, options);
   const { pointCounts, cell, origin } = grid;
   const xValues = createStlAxisValues(pointCounts.x, origin.x, cell.x);
   const yValues = createStlAxisValues(pointCounts.y, origin.y, cell.y);
@@ -1452,8 +1470,8 @@ function pushMarchingTetraTriangles(triangles, corners, faceShapesByFace, dimens
   pushOrientedStlTriangle(triangles, points[0], points[2], points[3], faceShapesByFace, dimensions, epsilon);
 }
 
-function buildMarchingStlTriangles(shapes, dimensions, resolutionFactor = 1) {
-  const field = createStlField(shapes, dimensions, resolutionFactor);
+function buildMarchingStlTriangles(shapes, dimensions, resolutionFactor = 1, options = STL_MESH_OPTIONS) {
+  const field = createStlField(shapes, dimensions, resolutionFactor, options);
   const { stepCounts, cell, faceShapesByFace } = field;
   const triangles = [];
   const cornerOffsets = [
@@ -1507,7 +1525,7 @@ function buildStlText(documentData, dimensions, resolutionFactor = 1) {
     return '';
   }
   const name = getOutputBaseName(documentData);
-  const triangles = buildMarchingStlTriangles(documentData.shapes, dimensions, resolutionFactor);
+  const triangles = buildMarchingStlTriangles(documentData.shapes, dimensions, resolutionFactor, STL_MESH_OPTIONS);
   const lines = [`solid ${name}`];
   triangles.forEach(({ normal, vertices }) => {
     lines.push(`  facet normal ${formatStlNumber(normal.x)} ${formatStlNumber(normal.y)} ${formatStlNumber(normal.z)}`);
@@ -1554,7 +1572,7 @@ function buildStepText(documentData, dimensions, resolutionFactor = 1) {
 
   const name = getOutputBaseName(documentData);
   const safeName = escapeStepString(name);
-  const triangles = buildMarchingStlTriangles(documentData.shapes, dimensions, resolutionFactor);
+  const triangles = buildMarchingStlTriangles(documentData.shapes, dimensions, resolutionFactor, STEP_MESH_OPTIONS);
   const writer = createStepWriter();
   const verticesByPoint = new Map();
   const edgesByKey = new Map();
@@ -1684,6 +1702,7 @@ function App() {
   const [stlSaving, setStlSaving] = useState(false);
   const [stepSaving, setStepSaving] = useState(false);
   const [stlResolution, setStlResolution] = useState(1);
+  const [stepResolution, setStepResolution] = useState(1);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
@@ -1698,7 +1717,8 @@ function App() {
     [document, faceBounds],
   );
   const previewDimensions = useMemo(() => getLockedPreviewDimensions(document), [document]);
-  const stlResolutionMax = useMemo(() => getStlResolutionMax(previewDimensions), [previewDimensions]);
+  const stlResolutionMax = useMemo(() => getMeshResolutionMax(previewDimensions, STL_MESH_OPTIONS), [previewDimensions]);
+  const stepResolutionMax = useMemo(() => getMeshResolutionMax(previewDimensions, STEP_MESH_OPTIONS), [previewDimensions]);
   const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const showingFaceControls = !showing3DControls && !outputOpen;
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
@@ -1714,6 +1734,10 @@ function App() {
   useEffect(() => {
     setStlResolution((current) => Math.min(current, stlResolutionMax));
   }, [stlResolutionMax]);
+
+  useEffect(() => {
+    setStepResolution((current) => Math.min(current, stepResolutionMax));
+  }, [stepResolutionMax]);
 
   useEffect(() => {
     const editor = editorRefs.current.get(selectedId);
@@ -2068,7 +2092,7 @@ function App() {
     setStepSaving(true);
     try {
       await new Promise((resolve) => window.requestAnimationFrame(resolve));
-      saveTextOutput(buildStepText(document, previewDimensions, stlResolution), 'step', 'model/step');
+      saveTextOutput(buildStepText(document, previewDimensions, stepResolution), 'step', 'model/step');
     } finally {
       setStepSaving(false);
     }
@@ -2192,8 +2216,8 @@ function App() {
             stlReady={Boolean(previewDimensions)}
             stlSaving={stlSaving}
             stepSaving={stepSaving}
-            stlResolution={stlResolution}
-            stlResolutionMax={stlResolutionMax}
+            meshResolution={outputFormat === 'step' ? stepResolution : stlResolution}
+            meshResolutionMax={outputFormat === 'step' ? stepResolutionMax : stlResolutionMax}
             partName={saveName}
             savedParts={savedParts}
             selectedSavedPartId={loadPartId}
@@ -2205,7 +2229,13 @@ function App() {
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
             onSaveWeb={savePartToWeb}
-            onStlResolutionChange={setStlResolution}
+            onMeshResolutionChange={(value) => {
+              if (outputFormat === 'step') {
+                setStepResolution(value);
+                return;
+              }
+              setStlResolution(value);
+            }}
             onSaveStl={saveStlOutput}
             onSaveStep={saveStepOutput}
           />
@@ -2392,8 +2422,8 @@ function OutputPanel({
   stlReady,
   stlSaving,
   stepSaving,
-  stlResolution,
-  stlResolutionMax,
+  meshResolution,
+  meshResolutionMax,
   partName,
   savedParts,
   selectedSavedPartId,
@@ -2405,7 +2435,7 @@ function OutputPanel({
   onCopyJson,
   onSaveJson,
   onSaveWeb,
-  onStlResolutionChange,
+  onMeshResolutionChange,
   onSaveStl,
   onSaveStep,
 }) {
@@ -2417,13 +2447,13 @@ function OutputPanel({
       <input
         type="range"
         min="1"
-        max={stlResolutionMax}
+        max={meshResolutionMax}
         step="0.1"
-        value={stlResolution}
-        disabled={meshSaving || stlResolutionMax <= 1}
-        onChange={(event) => onStlResolutionChange(Number(event.target.value))}
+        value={meshResolution}
+        disabled={meshSaving || meshResolutionMax <= 1}
+        onChange={(event) => onMeshResolutionChange(Number(event.target.value))}
       />
-      <strong>{stlResolution.toFixed(1)}x</strong>
+      <strong>{meshResolution.toFixed(1)}x</strong>
     </label>
   );
 
