@@ -6,17 +6,13 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-06-01-02';
+const APP_VERSION = 'proto-2026-06-01-03';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
 const STL_VOXEL_MAX_AXIS_STEPS = 180;
 const STL_VOXEL_MAX_CELLS = 12_000_000;
 const STL_RESOLUTION_MAX = 20;
-const STEP_VOXEL_CELL_SIZE = 1.5;
-const STEP_VOXEL_MAX_AXIS_STEPS = 80;
-const STEP_VOXEL_MAX_CELLS = 250_000;
-const STEP_RESOLUTION_MAX = 1.5;
 const SECTION_SAMPLE_EPSILON = 0.001;
 const DEFAULT_ROTATION = { x: 24, y: -34, z: 0 };
 const FACE_VIEW_ROTATIONS = {
@@ -1219,24 +1215,112 @@ function formatStlNumber(value) {
   return Number(value.toFixed(6)).toString();
 }
 
-function formatStepNumber(value) {
-  if (Math.abs(value) < 0.000001) {
-    return '0.';
-  }
-  const formatted = Number(value.toFixed(6)).toString();
-  return formatted.includes('.') ? formatted : `${formatted}.`;
-}
-
-function escapeStepString(value) {
-  return String(value).replace(/'/g, "''");
-}
-
-function getStepPointKey(point) {
-  return `${formatStepNumber(point.x)}:${formatStepNumber(point.y)}:${formatStepNumber(point.z)}`;
-}
-
 function getOutputBaseName(documentData) {
   return (documentData.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
+}
+
+let replicadReadyPromise = null;
+
+async function ensureReplicadReady() {
+  if (!replicadReadyPromise) {
+    replicadReadyPromise = Promise.all([
+      import('replicad-opencascadejs/src/replicad_single.js'),
+      import('replicad-opencascadejs/src/replicad_single.wasm?url'),
+      import('replicad'),
+    ]).then(async ([opencascadeModule, opencascadeWasmModule, replicad]) => {
+      const opencascade = opencascadeModule.default;
+      const opencascadeWasm = opencascadeWasmModule.default;
+      const oc = await opencascade({
+        locateFile: (path) => (path.endsWith('.wasm') ? opencascadeWasm : path),
+      });
+      replicad.setOC(oc);
+      return replicad;
+    });
+  }
+  return replicadReadyPromise;
+}
+
+function getReplicadPlaneConfig(shape, face, dimensions) {
+  const centerU = shape.type === 'circle' ? shape.x : shape.x + shape.w / 2;
+  const centerV = shape.type === 'circle' ? shape.y : shape.y + shape.h / 2;
+
+  if (face === 'top') {
+    return {
+      plane: 'XY',
+      origin: [
+        centeredCoordinate(centerU, dimensions.width),
+        centeredCoordinate(centerV, dimensions.depth),
+        -dimensions.height.size / 2,
+      ],
+      distance: dimensions.height.size,
+    };
+  }
+  if (face === 'front') {
+    return {
+      plane: 'XZ',
+      origin: [
+        centeredCoordinate(centerU, dimensions.width),
+        dimensions.depth.size / 2,
+        centeredCoordinate(centerV, dimensions.height),
+      ],
+      distance: dimensions.depth.size,
+    };
+  }
+  return {
+    plane: 'YZ',
+    origin: [
+      -dimensions.width.size / 2,
+      centeredCoordinate(centerU, dimensions.depth),
+      centeredCoordinate(centerV, dimensions.height),
+    ],
+    distance: dimensions.width.size,
+  };
+}
+
+function createReplicadPrism(replicad, shape, face, dimensions) {
+  const planeConfig = getReplicadPlaneConfig(shape, face, dimensions);
+  const sketch = shape.type === 'circle'
+    ? replicad.sketchCircle(shape.r, planeConfig)
+    : replicad.sketchRectangle(shape.w, shape.h, planeConfig);
+  return sketch.extrude(planeConfig.distance);
+}
+
+function buildReplicadFaceSolid(replicad, shapes, face, dimensions) {
+  return shapes
+    .filter((shape) => normalizeFace(shape.face) === face)
+    .reduce((solid, shape) => {
+      const prism = createReplicadPrism(replicad, shape, face, dimensions);
+      if (shape.mode === 'cut') {
+        return solid ? solid.cut(prism) : solid;
+      }
+      return solid ? solid.fuse(prism) : prism;
+    }, null);
+}
+
+function buildReplicadSolid(replicad, documentData, dimensions) {
+  const solids = FACE_ORDER.map((face) => buildReplicadFaceSolid(replicad, documentData.shapes, face, dimensions));
+  if (solids.some((solid) => !solid)) {
+    throw new Error('3面すべてに有効なadd図形が必要です。');
+  }
+  return solids.slice(1).reduce((solid, nextSolid) => solid.intersect(nextSolid), solids[0]);
+}
+
+async function buildReplicadStepBlob(documentData, dimensions) {
+  if (!dimensions) {
+    return null;
+  }
+
+  const replicad = await ensureReplicadReady();
+  const solid = buildReplicadSolid(replicad, documentData, dimensions);
+  return replicad.exportSTEP(
+    [{
+      shape: solid,
+      name: getOutputBaseName(documentData),
+      color: '#7ea1e8',
+      alpha: 1,
+    }],
+    { unit: 'MM', modelUnit: 'MM' },
+  );
 }
 
 const STL_MESH_OPTIONS = {
@@ -1244,13 +1328,6 @@ const STL_MESH_OPTIONS = {
   maxAxisSteps: STL_VOXEL_MAX_AXIS_STEPS,
   maxCells: STL_VOXEL_MAX_CELLS,
   resolutionMax: STL_RESOLUTION_MAX,
-};
-
-const STEP_MESH_OPTIONS = {
-  baseCellSize: STEP_VOXEL_CELL_SIZE,
-  maxAxisSteps: STEP_VOXEL_MAX_AXIS_STEPS,
-  maxCells: STEP_VOXEL_MAX_CELLS,
-  resolutionMax: STEP_RESOLUTION_MAX,
 };
 
 function getMeshBaseCellSize(dimensions, options = STL_MESH_OPTIONS) {
@@ -1544,166 +1621,6 @@ function buildStlText(documentData, dimensions, resolutionFactor = 1) {
   return lines.join('\n');
 }
 
-function createStepWriter() {
-  let nextId = 1;
-  const lines = [];
-  return {
-    add(definition) {
-      const id = nextId;
-      nextId += 1;
-      lines.push(`#${id}=${definition};`);
-      return `#${id}`;
-    },
-    lines,
-  };
-}
-
-function formatStepRefList(refs, chunkSize = 48) {
-  if (refs.length <= chunkSize) {
-    return `(${refs.join(',')})`;
-  }
-  const chunks = [];
-  for (let index = 0; index < refs.length; index += chunkSize) {
-    chunks.push(refs.slice(index, index + chunkSize).join(','));
-  }
-  return `(\n${chunks.join(',\n')}\n)`;
-}
-
-function buildStepText(documentData, dimensions, resolutionFactor = 1) {
-  if (!dimensions) {
-    return '';
-  }
-
-  const name = getOutputBaseName(documentData);
-  const safeName = escapeStepString(name);
-  const triangles = buildMarchingStlTriangles(documentData.shapes, dimensions, resolutionFactor, STEP_MESH_OPTIONS);
-  const writer = createStepWriter();
-  const verticesByPoint = new Map();
-  const edgesByKey = new Map();
-  const triangleKeys = new Set();
-  const faceIds = [];
-  const uniqueTriangles = triangles.reduce((items, triangle) => {
-    const keys = triangle.vertices.map(getStepPointKey);
-    if (new Set(keys).size < 3) {
-      return items;
-    }
-    const triangleKey = [...keys].sort().join('|');
-    if (triangleKeys.has(triangleKey)) {
-      return items;
-    }
-    triangleKeys.add(triangleKey);
-    items.push(triangle);
-    return items;
-  }, []);
-
-  const applicationContext = writer.add("APPLICATION_CONTEXT('automotive design')");
-  writer.add(`APPLICATION_PROTOCOL_DEFINITION('international standard','automotive_design',2000,${applicationContext})`);
-  const productContext = writer.add(`PRODUCT_CONTEXT('',${applicationContext},'mechanical')`);
-  const product = writer.add(`PRODUCT('${safeName}','${safeName}','',(${productContext}))`);
-  const productFormation = writer.add(`PRODUCT_DEFINITION_FORMATION('','',${product})`);
-  const productDefinitionContext = writer.add(`PRODUCT_DEFINITION_CONTEXT('part definition',${applicationContext},'design')`);
-  const productDefinition = writer.add(`PRODUCT_DEFINITION('design','',${productFormation},${productDefinitionContext})`);
-  const productDefinitionShape = writer.add(`PRODUCT_DEFINITION_SHAPE('','',${productDefinition})`);
-  const origin = writer.add("CARTESIAN_POINT('',(0.,0.,0.))");
-  const zDirection = writer.add("DIRECTION('',(0.,0.,1.))");
-  const xDirection = writer.add("DIRECTION('',(1.,0.,0.))");
-  const axisPlacement = writer.add(`AXIS2_PLACEMENT_3D('',${origin},${zDirection},${xDirection})`);
-  const lengthUnit = writer.add("(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.))");
-  const angleUnit = writer.add("(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.))");
-  const solidAngleUnit = writer.add("(NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT())");
-  const uncertainty = writer.add(`UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(0.0001),${lengthUnit},'distance_accuracy_value','')`);
-  const context = writer.add(`(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((${uncertainty})) GLOBAL_UNIT_ASSIGNED_CONTEXT((${lengthUnit},${angleUnit},${solidAngleUnit})) REPRESENTATION_CONTEXT('',''))`);
-
-  const getVertexData = (point) => {
-    const key = getStepPointKey(point);
-    const existingData = verticesByPoint.get(key);
-    if (existingData) {
-      return existingData;
-    }
-    const pointId = writer.add(
-      `CARTESIAN_POINT('',(${formatStepNumber(point.x)},${formatStepNumber(point.y)},${formatStepNumber(point.z)}))`,
-    );
-    const vertexId = writer.add(`VERTEX_POINT('',${pointId})`);
-    const data = { key, point, pointId, vertexId };
-    verticesByPoint.set(key, data);
-    return data;
-  };
-
-  const getDirectionId = (vector) =>
-    writer.add(`DIRECTION('',(${formatStepNumber(vector.x)},${formatStepNumber(vector.y)},${formatStepNumber(vector.z)}))`);
-
-  const getEdgeData = (start, end) => {
-    const [first, second] = [start, end].sort((a, b) => a.key.localeCompare(b.key));
-    const edgeKey = `${first.key}|${second.key}`;
-    const existingEdge = edgesByKey.get(edgeKey);
-    if (existingEdge) {
-      return existingEdge;
-    }
-    const direction = normalizeVector(subtractPoint(second.point, first.point));
-    if (!direction) {
-      return null;
-    }
-    const directionId = getDirectionId(direction);
-    const vectorId = writer.add(`VECTOR('',${directionId},1.)`);
-    const lineId = writer.add(`LINE('',${first.pointId},${vectorId})`);
-    const edgeId = writer.add(`EDGE_CURVE('',${first.vertexId},${second.vertexId},${lineId},.T.)`);
-    const data = { key: edgeKey, startKey: first.key, endKey: second.key, edgeId };
-    edgesByKey.set(edgeKey, data);
-    return data;
-  };
-
-  uniqueTriangles.forEach(({ vertices }) => {
-    const vertexData = vertices.map(getVertexData);
-    const normal = getTriangleNormal(vertices[0], vertices[1], vertices[2]);
-    const xAxis = normalizeVector(subtractPoint(vertices[1], vertices[0]));
-    if (!normal || !xAxis) {
-      return;
-    }
-    const orientedEdges = [
-      [vertexData[0], vertexData[1]],
-      [vertexData[1], vertexData[2]],
-      [vertexData[2], vertexData[0]],
-    ].map(([start, end]) => {
-      const edge = getEdgeData(start, end);
-      if (!edge) {
-        return null;
-      }
-      const orientation = edge.startKey === start.key && edge.endKey === end.key ? '.T.' : '.F.';
-      return writer.add(`ORIENTED_EDGE('',*,*,${edge.edgeId},${orientation})`);
-    });
-    if (orientedEdges.some((edge) => !edge)) {
-      return;
-    }
-
-    const loop = writer.add(`EDGE_LOOP('',${formatStepRefList(orientedEdges, 12)})`);
-    const bound = writer.add(`FACE_OUTER_BOUND('',${loop},.T.)`);
-    const normalDirection = getDirectionId(normal);
-    const xDirection = getDirectionId(xAxis);
-    const faceAxis = writer.add(`AXIS2_PLACEMENT_3D('',${vertexData[0].pointId},${normalDirection},${xDirection})`);
-    const plane = writer.add(`PLANE('',${faceAxis})`);
-    faceIds.push(writer.add(`ADVANCED_FACE('',(${bound}),${plane},.T.)`));
-  });
-
-  const shell = writer.add(`CLOSED_SHELL('',${formatStepRefList(faceIds)})`);
-  const brep = writer.add(`MANIFOLD_SOLID_BREP('${safeName}',${shell})`);
-  const representation = writer.add(`ADVANCED_BREP_SHAPE_REPRESENTATION('${safeName}',(${axisPlacement},${brep}),${context})`);
-  writer.add(`SHAPE_DEFINITION_REPRESENTATION(${productDefinitionShape},${representation})`);
-  writer.add(`PRODUCT_RELATED_PRODUCT_CATEGORY('part','',(${product}))`);
-
-  return [
-    'ISO-10303-21;',
-    'HEADER;',
-    "FILE_DESCRIPTION(('Advanced B-rep STEP generated by Oshida Smartphone CAD'),'2;1');",
-    `FILE_NAME('${safeName}.step','${new Date().toISOString()}',('Oshida Smartphone CAD'),(''),'Oshida Smartphone CAD','Oshida Smartphone CAD','');`,
-    "FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));",
-    'ENDSEC;',
-    'DATA;',
-    ...writer.lines,
-    'ENDSEC;',
-    'END-ISO-10303-21;',
-  ].join('\n');
-}
-
 function App() {
   const [document, setDocument] = useState(loadDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -1718,7 +1635,6 @@ function App() {
   const [stlSaving, setStlSaving] = useState(false);
   const [stepSaving, setStepSaving] = useState(false);
   const [stlResolution, setStlResolution] = useState(1);
-  const [stepResolution, setStepResolution] = useState(1);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
@@ -1734,7 +1650,6 @@ function App() {
   );
   const previewDimensions = useMemo(() => getLockedPreviewDimensions(document), [document]);
   const stlResolutionMax = useMemo(() => getMeshResolutionMax(previewDimensions, STL_MESH_OPTIONS), [previewDimensions]);
-  const stepResolutionMax = useMemo(() => getMeshResolutionMax(previewDimensions, STEP_MESH_OPTIONS), [previewDimensions]);
   const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const showingFaceControls = !showing3DControls && !outputOpen;
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
@@ -1750,10 +1665,6 @@ function App() {
   useEffect(() => {
     setStlResolution((current) => Math.min(current, stlResolutionMax));
   }, [stlResolutionMax]);
-
-  useEffect(() => {
-    setStepResolution((current) => Math.min(current, stepResolutionMax));
-  }, [stepResolutionMax]);
 
   useEffect(() => {
     const editor = editorRefs.current.get(selectedId);
@@ -2076,8 +1987,12 @@ function App() {
   }
 
   function saveTextOutput(text, extension, type) {
-    const fileNameBase = getOutputBaseName(document);
     const blob = new Blob([text], { type });
+    saveBlobOutput(blob, extension);
+  }
+
+  function saveBlobOutput(blob, extension) {
+    const fileNameBase = getOutputBaseName(document);
     const url = URL.createObjectURL(blob);
     const anchor = window.document.createElement('a');
     anchor.href = url;
@@ -2108,7 +2023,12 @@ function App() {
     setStepSaving(true);
     try {
       await new Promise((resolve) => window.requestAnimationFrame(resolve));
-      saveTextOutput(buildStepText(document, previewDimensions, stepResolution), 'step', 'model/step');
+      const stepBlob = await buildReplicadStepBlob(document, previewDimensions);
+      if (stepBlob) {
+        saveBlobOutput(stepBlob, 'step');
+      }
+    } catch (error) {
+      window.alert(`STEP生成に失敗しました: ${error.message}`);
     } finally {
       setStepSaving(false);
     }
@@ -2232,8 +2152,8 @@ function App() {
             stlReady={Boolean(previewDimensions)}
             stlSaving={stlSaving}
             stepSaving={stepSaving}
-            meshResolution={outputFormat === 'step' ? stepResolution : stlResolution}
-            meshResolutionMax={outputFormat === 'step' ? stepResolutionMax : stlResolutionMax}
+            meshResolution={stlResolution}
+            meshResolutionMax={stlResolutionMax}
             partName={saveName}
             savedParts={savedParts}
             selectedSavedPartId={loadPartId}
@@ -2245,13 +2165,7 @@ function App() {
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
             onSaveWeb={savePartToWeb}
-            onMeshResolutionChange={(value) => {
-              if (outputFormat === 'step') {
-                setStepResolution(value);
-                return;
-              }
-              setStlResolution(value);
-            }}
+            onMeshResolutionChange={setStlResolution}
             onSaveStl={saveStlOutput}
             onSaveStep={saveStepOutput}
           />
@@ -2575,9 +2489,8 @@ function OutputPanel({
                 {stepSaving ? '生成中...' : '保存'}
               </button>
             </div>
-            {meshResolutionControl}
             <div className="output-placeholder">
-              STEPは保存時にadvanced B-repとして生成します。
+              STEPは保存時にOpenCascadeでB-repとして生成します。
             </div>
           </div>
         ) : (
@@ -2615,7 +2528,7 @@ function HelpPanel() {
       <ul>
         <li>JSONは現在の編集データです。ファイル保存とweb保存ができます。</li>
         <li>STLはスライサー向けのメッシュとして保存します。</li>
-        <li>STEPはCAD向けのadvanced B-repとして保存します。</li>
+        <li>STEPはOpenCascadeでCAD向けのB-repとして保存します。</li>
       </ul>
       <h2>ロックのヒント</h2>
       <ul>

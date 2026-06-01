@@ -14,7 +14,8 @@
     "polygon-clipping": "^0.15.7",
     "react": "latest",
     "react-dom": "latest",
+    "replicad": "^0.23.1",
+    "replicad-opencascadejs": "^0.23.0",
     "vite": "latest"
-  },
-  "devDependencies": {}
+  }
 }
