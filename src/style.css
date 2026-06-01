@@ -464,6 +464,40 @@ input[type="range"] {
   font-size: 11px;
 }
 
+.assembly-view .face-plan-bg,
+.assembly-view .iso-preview-frame {
+  fill: #ffffff;
+}
+
+.assembly-projection-surface {
+  fill-opacity: 0.22;
+  stroke-opacity: 0.72;
+  stroke-width: 0.75;
+  vector-effect: non-scaling-stroke;
+  pointer-events: none;
+}
+
+.assembly-iso-surface {
+  fill-opacity: 0.74;
+  stroke-opacity: 0.48;
+  stroke-width: 0.35;
+  stroke-linejoin: round;
+  cursor: pointer;
+}
+
+.assembly-hit-area {
+  fill: transparent;
+  stroke: transparent;
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+  cursor: pointer;
+}
+
+.assembly-hit-area.selected {
+  stroke: #17212b;
+  stroke-dasharray: 3 2;
+}
+
 .rotation-panel {
   margin: 12px 0 0;
   border: 1px solid #d1d9e3;
@@ -876,6 +910,125 @@ h1 {
   color: #506174;
   font-size: 0.9rem;
   font-weight: 700;
+}
+
+.assembly-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.assembly-view-controls {
+  margin-top: 0;
+}
+
+.assembly-view-actions {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+
+.assembly-view-actions button {
+  min-height: 32px;
+}
+
+.assembly-load-panel .saved-part-actions {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.assembly-note {
+  margin: 0;
+  color: #66788a;
+  font-size: 0.78rem;
+  font-weight: 800;
+  line-height: 1.45;
+}
+
+.danger-text {
+  color: #b91c1c;
+}
+
+.assembly-active-face {
+  width: fit-content;
+}
+
+.assembly-list {
+  display: grid;
+  gap: 8px;
+}
+
+.assembly-card {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #d1d9e3;
+  border-radius: 8px;
+  background: #f9fbfd;
+  padding: 8px;
+}
+
+.assembly-card.selected {
+  border-color: #17212b;
+  box-shadow: inset 4px 0 0 #17212b;
+}
+
+.assembly-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 38px auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.assembly-title {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  overflow: hidden;
+  padding: 0 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.assembly-title span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assembly-color-dot {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  border: 1px solid rgba(15, 23, 42, 0.22);
+  border-radius: 50%;
+}
+
+.assembly-color-input {
+  width: 38px;
+  min-width: 38px;
+  height: 34px;
+  padding: 3px;
+}
+
+.assembly-section-label {
+  color: #506174;
+  font-size: 0.78rem;
+  font-weight: 900;
+}
+
+.assembly-position-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.assembly-rotation-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.assembly-rotation-field {
+  grid-template-rows: auto 32px auto;
 }
 
 .output-panel {

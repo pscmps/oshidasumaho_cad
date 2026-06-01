@@ -6,7 +6,8 @@ import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
-const APP_VERSION = 'proto-2026-06-01-03';
+const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
+const APP_VERSION = 'proto-2026-06-02-01';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -61,6 +62,23 @@ const initialDocument = {
   ],
 };
 
+const ASSEMBLY_COLORS = [
+  '#5b8def',
+  '#f59e0b',
+  '#10b981',
+  '#ef4444',
+  '#8b5cf6',
+  '#06b6d4',
+  '#f97316',
+  '#64748b',
+];
+
+const initialAssemblyDocument = {
+  viewRotation: DEFAULT_ROTATION,
+  activeFace: 'top',
+  instances: [],
+};
+
 function normalizeFace(face) {
   if (face === 'left') {
     return 'front';
@@ -105,6 +123,50 @@ function normalizeDocument(document) {
   };
 }
 
+function snapRightAngle(value) {
+  return clampValue(Math.round((Number(value) || 0) / 90) * 90, -180, 180);
+}
+
+function normalizeAssemblyRotation(rotation) {
+  return {
+    x: snapRightAngle(rotation?.x),
+    y: snapRightAngle(rotation?.y),
+    z: snapRightAngle(rotation?.z),
+  };
+}
+
+function normalizeAssemblyPosition(position) {
+  return {
+    x: clampValue(Number(position?.x ?? 0), -120, 120),
+    y: clampValue(Number(position?.y ?? 0), -120, 120),
+    z: clampValue(Number(position?.z ?? 0), -120, 120),
+  };
+}
+
+function normalizeAssemblyDocument(document) {
+  const instances = Array.isArray(document?.instances)
+    ? document.instances
+        .filter((instance) => instance?.document)
+        .map((instance, index) => ({
+          id: instance.id || `assembly-part-${Date.now()}-${index}`,
+          sourcePartId: instance.sourcePartId || '',
+          name: instance.name || instance.document?.partName || `部品 ${index + 1}`,
+          color: instance.color || ASSEMBLY_COLORS[index % ASSEMBLY_COLORS.length],
+          position: normalizeAssemblyPosition(instance.position),
+          rotation: normalizeAssemblyRotation(instance.rotation),
+          document: normalizeDocument(instance.document),
+        }))
+    : [];
+
+  return {
+    ...initialAssemblyDocument,
+    ...document,
+    activeFace: normalizeFace(document?.activeFace),
+    viewRotation: normalizeRotation(document?.viewRotation),
+    instances,
+  };
+}
+
 function normalizeRotation(rotation) {
   return {
     x: clampValue(Number(rotation?.x ?? DEFAULT_ROTATION.x), -180, 180),
@@ -119,6 +181,15 @@ function loadDocument() {
     return saved ? normalizeDocument(JSON.parse(saved)) : normalizeDocument(initialDocument);
   } catch {
     return normalizeDocument(initialDocument);
+  }
+}
+
+function loadAssemblyDocument() {
+  try {
+    const saved = localStorage.getItem(ASSEMBLY_STORAGE_KEY);
+    return saved ? normalizeAssemblyDocument(JSON.parse(saved)) : normalizeAssemblyDocument(initialAssemblyDocument);
+  } catch {
+    return normalizeAssemblyDocument(initialAssemblyDocument);
   }
 }
 
@@ -470,6 +541,64 @@ function getLockedPreviewDimensions(document) {
   }
 
   return { width, depth, height };
+}
+
+function getRangeFromBounds(face, axis, bounds) {
+  if (!bounds) {
+    return null;
+  }
+  return {
+    dimension: FACE_AXES[face][axis],
+    min: axis === 'x' ? bounds.minX : bounds.minY,
+    max: axis === 'x' ? bounds.maxX : bounds.maxY,
+  };
+}
+
+function intersectDimensionRanges(ranges) {
+  const validRanges = ranges.filter(Boolean);
+  if (!validRanges.length) {
+    return null;
+  }
+  const min = Math.max(...validRanges.map((range) => range.min));
+  const max = Math.min(...validRanges.map((range) => range.max));
+  if (max > min) {
+    return { min, max, size: max - min };
+  }
+
+  const fallbackMin = Math.min(...validRanges.map((range) => range.min));
+  const fallbackMax = Math.max(...validRanges.map((range) => range.max));
+  return fallbackMax > fallbackMin ? { min: fallbackMin, max: fallbackMax, size: fallbackMax - fallbackMin } : null;
+}
+
+function getPreviewDimensionsFromFaceBounds(document) {
+  const faceBounds = getAllFaceBounds(document.shapes);
+  const rangesByDimension = {
+    width: [],
+    depth: [],
+    height: [],
+  };
+
+  FACE_ORDER.forEach((face) => {
+    ['x', 'y'].forEach((axis) => {
+      const range = getRangeFromBounds(face, axis, faceBounds[face]);
+      if (range) {
+        rangesByDimension[range.dimension].push(range);
+      }
+    });
+  });
+
+  const dimensions = {
+    width: intersectDimensionRanges(rangesByDimension.width),
+    depth: intersectDimensionRanges(rangesByDimension.depth),
+    height: intersectDimensionRanges(rangesByDimension.height),
+  };
+
+  return dimensions.width && dimensions.depth && dimensions.height ? dimensions : null;
+}
+
+function getDocumentPreviewDimensions(documentData) {
+  const normalizedDocument = normalizeDocument(documentData);
+  return getLockedPreviewDimensions(normalizedDocument) ?? getPreviewDimensionsFromFaceBounds(normalizedDocument);
 }
 
 function pointInShape(shape, x, y) {
@@ -1622,8 +1751,12 @@ function buildStlText(documentData, dimensions, resolutionFactor = 1) {
 }
 
 function App() {
+  const [appMode, setAppMode] = useState('part');
   const [document, setDocument] = useState(loadDocument);
+  const [assembly, setAssembly] = useState(loadAssemblyDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
+  const [selectedAssemblyId, setSelectedAssemblyId] = useState(null);
+  const [assemblyViewport, setAssemblyViewport] = useState('3d');
   const [preview3DSelected, setPreview3DSelected] = useState(false);
   const [fullPreviewFace, setFullPreviewFace] = useState(null);
   const [outputOpen, setOutputOpen] = useState(false);
@@ -1638,6 +1771,7 @@ function App() {
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
+  const assemblyRefs = useRef(new Map());
 
   const selectedShape = document.shapes.find((shape) => shape.id === selectedId);
   const activeFace = normalizeFace(document.activeFace);
@@ -1653,10 +1787,15 @@ function App() {
   const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const showingFaceControls = !showing3DControls && !outputOpen;
   const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
+  const selectedAssemblyInstance = assembly.instances.find((instance) => instance.id === selectedAssemblyId);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
   }, [document]);
+
+  useEffect(() => {
+    localStorage.setItem(ASSEMBLY_STORAGE_KEY, JSON.stringify(assembly));
+  }, [assembly]);
 
   useEffect(() => {
     setSaveName(document.partName ?? '');
@@ -1667,6 +1806,9 @@ function App() {
   }, [stlResolutionMax]);
 
   useEffect(() => {
+    if (appMode !== 'part') {
+      return;
+    }
     const editor = editorRefs.current.get(selectedId);
     const panel = controlPanelRef.current;
     if (!selectedId && panel) {
@@ -1680,6 +1822,24 @@ function App() {
       panel.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
     }
   }, [selectedId, activeFace]);
+
+  useEffect(() => {
+    if (appMode !== 'assembly') {
+      return;
+    }
+    const editor = assemblyRefs.current.get(selectedAssemblyId);
+    const panel = controlPanelRef.current;
+    if (!selectedAssemblyId && panel) {
+      panel.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (editor && panel) {
+      const panelRect = panel.getBoundingClientRect();
+      const editorRect = editor.getBoundingClientRect();
+      const targetTop = panel.scrollTop + editorRect.top - panelRect.top - 18;
+      panel.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    }
+  }, [selectedAssemblyId, assembly.activeFace, appMode]);
 
   function updateDocument(patch) {
     setDocument((current) => ({ ...current, ...patch }));
@@ -1933,6 +2093,104 @@ function App() {
     setLoadPartId(nextSavedParts[0]?.id ?? '');
   }
 
+  function openAssemblyMode() {
+    setAppMode('assembly');
+    setPreviewMenuOpen(false);
+    setAssemblyViewport('3d');
+    setSelectedAssemblyId(null);
+    setOutputOpen(false);
+    setPreview3DSelected(false);
+  }
+
+  function openPartMode() {
+    setAppMode('part');
+    setPreviewMenuOpen(false);
+    setAssemblyViewport('3d');
+  }
+
+  function addAssemblyInstance(partId) {
+    const part = savedParts.find((item) => item.id === partId);
+    if (!part) {
+      return;
+    }
+    const documentSnapshot = normalizeDocument(part.document);
+    const id = `assembly-${Date.now()}`;
+    const instance = {
+      id,
+      sourcePartId: part.id,
+      name: part.name,
+      color: ASSEMBLY_COLORS[assembly.instances.length % ASSEMBLY_COLORS.length],
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      document: documentSnapshot,
+    };
+    setAssembly((current) => normalizeAssemblyDocument({
+      ...current,
+      instances: [...current.instances, instance],
+    }));
+    setSelectedAssemblyId(id);
+    setAssemblyViewport('3d');
+  }
+
+  function updateAssemblyViewRotation(axis, value) {
+    setAssembly((current) => ({
+      ...current,
+      viewRotation: normalizeRotation({
+        ...current.viewRotation,
+        [axis]: value,
+      }),
+    }));
+  }
+
+  function resetAssemblyViewRotation() {
+    setAssembly((current) => ({
+      ...current,
+      viewRotation: DEFAULT_ROTATION,
+    }));
+    setAssemblyViewport('3d');
+  }
+
+  function selectAssemblyViewport(viewport) {
+    setAssemblyViewport(viewport);
+    if (viewport !== '3d') {
+      setAssembly((current) => ({
+        ...current,
+        activeFace: normalizeFace(viewport),
+      }));
+    }
+  }
+
+  function selectAssemblyInstance(id, viewport = assemblyViewport) {
+    setSelectedAssemblyId(id);
+    selectAssemblyViewport(viewport);
+  }
+
+  function updateAssemblyInstance(id, patch) {
+    setAssembly((current) => normalizeAssemblyDocument({
+      ...current,
+      instances: current.instances.map((instance) => (
+        instance.id === id
+          ? {
+              ...instance,
+              ...patch,
+              position: patch.position ? normalizeAssemblyPosition(patch.position) : instance.position,
+              rotation: patch.rotation ? normalizeAssemblyRotation(patch.rotation) : instance.rotation,
+            }
+          : instance
+      )),
+    }));
+  }
+
+  function removeAssemblyInstance(id) {
+    setAssembly((current) => ({
+      ...current,
+      instances: current.instances.filter((instance) => instance.id !== id),
+    }));
+    if (selectedAssemblyId === id) {
+      setSelectedAssemblyId(null);
+    }
+  }
+
   function setActiveFace(face) {
     setPreview3DSelected(false);
     setOutputOpen(false);
@@ -2037,37 +2295,68 @@ function App() {
   return (
     <main className="app-shell">
       <section className="viewer-panel" aria-label="CAD viewer">
-        <Viewer
-          document={document}
-          selectedId={selectedId}
-          fullPreviewFace={fullPreviewFace}
-          areaLocks={document.areaLocks}
-          areaLockConstraints={document.areaLockConstraints}
-          areaLockAvailability={areaLockAvailability}
-          previewDimensions={previewDimensions}
-          rotation={document.rotation}
-          transparent3D={document.transparent3D}
-          show3DGrid={document.show3DGrid}
-          show3DEdges={document.show3DEdges}
-          viewMode={document.viewMode}
-          preview3DSelected={preview3DSelected}
-          menuOpen={previewMenuOpen}
-          onSelect={selectShape}
-          onFaceSelect={setActiveFace}
-          onFaceDoubleSelect={toggleFullPreview}
-          onAreaLockToggle={toggleAreaLock}
-          on3DSelect={select3DPreview}
-          on3DDoubleSelect={toggle3DPreview}
-          onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
-          onReset={requestScreenReset}
-          onSaveOpen={() => openSavePanel('json')}
-          onLoadOpen={openLoadPanel}
-          onHelpOpen={openHelpPanel}
-        />
+        {appMode === 'assembly' ? (
+          <AssemblyViewer
+            assembly={assembly}
+            selectedInstanceId={selectedAssemblyId}
+            viewport={assemblyViewport}
+            menuOpen={previewMenuOpen}
+            onInstanceSelect={selectAssemblyInstance}
+            onViewportSelect={selectAssemblyViewport}
+            onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
+            onPartMode={openPartMode}
+          />
+        ) : (
+          <Viewer
+            document={document}
+            selectedId={selectedId}
+            fullPreviewFace={fullPreviewFace}
+            areaLocks={document.areaLocks}
+            areaLockConstraints={document.areaLockConstraints}
+            areaLockAvailability={areaLockAvailability}
+            previewDimensions={previewDimensions}
+            rotation={document.rotation}
+            transparent3D={document.transparent3D}
+            show3DGrid={document.show3DGrid}
+            show3DEdges={document.show3DEdges}
+            viewMode={document.viewMode}
+            preview3DSelected={preview3DSelected}
+            menuOpen={previewMenuOpen}
+            onSelect={selectShape}
+            onFaceSelect={setActiveFace}
+            onFaceDoubleSelect={toggleFullPreview}
+            onAreaLockToggle={toggleAreaLock}
+            on3DSelect={select3DPreview}
+            on3DDoubleSelect={toggle3DPreview}
+            onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
+            onReset={requestScreenReset}
+            onSaveOpen={() => openSavePanel('json')}
+            onLoadOpen={openLoadPanel}
+            onHelpOpen={openHelpPanel}
+            onAssemblyOpen={openAssemblyMode}
+          />
+        )}
       </section>
 
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
-        {showingFaceControls ? (
+        {appMode === 'assembly' ? (
+          <AssemblyPanel
+            assembly={assembly}
+            savedParts={savedParts}
+            selectedInstance={selectedAssemblyInstance}
+            selectedInstanceId={selectedAssemblyId}
+            activeFace={assembly.activeFace}
+            editorRefs={assemblyRefs}
+            onAddInstance={addAssemblyInstance}
+            onSelectInstance={(id) => selectAssemblyInstance(id, assemblyViewport)}
+            onUpdateInstance={updateAssemblyInstance}
+            onRemoveInstance={removeAssemblyInstance}
+            onViewRotationChange={updateAssemblyViewRotation}
+            onViewRotationReset={resetAssemblyViewRotation}
+          />
+        ) : null}
+
+        {appMode === 'part' && showingFaceControls ? (
           <header className="control-header">
             <div>
               <p className="eyebrow">Oshida Smartphone CAD</p>
@@ -2080,7 +2369,7 @@ function App() {
           </header>
         ) : null}
 
-        {showingFaceControls ? (
+        {appMode === 'part' && showingFaceControls ? (
           <div className="document-controls">
             <div className="active-face-control" aria-label="配置面">
               <span>配置面</span>
@@ -2091,7 +2380,7 @@ function App() {
           </div>
         ) : null}
 
-        {showingFaceControls ? (
+        {appMode === 'part' && showingFaceControls ? (
           <div className="shape-list">
             {activeShapes.map((shape, index) => (
               <ShapeEditor
@@ -2118,7 +2407,7 @@ function App() {
           </div>
         ) : null}
 
-        {showingFaceControls ? (
+        {appMode === 'part' && showingFaceControls ? (
           selectedShape ? (
             <p className="selection-note">
               選択中: {FACE_LABELS[normalizeFace(selectedShape.face)]} / {getShapeLabel(selectedShape)}
@@ -2130,7 +2419,7 @@ function App() {
           )
         ) : null}
 
-        {showing3DControls ? (
+        {appMode === 'part' && showing3DControls ? (
           <RotationControls
             rotation={document.rotation}
             transparent={document.transparent3D}
@@ -2145,7 +2434,7 @@ function App() {
           />
         ) : null}
 
-        {outputOpen ? (
+        {appMode === 'part' && outputOpen ? (
           <OutputPanel
             format={outputFormat}
             jsonText={jsonText}
@@ -2211,6 +2500,7 @@ function Viewer({
   onSaveOpen,
   onLoadOpen,
   onHelpOpen,
+  onAssemblyOpen,
 }) {
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
@@ -2246,6 +2536,7 @@ function Viewer({
               <button type="button" onClick={onSaveOpen}>保存</button>
               <button type="button" onClick={onLoadOpen}>呼び出し</button>
               <button type="button" onClick={onHelpOpen}>ヘルプ</button>
+              <button type="button" onClick={onAssemblyOpen}>アセンブリ(開発中)</button>
               <button type="button" onClick={onReset}>画面リセット</button>
             </div>
           ) : null}
@@ -2324,6 +2615,338 @@ function Viewer({
   );
 }
 
+function getAssemblyInstanceSurfaces(instance) {
+  const documentData = normalizeDocument(instance.document);
+  const dimensions = getDocumentPreviewDimensions(documentData);
+  if (!dimensions) {
+    return [];
+  }
+
+  return buildSurfacePreviewFaces(documentData.shapes, dimensions).map((surface) => ({
+    ...surface,
+    instanceId: instance.id,
+    instanceName: instance.name,
+    color: instance.color,
+    rings: surface.rings.map((ring) => ring.map((point) => {
+      const rotated = rotatePoint(point, instance.rotation);
+      return {
+        x: rotated.x + instance.position.x,
+        y: rotated.y + instance.position.y,
+        z: rotated.z + instance.position.z,
+      };
+    })),
+  }));
+}
+
+function getAssemblySurfaces(instances) {
+  return instances.flatMap(getAssemblyInstanceSurfaces);
+}
+
+function getAssemblyBoundsFromSurfaces(surfaces) {
+  const points = surfaces.flatMap((surface) => surface.rings.flat());
+  if (!points.length) {
+    return {
+      x: { min: -60, max: 60, size: 120 },
+      y: { min: -60, max: 60, size: 120 },
+      z: { min: -60, max: 60, size: 120 },
+    };
+  }
+  const bounds = {};
+  ['x', 'y', 'z'].forEach((axis) => {
+    const values = points.map((point) => point[axis]);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const padding = Math.max(12, (max - min) * 0.12);
+    bounds[axis] = {
+      min: min - padding,
+      max: max + padding,
+      size: Math.max(1, max - min + padding * 2),
+    };
+  });
+  return bounds;
+}
+
+function getAssemblyProjectionAxes(face) {
+  if (face === 'top') {
+    return { horizontal: 'x', vertical: 'y' };
+  }
+  if (face === 'front') {
+    return { horizontal: 'x', vertical: 'z' };
+  }
+  return { horizontal: 'y', vertical: 'z' };
+}
+
+function getAssemblyProjectedPoint(point, face, bounds) {
+  const axes = getAssemblyProjectionAxes(face);
+  const horizontalBounds = bounds[axes.horizontal];
+  const verticalBounds = bounds[axes.vertical];
+  return {
+    sx: 10 + ((point[axes.horizontal] - horizontalBounds.min) / horizontalBounds.size) * 100,
+    sy: 110 - ((point[axes.vertical] - verticalBounds.min) / verticalBounds.size) * 100,
+  };
+}
+
+function getProjectedRingPath(ring) {
+  return ring
+    .map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.sx} ${point.sy}`)
+    .join(' ') + ' Z';
+}
+
+function getProjectedSurfacePathFrom3D(surface, face, bounds) {
+  return surface.rings
+    .map((ring) => getProjectedRingPath(ring.map((point) => getAssemblyProjectedPoint(point, face, bounds))))
+    .join(' ');
+}
+
+function getProjectedInstanceBounds(surfaces, face, bounds) {
+  const points = surfaces
+    .flatMap((surface) => surface.rings.flat())
+    .map((point) => getAssemblyProjectedPoint(point, face, bounds));
+  if (!points.length) {
+    return null;
+  }
+  return {
+    minX: Math.min(...points.map((point) => point.sx)),
+    maxX: Math.max(...points.map((point) => point.sx)),
+    minY: Math.min(...points.map((point) => point.sy)),
+    maxY: Math.max(...points.map((point) => point.sy)),
+  };
+}
+
+function AssemblyViewer({
+  assembly,
+  selectedInstanceId,
+  viewport,
+  menuOpen,
+  onInstanceSelect,
+  onViewportSelect,
+  onMenuToggle,
+  onPartMode,
+}) {
+  const surfaces = useMemo(() => getAssemblySurfaces(assembly.instances), [assembly.instances]);
+  const bounds = useMemo(() => getAssemblyBoundsFromSurfaces(surfaces), [surfaces]);
+
+  return (
+    <div className="viewer-frame">
+      <div className="viewer-toolbar">
+        <div className="viewer-toolbar-info">
+          <span>アセンブリ</span>
+          <span>{APP_VERSION}</span>
+        </div>
+        <div className="viewer-menu">
+          <button
+            type="button"
+            className="viewer-menu-button"
+            aria-label="プレビューメニュー"
+            aria-expanded={menuOpen}
+            onClick={onMenuToggle}
+          >
+            ☰
+          </button>
+          {menuOpen ? (
+            <div className="viewer-menu-popover">
+              <button type="button" onClick={onPartMode}>単品部品</button>
+            </div>
+          ) : null}
+        </div>
+      </div>
+      <svg className="tri-view assembly-view" viewBox="0 0 378 268" role="img" aria-label="アセンブリ配置図">
+        {FACE_ORDER.map((face) => (
+          <AssemblyFaceProjection
+            key={face}
+            face={face}
+            active={viewport === face}
+            surfaces={surfaces}
+            bounds={bounds}
+            selectedInstanceId={selectedInstanceId}
+            onInstanceSelect={onInstanceSelect}
+            onViewportSelect={onViewportSelect}
+          />
+        ))}
+        <AssemblyIsoPreview
+          surfaces={surfaces}
+          bounds={bounds}
+          rotation={assembly.viewRotation}
+          selected={viewport === '3d'}
+          selectedInstanceId={selectedInstanceId}
+          onSelect={() => onViewportSelect('3d')}
+          onInstanceSelect={(id) => onInstanceSelect(id, '3d')}
+        />
+      </svg>
+    </div>
+  );
+}
+
+function AssemblyFaceProjection({
+  face,
+  active,
+  surfaces,
+  bounds,
+  selectedInstanceId,
+  onInstanceSelect,
+  onViewportSelect,
+}) {
+  const instanceIds = [...new Set(surfaces.map((surface) => surface.instanceId))];
+
+  return (
+    <g
+      className={`face-plan assembly-face face-${face} ${active ? 'active' : ''}`}
+      transform={getFaceTransform(face, false)}
+      role="button"
+      tabIndex="0"
+      aria-label={`アセンブリ ${FACE_LABELS[face]}`}
+      onClick={() => onViewportSelect(face)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onViewportSelect(face);
+        }
+      }}
+    >
+      <rect className="face-plan-bg" width="120" height="120" rx="2" />
+      <rect className="face-plan-surface" width="120" height="120" />
+      <line x1="0" y1="60" x2="120" y2="60" className="face-axis" />
+      <line x1="60" y1="0" x2="60" y2="120" className="face-axis" />
+      {surfaces.map((surface, index) => (
+        <path
+          key={`${face}-${surface.instanceId}-${index}`}
+          className="assembly-projection-surface"
+          d={getProjectedSurfacePathFrom3D(surface, face, bounds)}
+          fill={surface.color}
+          stroke={surface.color}
+        />
+      ))}
+      {instanceIds.map((instanceId) => {
+        const instanceSurfaces = surfaces.filter((surface) => surface.instanceId === instanceId);
+        const projectedBounds = getProjectedInstanceBounds(instanceSurfaces, face, bounds);
+        if (!projectedBounds) {
+          return null;
+        }
+        const selected = instanceId === selectedInstanceId;
+        return (
+          <rect
+            key={`${face}-hit-${instanceId}`}
+            className={`assembly-hit-area ${selected ? 'selected' : ''}`}
+            x={projectedBounds.minX}
+            y={projectedBounds.minY}
+            width={projectedBounds.maxX - projectedBounds.minX}
+            height={projectedBounds.maxY - projectedBounds.minY}
+            onClick={(event) => {
+              event.stopPropagation();
+              onInstanceSelect(instanceId, face);
+            }}
+          />
+        );
+      })}
+      <text className="face-plan-label" x="60" y="112">{FACE_LABELS[face]}</text>
+    </g>
+  );
+}
+
+function AssemblyIsoPreview({
+  surfaces,
+  bounds,
+  rotation,
+  selected,
+  selectedInstanceId,
+  onSelect,
+  onInstanceSelect,
+}) {
+  const box = { x: 198, y: 6, width: 120, height: 120, labelY: 116 };
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + 4 };
+  const maxSize = Math.max(bounds.x.size, bounds.y.size, bounds.z.size);
+  const scale = 48 / Math.max(1, maxSize);
+  const projectedSurfaces = surfaces.map((surface) => {
+    const projectedRings = surface.rings.map((ring) => ring.map((point) => {
+      const rotated = rotatePoint(point, rotation);
+      return {
+        ...rotated,
+        sx: center.x + rotated.x * scale,
+        sy: center.y - rotated.z * scale,
+      };
+    }));
+    const projectedPoints = projectedRings.flat();
+    const depth = projectedPoints.reduce((sum, point) => sum + point.y, 0) / projectedPoints.length;
+    return {
+      ...surface,
+      depth,
+      projectedRings,
+      path: getProjectedSurfacePath(projectedRings),
+    };
+  }).sort((a, b) => b.depth - a.depth);
+
+  const instanceIds = [...new Set(projectedSurfaces.map((surface) => surface.instanceId))];
+
+  return (
+    <g
+      className={`iso-preview assembly-iso ${selected ? 'selected' : ''}`}
+      aria-label="アセンブリ3Dプレビュー"
+      onClick={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+    >
+      <rect className="iso-preview-frame" x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
+      {projectedSurfaces.map((surface, index) => (
+        <g key={`assembly-iso-${surface.instanceId}-${index}`}>
+          <path
+            className="assembly-iso-surface"
+            d={surface.path}
+            fill={surface.color}
+            stroke={surface.color}
+            onClick={(event) => {
+              event.stopPropagation();
+              onInstanceSelect(surface.instanceId);
+            }}
+          />
+          {surface.projectedRings.flatMap((ring, ringIndex) =>
+            ring.map((point, pointIndex) => {
+              const next = ring[(pointIndex + 1) % ring.length];
+              return (
+                <line
+                  key={`${index}-${ringIndex}-${pointIndex}`}
+                  className="iso-preview-outline-edge"
+                  x1={point.sx}
+                  y1={point.sy}
+                  x2={next.sx}
+                  y2={next.sy}
+                />
+              );
+            }),
+          )}
+        </g>
+      ))}
+      {instanceIds.map((instanceId) => {
+        const points = projectedSurfaces
+          .filter((surface) => surface.instanceId === instanceId)
+          .flatMap((surface) => surface.projectedRings.flat());
+        if (!points.length) {
+          return null;
+        }
+        const minX = Math.min(...points.map((point) => point.sx));
+        const maxX = Math.max(...points.map((point) => point.sx));
+        const minY = Math.min(...points.map((point) => point.sy));
+        const maxY = Math.max(...points.map((point) => point.sy));
+        return (
+          <rect
+            key={`assembly-iso-hit-${instanceId}`}
+            className={`assembly-hit-area ${instanceId === selectedInstanceId ? 'selected' : ''}`}
+            x={minX}
+            y={minY}
+            width={maxX - minX}
+            height={maxY - minY}
+            onClick={(event) => {
+              event.stopPropagation();
+              onInstanceSelect(instanceId);
+            }}
+          />
+        );
+      })}
+      <text x={box.x + box.width / 2} y={box.labelY}>3D assembly</text>
+    </g>
+  );
+}
+
 function ConfirmDialog({ title, message, confirmLabel, cancelLabel, onConfirm, onCancel }) {
   return (
     <div className="dialog-backdrop" role="presentation">
@@ -2343,6 +2966,269 @@ function ConfirmDialog({ title, message, confirmLabel, cancelLabel, onConfirm, o
         </div>
       </div>
     </div>
+  );
+}
+
+function getAssemblyMoveAxes(face) {
+  if (face === 'top') {
+    return ['x', 'y'];
+  }
+  if (face === 'front') {
+    return ['x', 'z'];
+  }
+  return ['y', 'z'];
+}
+
+function getAssemblyAxisLabel(axis) {
+  return axis.toUpperCase();
+}
+
+function AssemblyPanel({
+  assembly,
+  savedParts,
+  selectedInstance,
+  selectedInstanceId,
+  activeFace,
+  editorRefs,
+  onAddInstance,
+  onSelectInstance,
+  onUpdateInstance,
+  onRemoveInstance,
+  onViewRotationChange,
+  onViewRotationReset,
+}) {
+  const [selectedPartId, setSelectedPartId] = useState(savedParts[0]?.id ?? '');
+  const hasSavedParts = savedParts.length > 0;
+  const selectedPart = savedParts.find((part) => part.id === selectedPartId);
+  const selectedPartReady = Boolean(selectedPart && getDocumentPreviewDimensions(selectedPart.document));
+
+  useEffect(() => {
+    if (savedParts.length && !savedParts.some((part) => part.id === selectedPartId)) {
+      setSelectedPartId(savedParts[0].id);
+      return;
+    }
+    if (!savedParts.length && selectedPartId) {
+      setSelectedPartId('');
+    }
+  }, [savedParts, selectedPartId]);
+
+  return (
+    <section className="assembly-panel" aria-label="アセンブリ">
+      <header className="control-header">
+        <div>
+          <p className="eyebrow">Oshida Smartphone CAD</p>
+          <h1>アセンブリ</h1>
+        </div>
+      </header>
+
+      <AssemblyViewControls
+        rotation={assembly.viewRotation}
+        onChange={onViewRotationChange}
+        onReset={onViewRotationReset}
+      />
+
+      <div className="part-storage-panel assembly-load-panel">
+        <h2>部品配置</h2>
+        <label className="saved-part-field">
+          <span>web保存データ</span>
+          <select
+            value={selectedPartId}
+            disabled={!hasSavedParts}
+            onChange={(event) => setSelectedPartId(event.target.value)}
+          >
+            {hasSavedParts ? savedParts.map((part) => (
+              <option key={part.id} value={part.id}>{part.name}</option>
+            )) : (
+              <option value="">保存データなし</option>
+            )}
+          </select>
+        </label>
+        <div className="saved-part-actions">
+          <button
+            type="button"
+            onClick={() => onAddInstance(selectedPartId)}
+            disabled={!hasSavedParts || !selectedPartId || !selectedPartReady}
+          >
+            配置
+          </button>
+        </div>
+        {!hasSavedParts ? (
+          <p className="assembly-note">単品部品をweb保存するとここから配置できます。</p>
+        ) : null}
+        {selectedPart && !selectedPartReady ? (
+          <p className="assembly-note danger-text">この部品は3面寸法を決められないため配置できません。</p>
+        ) : null}
+      </div>
+
+      <div className="active-face-control assembly-active-face">
+        <span>操作面</span>
+        <strong className={`face-label face-${activeFace}`}>
+          {FACE_LABELS[activeFace]}
+        </strong>
+      </div>
+
+      <div className="assembly-list">
+        {assembly.instances.length ? assembly.instances.map((instance) => (
+          <AssemblyInstanceEditor
+            key={instance.id}
+            editorRef={(node) => {
+              if (node) {
+                editorRefs.current.set(instance.id, node);
+              } else {
+                editorRefs.current.delete(instance.id);
+              }
+            }}
+            instance={instance}
+            selected={instance.id === selectedInstanceId}
+            activeFace={activeFace}
+            onSelect={() => onSelectInstance(instance.id)}
+            onChange={(patch) => onUpdateInstance(instance.id, patch)}
+            onRemove={() => onRemoveInstance(instance.id)}
+          />
+        )) : (
+          <div className="output-placeholder">
+            部品を配置するとここに一覧表示されます。
+          </div>
+        )}
+      </div>
+
+      {selectedInstance ? (
+        <p className="selection-note">選択中: {selectedInstance.name}</p>
+      ) : (
+        <p className="selection-note">右上の3D、または各面の部品をタップして選択できます。</p>
+      )}
+    </section>
+  );
+}
+
+function AssemblyViewControls({ rotation, onChange, onReset }) {
+  return (
+    <section className="rotation-panel assembly-view-controls" aria-label="アセンブリ画面回転">
+      <div className="rotation-header">
+        <span>画面回転</span>
+      </div>
+      <div className="rotation-grid">
+        {['x', 'y', 'z'].map((axis) => (
+          <label key={axis} className="rotation-field">
+            <span>{axis.toUpperCase()}</span>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="1"
+              value={rotation[axis]}
+              onChange={(event) => onChange(axis, Number(event.target.value))}
+            />
+            <NumberField
+              label={`${axis} assembly view rotation`}
+              value={rotation[axis]}
+              min={-180}
+              max={180}
+              compact
+              onChange={(value) => onChange(axis, value)}
+            />
+          </label>
+        ))}
+      </div>
+      <div className="assembly-view-actions">
+        <button type="button" onClick={onReset}>初期角度</button>
+      </div>
+    </section>
+  );
+}
+
+function AssemblyInstanceEditor({
+  editorRef,
+  instance,
+  selected,
+  activeFace,
+  onSelect,
+  onChange,
+  onRemove,
+}) {
+  const moveAxes = getAssemblyMoveAxes(activeFace);
+
+  function updatePosition(axis, value) {
+    onChange({
+      position: {
+        ...instance.position,
+        [axis]: value,
+      },
+    });
+  }
+
+  function updateRotation(axis, value) {
+    onChange({
+      rotation: {
+        ...instance.rotation,
+        [axis]: value,
+      },
+    });
+  }
+
+  return (
+    <article ref={editorRef} className={`assembly-card ${selected ? 'selected' : ''}`}>
+      <header className="assembly-card-top">
+        <button type="button" className="assembly-title" onClick={onSelect}>
+          <span className="assembly-color-dot" style={{ backgroundColor: instance.color }} />
+          <span>{instance.name}</span>
+        </button>
+        <input
+          className="assembly-color-input"
+          type="color"
+          value={instance.color}
+          aria-label={`${instance.name} color`}
+          onChange={(event) => onChange({ color: event.target.value })}
+        />
+        <button type="button" className="danger" onClick={onRemove}>削除</button>
+      </header>
+
+      <div className="assembly-section-label">位置</div>
+      <div className="shape-control-grid assembly-position-grid">
+        <ControlField
+          axis="x"
+          label={getAssemblyAxisLabel(moveAxes[0])}
+          value={instance.position[moveAxes[0]]}
+          min={-120}
+          max={120}
+          onChange={(value) => updatePosition(moveAxes[0], value)}
+        />
+        <ControlField
+          axis="y"
+          label={getAssemblyAxisLabel(moveAxes[1])}
+          value={instance.position[moveAxes[1]]}
+          min={-120}
+          max={120}
+          invert
+          onChange={(value) => updatePosition(moveAxes[1], value)}
+        />
+      </div>
+
+      <div className="assembly-section-label">部品回転</div>
+      <div className="assembly-rotation-grid">
+        {['x', 'y', 'z'].map((axis) => (
+          <label key={axis} className="rotation-field assembly-rotation-field">
+            <span>{axis.toUpperCase()}</span>
+            <input
+              type="range"
+              min="-180"
+              max="180"
+              step="90"
+              value={instance.rotation[axis]}
+              onChange={(event) => updateRotation(axis, Number(event.target.value))}
+            />
+            <NumberField
+              label={`${axis} part rotation`}
+              value={instance.rotation[axis]}
+              min={-180}
+              max={180}
+              compact
+              onChange={(value) => updateRotation(axis, snapRightAngle(value))}
+            />
+          </label>
+        ))}
+      </div>
+    </article>
   );
 }
 
