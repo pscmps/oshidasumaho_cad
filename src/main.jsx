@@ -7,7 +7,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-01';
+const APP_VERSION = 'proto-2026-06-02-02';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -2345,6 +2345,7 @@ function App() {
             savedParts={savedParts}
             selectedInstance={selectedAssemblyInstance}
             selectedInstanceId={selectedAssemblyId}
+            viewport={assemblyViewport}
             activeFace={assembly.activeFace}
             editorRefs={assemblyRefs}
             onAddInstance={addAssemblyInstance}
@@ -2644,23 +2645,14 @@ function getAssemblySurfaces(instances) {
 
 function getAssemblyBoundsFromSurfaces(surfaces) {
   const points = surfaces.flatMap((surface) => surface.rings.flat());
-  if (!points.length) {
-    return {
-      x: { min: -60, max: 60, size: 120 },
-      y: { min: -60, max: 60, size: 120 },
-      z: { min: -60, max: 60, size: 120 },
-    };
-  }
   const bounds = {};
   ['x', 'y', 'z'].forEach((axis) => {
-    const values = points.map((point) => point[axis]);
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const padding = Math.max(12, (max - min) * 0.12);
+    const values = [-180, 180, ...points.map((point) => point[axis])];
+    const limit = Math.max(180, ...values.map((value) => Math.abs(value))) + 8;
     bounds[axis] = {
-      min: min - padding,
-      max: max + padding,
-      size: Math.max(1, max - min + padding * 2),
+      min: -limit,
+      max: limit,
+      size: limit * 2,
     };
   });
   return bounds;
@@ -2969,14 +2961,24 @@ function ConfirmDialog({ title, message, confirmLabel, cancelLabel, onConfirm, o
   );
 }
 
-function getAssemblyMoveAxes(face) {
-  if (face === 'top') {
+function getAssemblyMoveAxes(viewport) {
+  if (viewport === '3d') {
+    return ['x', 'y', 'z'];
+  }
+  if (viewport === 'top') {
     return ['x', 'y'];
   }
-  if (face === 'front') {
+  if (viewport === 'front') {
     return ['x', 'z'];
   }
   return ['y', 'z'];
+}
+
+function getAssemblyControlAxis(axis, viewport) {
+  if (viewport === '3d') {
+    return 'x';
+  }
+  return axis === 'z' ? 'y' : 'x';
 }
 
 function getAssemblyAxisLabel(axis) {
@@ -2988,6 +2990,7 @@ function AssemblyPanel({
   savedParts,
   selectedInstance,
   selectedInstanceId,
+  viewport,
   activeFace,
   editorRefs,
   onAddInstance,
@@ -3001,6 +3004,7 @@ function AssemblyPanel({
   const hasSavedParts = savedParts.length > 0;
   const selectedPart = savedParts.find((part) => part.id === selectedPartId);
   const selectedPartReady = Boolean(selectedPart && getDocumentPreviewDimensions(selectedPart.document));
+  const activeViewLabel = viewport === '3d' ? '3D' : FACE_LABELS[activeFace];
 
   useEffect(() => {
     if (savedParts.length && !savedParts.some((part) => part.id === selectedPartId)) {
@@ -3061,9 +3065,9 @@ function AssemblyPanel({
       </div>
 
       <div className="active-face-control assembly-active-face">
-        <span>操作面</span>
-        <strong className={`face-label face-${activeFace}`}>
-          {FACE_LABELS[activeFace]}
+        <span>{viewport === '3d' ? '操作ビュー' : '操作面'}</span>
+        <strong className={`face-label ${viewport === '3d' ? 'assembly-view-label' : `face-${activeFace}`}`}>
+          {activeViewLabel}
         </strong>
       </div>
 
@@ -3080,7 +3084,7 @@ function AssemblyPanel({
             }}
             instance={instance}
             selected={instance.id === selectedInstanceId}
-            activeFace={activeFace}
+            viewport={viewport}
             onSelect={() => onSelectInstance(instance.id)}
             onChange={(patch) => onUpdateInstance(instance.id, patch)}
             onRemove={() => onRemoveInstance(instance.id)}
@@ -3141,12 +3145,12 @@ function AssemblyInstanceEditor({
   editorRef,
   instance,
   selected,
-  activeFace,
+  viewport,
   onSelect,
   onChange,
   onRemove,
 }) {
-  const moveAxes = getAssemblyMoveAxes(activeFace);
+  const moveAxes = getAssemblyMoveAxes(viewport);
 
   function updatePosition(axis, value) {
     onChange({
@@ -3184,24 +3188,19 @@ function AssemblyInstanceEditor({
       </header>
 
       <div className="assembly-section-label">位置</div>
-      <div className="shape-control-grid assembly-position-grid">
-        <ControlField
-          axis="x"
-          label={getAssemblyAxisLabel(moveAxes[0])}
-          value={instance.position[moveAxes[0]]}
-          min={-120}
-          max={120}
-          onChange={(value) => updatePosition(moveAxes[0], value)}
-        />
-        <ControlField
-          axis="y"
-          label={getAssemblyAxisLabel(moveAxes[1])}
-          value={instance.position[moveAxes[1]]}
-          min={-120}
-          max={120}
-          invert
-          onChange={(value) => updatePosition(moveAxes[1], value)}
-        />
+      <div className={`shape-control-grid assembly-position-grid ${viewport === '3d' ? 'three-axis' : ''}`}>
+        {moveAxes.map((axis, index) => (
+          <ControlField
+            key={axis}
+            axis={getAssemblyControlAxis(axis, viewport)}
+            label={getAssemblyAxisLabel(axis)}
+            value={instance.position[axis]}
+            min={-120}
+            max={120}
+            invert={viewport !== '3d' && index === 1}
+            onChange={(value) => updatePosition(axis, value)}
+          />
+        ))}
       </div>
 
       <div className="assembly-section-label">部品回転</div>

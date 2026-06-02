@@ -951,6 +951,10 @@ h1 {
   width: fit-content;
 }
 
+.assembly-view-label {
+  color: #17212b;
+}
+
 .assembly-list {
   display: grid;
   gap: 8px;
@@ -1019,6 +1023,10 @@ h1 {
 
 .assembly-position-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.assembly-position-grid.three-axis {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .assembly-rotation-grid {
