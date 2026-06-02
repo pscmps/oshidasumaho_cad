@@ -7,7 +7,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-02';
+const APP_VERSION = 'proto-2026-06-02-03';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -1757,6 +1757,7 @@ function App() {
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
   const [selectedAssemblyId, setSelectedAssemblyId] = useState(null);
   const [assemblyViewport, setAssemblyViewport] = useState('3d');
+  const [fullAssemblyPreview, setFullAssemblyPreview] = useState(null);
   const [preview3DSelected, setPreview3DSelected] = useState(false);
   const [fullPreviewFace, setFullPreviewFace] = useState(null);
   const [outputOpen, setOutputOpen] = useState(false);
@@ -2097,6 +2098,7 @@ function App() {
     setAppMode('assembly');
     setPreviewMenuOpen(false);
     setAssemblyViewport('3d');
+    setFullAssemblyPreview(null);
     setSelectedAssemblyId(null);
     setOutputOpen(false);
     setPreview3DSelected(false);
@@ -2106,6 +2108,7 @@ function App() {
     setAppMode('part');
     setPreviewMenuOpen(false);
     setAssemblyViewport('3d');
+    setFullAssemblyPreview(null);
   }
 
   function addAssemblyInstance(partId) {
@@ -2130,6 +2133,7 @@ function App() {
     }));
     setSelectedAssemblyId(id);
     setAssemblyViewport('3d');
+    setFullAssemblyPreview(null);
   }
 
   function updateAssemblyViewRotation(axis, value) {
@@ -2158,6 +2162,12 @@ function App() {
         activeFace: normalizeFace(viewport),
       }));
     }
+  }
+
+  function toggleFullAssemblyPreview(viewport) {
+    const nextViewport = viewport === '3d' ? '3d' : normalizeFace(viewport);
+    selectAssemblyViewport(nextViewport);
+    setFullAssemblyPreview((current) => (current === nextViewport ? null : nextViewport));
   }
 
   function selectAssemblyInstance(id, viewport = assemblyViewport) {
@@ -2300,9 +2310,11 @@ function App() {
             assembly={assembly}
             selectedInstanceId={selectedAssemblyId}
             viewport={assemblyViewport}
+            fullPreview={fullAssemblyPreview}
             menuOpen={previewMenuOpen}
             onInstanceSelect={selectAssemblyInstance}
             onViewportSelect={selectAssemblyViewport}
+            onViewportDoubleSelect={toggleFullAssemblyPreview}
             onMenuToggle={() => setPreviewMenuOpen((open) => !open)}
             onPartMode={openPartMode}
           />
@@ -2658,6 +2670,31 @@ function getAssemblyBoundsFromSurfaces(surfaces) {
   return bounds;
 }
 
+function getAssemblyFitBoundsFromSurfaces(surfaces) {
+  const points = surfaces.flatMap((surface) => surface.rings.flat());
+  if (!points.length) {
+    return {
+      x: { min: -60, max: 60, size: 120 },
+      y: { min: -60, max: 60, size: 120 },
+      z: { min: -60, max: 60, size: 120 },
+    };
+  }
+
+  const bounds = {};
+  ['x', 'y', 'z'].forEach((axis) => {
+    const values = points.map((point) => point[axis]);
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const padding = Math.max(4, (max - min) * 0.08);
+    bounds[axis] = {
+      min: min - padding,
+      max: max + padding,
+      size: Math.max(1, max - min + padding * 2),
+    };
+  });
+  return bounds;
+}
+
 function getAssemblyProjectionAxes(face) {
   if (face === 'top') {
     return { horizontal: 'x', vertical: 'y' };
@@ -2709,14 +2746,18 @@ function AssemblyViewer({
   assembly,
   selectedInstanceId,
   viewport,
+  fullPreview,
   menuOpen,
   onInstanceSelect,
   onViewportSelect,
+  onViewportDoubleSelect,
   onMenuToggle,
   onPartMode,
 }) {
   const surfaces = useMemo(() => getAssemblySurfaces(assembly.instances), [assembly.instances]);
   const bounds = useMemo(() => getAssemblyBoundsFromSurfaces(surfaces), [surfaces]);
+  const fitBounds = useMemo(() => getAssemblyFitBoundsFromSurfaces(surfaces), [surfaces]);
+  const fullFace = fullPreview && fullPreview !== '3d' ? normalizeFace(fullPreview) : null;
 
   return (
     <div className="viewer-frame">
@@ -2743,27 +2784,48 @@ function AssemblyViewer({
         </div>
       </div>
       <svg className="tri-view assembly-view" viewBox="0 0 378 268" role="img" aria-label="アセンブリ配置図">
-        {FACE_ORDER.map((face) => (
-          <AssemblyFaceProjection
-            key={face}
-            face={face}
-            active={viewport === face}
+        {fullPreview === '3d' ? (
+          <AssemblyIsoPreview
             surfaces={surfaces}
-            bounds={bounds}
+            bounds={fitBounds}
+            rotation={assembly.viewRotation}
+            selected
+            expanded
             selectedInstanceId={selectedInstanceId}
-            onInstanceSelect={onInstanceSelect}
-            onViewportSelect={onViewportSelect}
+            onSelect={() => onViewportSelect('3d')}
+            onDoubleSelect={() => onViewportDoubleSelect('3d')}
+            onInstanceSelect={(id) => onInstanceSelect(id, '3d')}
           />
-        ))}
-        <AssemblyIsoPreview
-          surfaces={surfaces}
-          bounds={bounds}
-          rotation={assembly.viewRotation}
-          selected={viewport === '3d'}
-          selectedInstanceId={selectedInstanceId}
-          onSelect={() => onViewportSelect('3d')}
-          onInstanceSelect={(id) => onInstanceSelect(id, '3d')}
-        />
+        ) : (
+          <>
+            {(fullFace ? [fullFace] : FACE_ORDER).map((face) => (
+              <AssemblyFaceProjection
+                key={face}
+                face={face}
+                active={viewport === face}
+                full={Boolean(fullFace)}
+                surfaces={surfaces}
+                bounds={bounds}
+                selectedInstanceId={selectedInstanceId}
+                onInstanceSelect={onInstanceSelect}
+                onViewportSelect={onViewportSelect}
+                onViewportDoubleSelect={onViewportDoubleSelect}
+              />
+            ))}
+            {!fullFace ? (
+              <AssemblyIsoPreview
+                surfaces={surfaces}
+                bounds={fitBounds}
+                rotation={assembly.viewRotation}
+                selected={viewport === '3d'}
+                selectedInstanceId={selectedInstanceId}
+                onSelect={() => onViewportSelect('3d')}
+                onDoubleSelect={() => onViewportDoubleSelect('3d')}
+                onInstanceSelect={(id) => onInstanceSelect(id, '3d')}
+              />
+            ) : null}
+          </>
+        )}
       </svg>
     </div>
   );
@@ -2772,22 +2834,28 @@ function AssemblyViewer({
 function AssemblyFaceProjection({
   face,
   active,
+  full = false,
   surfaces,
   bounds,
   selectedInstanceId,
   onInstanceSelect,
   onViewportSelect,
+  onViewportDoubleSelect,
 }) {
   const instanceIds = [...new Set(surfaces.map((surface) => surface.instanceId))];
 
   return (
     <g
       className={`face-plan assembly-face face-${face} ${active ? 'active' : ''}`}
-      transform={getFaceTransform(face, false)}
+      transform={getFaceTransform(face, full)}
       role="button"
       tabIndex="0"
       aria-label={`アセンブリ ${FACE_LABELS[face]}`}
       onClick={() => onViewportSelect(face)}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onViewportDoubleSelect(face);
+      }}
       onKeyDown={(event) => {
         if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
@@ -2827,6 +2895,10 @@ function AssemblyFaceProjection({
               event.stopPropagation();
               onInstanceSelect(instanceId, face);
             }}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onViewportDoubleSelect(face);
+            }}
           />
         );
       })}
@@ -2840,17 +2912,30 @@ function AssemblyIsoPreview({
   bounds,
   rotation,
   selected,
+  expanded = false,
   selectedInstanceId,
   onSelect,
+  onDoubleSelect,
   onInstanceSelect,
 }) {
-  const box = { x: 198, y: 6, width: 120, height: 120, labelY: 116 };
-  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + 4 };
+  const box = expanded
+    ? { x: 30, y: 12, width: 266, height: 240, labelY: 238 }
+    : { x: 198, y: 6, width: 120, height: 120, labelY: 116 };
+  const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 + (expanded ? 12 : 4) };
+  const contentCenter = {
+    x: (bounds.x.min + bounds.x.max) / 2,
+    y: (bounds.y.min + bounds.y.max) / 2,
+    z: (bounds.z.min + bounds.z.max) / 2,
+  };
   const maxSize = Math.max(bounds.x.size, bounds.y.size, bounds.z.size);
-  const scale = 48 / Math.max(1, maxSize);
+  const scale = (expanded ? 104 : 50) / Math.max(1, maxSize);
   const projectedSurfaces = surfaces.map((surface) => {
     const projectedRings = surface.rings.map((ring) => ring.map((point) => {
-      const rotated = rotatePoint(point, rotation);
+      const rotated = rotatePoint({
+        x: point.x - contentCenter.x,
+        y: point.y - contentCenter.y,
+        z: point.z - contentCenter.z,
+      }, rotation);
       return {
         ...rotated,
         sx: center.x + rotated.x * scale,
@@ -2871,11 +2956,15 @@ function AssemblyIsoPreview({
 
   return (
     <g
-      className={`iso-preview assembly-iso ${selected ? 'selected' : ''}`}
+      className={`iso-preview assembly-iso ${expanded ? 'expanded' : ''} ${selected ? 'selected' : ''}`}
       aria-label="アセンブリ3Dプレビュー"
       onClick={(event) => {
         event.stopPropagation();
         onSelect();
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+        onDoubleSelect();
       }}
     >
       <rect className="iso-preview-frame" x={box.x} y={box.y} width={box.width} height={box.height} rx="4" />
@@ -2889,6 +2978,10 @@ function AssemblyIsoPreview({
             onClick={(event) => {
               event.stopPropagation();
               onInstanceSelect(surface.instanceId);
+            }}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onDoubleSelect();
             }}
           />
           {surface.projectedRings.flatMap((ring, ringIndex) =>
@@ -2930,6 +3023,10 @@ function AssemblyIsoPreview({
             onClick={(event) => {
               event.stopPropagation();
               onInstanceSelect(instanceId);
+            }}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              onDoubleSelect();
             }}
           />
         );
