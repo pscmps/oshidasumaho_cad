@@ -936,13 +936,24 @@ h1 {
 }
 
 .assembly-view-actions {
-  display: flex;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: minmax(76px, auto) minmax(0, 1fr);
+  grid-template-rows: repeat(4, 30px);
+  gap: 8px;
+  align-items: stretch;
   margin-top: 10px;
 }
 
-.assembly-view-actions button {
+.assembly-view-actions > button {
+  grid-column: 1;
+  grid-row: 1;
   min-height: 32px;
+  padding: 0 8px;
+}
+
+.assembly-view-actions .view-net {
+  grid-column: 2;
+  grid-row: 1 / span 4;
 }
 
 .assembly-load-panel .saved-part-actions {

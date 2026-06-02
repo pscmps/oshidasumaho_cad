@@ -7,7 +7,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-05';
+const APP_VERSION = 'proto-2026-06-02-06';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -2146,6 +2146,14 @@ function App() {
     }));
   }
 
+  function setAssemblyViewRotation(rotation) {
+    setAssembly((current) => ({
+      ...current,
+      viewRotation: normalizeRotation(rotation),
+    }));
+    setAssemblyViewport('3d');
+  }
+
   function resetAssemblyViewRotation() {
     setAssembly((current) => ({
       ...current,
@@ -3127,6 +3135,7 @@ function AssemblyPanel({
         rotation={assembly.viewRotation}
         onChange={onViewRotationChange}
         onReset={onViewRotationReset}
+        onView={(view) => setAssemblyViewRotation(FACE_VIEW_ROTATIONS[view])}
       />
 
       <div className="part-storage-panel assembly-load-panel">
@@ -3203,7 +3212,7 @@ function AssemblyPanel({
   );
 }
 
-function AssemblyViewControls({ rotation, onChange, onReset }) {
+function AssemblyViewControls({ rotation, onChange, onReset, onView }) {
   return (
     <section className="rotation-panel assembly-view-controls" aria-label="アセンブリ画面回転">
       <div className="rotation-header">
@@ -3234,6 +3243,14 @@ function AssemblyViewControls({ rotation, onChange, onReset }) {
       </div>
       <div className="assembly-view-actions">
         <button type="button" onClick={onReset}>初期角度</button>
+        <div className="view-net" aria-label="アセンブリ方向プリセット">
+          <button type="button" className="view-top" onClick={() => onView('top')}>上面</button>
+          <button type="button" className="view-left" onClick={() => onView('left')}>左側面</button>
+          <button type="button" className="view-front" onClick={() => onView('front')}>正面</button>
+          <button type="button" className="view-right" onClick={() => onView('right')}>右側面</button>
+          <button type="button" className="view-bottom" onClick={() => onView('bottom')}>底面</button>
+          <button type="button" className="view-back" onClick={() => onView('back')}>背面</button>
+        </div>
       </div>
     </section>
   );
