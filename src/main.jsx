@@ -7,7 +7,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-08';
+const APP_VERSION = 'proto-2026-06-02-09';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -56,6 +56,7 @@ const initialDocument = {
   transparent3D: true,
   show3DGrid: false,
   show3DEdges: true,
+  showAllDimensions: false,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -93,6 +94,7 @@ function normalizeDocument(document) {
   const transparent3D = document?.transparent3D !== false;
   const show3DGrid = Boolean(document?.show3DGrid);
   const show3DEdges = document?.show3DEdges !== false;
+  const showAllDimensions = Boolean(document?.showAllDimensions);
   const areaLocks = FACE_ORDER.reduce((locks, face) => ({
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
@@ -105,6 +107,7 @@ function normalizeDocument(document) {
     ? document.shapes.map((shape) => ({
         ...shape,
         face: normalizeFace(shape.face ?? activeFace),
+        showDimensions: Boolean(shape.showDimensions),
       }))
     : initialDocument.shapes;
 
@@ -119,6 +122,7 @@ function normalizeDocument(document) {
     transparent3D,
     show3DGrid,
     show3DEdges,
+    showAllDimensions,
     shapes,
   };
 }
@@ -1908,6 +1912,13 @@ function App() {
     });
   }
 
+  function toggleAllDimensions() {
+    setDocument((current) => ({
+      ...current,
+      showAllDimensions: !current.showAllDimensions,
+    }));
+  }
+
   function addShape(type) {
     setPreview3DSelected(false);
     setOutputOpen(false);
@@ -2387,6 +2398,14 @@ function App() {
               <h1>図形配置</h1>
             </div>
             <div className="header-actions">
+              <button
+                type="button"
+                className={document.showAllDimensions ? 'active-toggle' : ''}
+                aria-pressed={document.showAllDimensions}
+                onClick={toggleAllDimensions}
+              >
+                全寸法
+              </button>
               <button type="button" onClick={() => addShape('rect')}>+四角</button>
               <button type="button" onClick={() => addShape('circle')}>+円</button>
             </div>
@@ -2572,6 +2591,9 @@ function Viewer({
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
           </pattern>
+          <marker id="dimension-arrow" markerWidth="4" markerHeight="4" refX="2" refY="2" orient="auto-start-reverse">
+            <path d="M 0 0 L 4 2 L 0 4 Z" />
+          </marker>
           {FACE_ORDER.map((face) => (
             <mask key={face} id={`body-mask-${face}`}>
               <rect width="120" height="120" fill="black" />
@@ -2604,6 +2626,7 @@ function Viewer({
                 full={Boolean(previewFace)}
                 shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
                 constraint={faceConstraints[face]}
+                showAllDimensions={document.showAllDimensions}
                 selectedId={selectedId}
                 onSelect={onSelect}
                 onFaceSelect={onFaceSelect}
@@ -3735,17 +3758,164 @@ function getFaceTransform(face, full) {
   return 'translate(62 142)';
 }
 
+function getShapeBounds2D(shape) {
+  if (shape.type === 'circle') {
+    return {
+      minX: shape.x - shape.r,
+      maxX: shape.x + shape.r,
+      minY: shape.y - shape.r,
+      maxY: shape.y + shape.r,
+      width: shape.r * 2,
+      height: shape.r * 2,
+      centerX: shape.x,
+      centerY: shape.y,
+    };
+  }
+
+  return {
+    minX: shape.x,
+    maxX: shape.x + shape.w,
+    minY: shape.y,
+    maxY: shape.y + shape.h,
+    width: shape.w,
+    height: shape.h,
+    centerX: shape.x + shape.w / 2,
+    centerY: shape.y + shape.h / 2,
+  };
+}
+
+function formatDimensionValue(value) {
+  return Number(Math.max(0, value).toFixed(1)).toString();
+}
+
+function getDimensionTextPoint(start, end, offset = 0) {
+  const horizontal = Math.abs(start.y - end.y) < 0.001;
+  if (horizontal) {
+    return {
+      x: (start.x + end.x) / 2,
+      y: start.y - 2 + offset,
+      rotate: null,
+    };
+  }
+  return {
+    x: start.x + 3 + offset,
+    y: (start.y + end.y) / 2,
+    rotate: null,
+  };
+}
+
+function DimensionArrow({ start, end, value, className = '' }) {
+  const textPoint = getDimensionTextPoint(start, end);
+  if (value <= 0.001) {
+    return null;
+  }
+
+  return (
+    <g className={`dimension-line ${className}`}>
+      <line
+        x1={start.x}
+        y1={start.y}
+        x2={end.x}
+        y2={end.y}
+        markerStart="url(#dimension-arrow)"
+        markerEnd="url(#dimension-arrow)"
+      />
+      <text x={textPoint.x} y={textPoint.y}>
+        {formatDimensionValue(value)}
+      </text>
+    </g>
+  );
+}
+
+function ShapeDimensions({ shape, outerBounds }) {
+  if (!outerBounds) {
+    return null;
+  }
+
+  const bounds = getShapeBounds2D(shape);
+  const topY = clampValue(bounds.minY - 7, 7, 113);
+  const bottomY = clampValue(bounds.maxY + 7, 7, 113);
+  const leftX = clampValue(bounds.minX - 7, 7, 113);
+  const rightX = clampValue(bounds.maxX + 7, 7, 113);
+  const centerX = clampValue(bounds.centerX, 7, 113);
+  const centerY = clampValue(bounds.centerY, 7, 113);
+
+  const distanceArrows = [
+    {
+      key: 'left',
+      start: { x: outerBounds.minX, y: topY },
+      end: { x: bounds.minX, y: topY },
+      value: bounds.minX - outerBounds.minX,
+    },
+    {
+      key: 'right',
+      start: { x: bounds.maxX, y: topY },
+      end: { x: outerBounds.maxX, y: topY },
+      value: outerBounds.maxX - bounds.maxX,
+    },
+    {
+      key: 'top',
+      start: { x: leftX, y: outerBounds.minY },
+      end: { x: leftX, y: bounds.minY },
+      value: bounds.minY - outerBounds.minY,
+    },
+    {
+      key: 'bottom',
+      start: { x: rightX, y: bounds.maxY },
+      end: { x: rightX, y: outerBounds.maxY },
+      value: outerBounds.maxY - bounds.maxY,
+    },
+  ];
+
+  const shapeSizeArrows = shape.mode === 'add'
+    ? [
+        {
+          key: 'width',
+          start: { x: bounds.minX, y: bottomY },
+          end: { x: bounds.maxX, y: bottomY },
+          value: bounds.width,
+          className: 'shape-size',
+        },
+        {
+          key: 'height',
+          start: { x: centerX, y: bounds.minY },
+          end: { x: centerX, y: bounds.maxY },
+          value: bounds.height,
+          className: 'shape-size',
+        },
+      ]
+    : [];
+
+  return (
+    <g className={`shape-dimensions ${shape.mode}`}>
+      {[...distanceArrows, ...shapeSizeArrows].map((arrow) => (
+        <DimensionArrow
+          key={arrow.key}
+          start={arrow.start}
+          end={arrow.end}
+          value={arrow.value}
+          className={arrow.className}
+        />
+      ))}
+    </g>
+  );
+}
+
 function FacePlan({
   face,
   active,
   full,
   shapes,
   constraint,
+  showAllDimensions,
   selectedId,
   onSelect,
   onFaceSelect,
   onFaceDoubleSelect,
 }) {
+  const outerBounds = getBooleanPolygonBounds(getFaceBooleanPolygons(shapes));
+  const dimensionShapes = shapes.filter((shape) => showAllDimensions || shape.showDimensions);
+
   return (
     <g
       className={`face-plan face-${face} ${active ? 'active' : ''} ${full ? 'full' : ''}`}
@@ -3789,6 +3959,9 @@ function FacePlan({
           selected={shape.id === selectedId}
           onSelect={() => onSelect(shape.id)}
         />
+      ))}
+      {dimensionShapes.map((shape) => (
+        <ShapeDimensions key={`dimensions-${shape.id}`} shape={shape} outerBounds={outerBounds} />
       ))}
       <text className="face-plan-label" x="60" y="112">{FACE_LABELS[face]}</text>
     </g>
@@ -3941,16 +4114,14 @@ function ShapeEditor({
           <option value="add">add</option>
           <option value="cut">cut</option>
         </select>
-        <select
-          className="face-select"
-          value={normalizeFace(shape.face)}
-          onChange={(event) => onChange({ face: event.target.value })}
-          aria-label={`${getShapeLabel(shape)} face`}
+        <button
+          type="button"
+          className={`dimension-toggle ${shape.showDimensions ? 'active-toggle' : ''}`}
+          aria-pressed={Boolean(shape.showDimensions)}
+          onClick={() => onChange({ showDimensions: !shape.showDimensions })}
         >
-          {FACE_ORDER.map((face) => (
-            <option key={face} value={face}>{FACE_LABELS[face]}</option>
-          ))}
-        </select>
+          寸法
+        </button>
         <div className="shape-actions">
           <button type="button" onClick={() => onMove(shape.id, -1)} disabled={index === 0}>
             ↑

@@ -728,6 +728,12 @@ h1 {
   padding: 0 10px;
 }
 
+.active-toggle {
+  border-color: #17212b;
+  background: #17212b;
+  color: #ffffff;
+}
+
 .document-controls {
   display: grid;
   grid-template-columns: minmax(120px, max-content);
@@ -821,8 +827,10 @@ h1 {
   flex: 0 0 64px;
 }
 
-.face-select {
-  flex: 0 0 52px;
+.dimension-toggle {
+  flex: 0 0 56px;
+  min-height: 34px;
+  padding: 0 8px;
 }
 
 .shape-actions {
@@ -836,6 +844,42 @@ h1 {
 
 .shape-actions .danger {
   min-width: 48px;
+}
+
+#dimension-arrow path {
+  fill: #17212b;
+}
+
+.shape-dimensions {
+  pointer-events: none;
+}
+
+.dimension-line line {
+  fill: none;
+  stroke: #17212b;
+  stroke-width: 0.75;
+  vector-effect: non-scaling-stroke;
+}
+
+.dimension-line text {
+  fill: #17212b;
+  paint-order: stroke;
+  stroke: #ffffff;
+  stroke-width: 2.2px;
+  stroke-linejoin: round;
+  font-size: 5px;
+  font-weight: 900;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.shape-dimensions.cut .dimension-line line,
+.shape-dimensions.cut .dimension-line text {
+  stroke-opacity: 0.9;
+}
+
+.dimension-line.shape-size line {
+  stroke-dasharray: 1.8 1.2;
 }
 
 .shape-control-grid {
