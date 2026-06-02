@@ -7,7 +7,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-06';
+const APP_VERSION = 'proto-2026-06-02-07';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -2152,6 +2152,7 @@ function App() {
       viewRotation: normalizeRotation(rotation),
     }));
     setAssemblyViewport('3d');
+    setFullAssemblyPreview((current) => (current === '3d' ? '3d' : null));
   }
 
   function resetAssemblyViewRotation() {
@@ -2160,6 +2161,7 @@ function App() {
       viewRotation: DEFAULT_ROTATION,
     }));
     setAssemblyViewport('3d');
+    setFullAssemblyPreview((current) => (current === '3d' ? '3d' : null));
   }
 
   function selectAssemblyViewport(viewport) {
