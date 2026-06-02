@@ -267,6 +267,11 @@ input[type="range"] {
   fill: #ffffff;
 }
 
+.face-plan-grid {
+  pointer-events: none;
+  fill: url("#grid");
+}
+
 .face-plan.active .face-plan-bg {
   stroke-width: 3;
 }

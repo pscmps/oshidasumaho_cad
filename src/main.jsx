@@ -7,7 +7,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-03';
+const APP_VERSION = 'proto-2026-06-02-04';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -3747,6 +3747,7 @@ function FacePlan({
     >
       <rect className="face-plan-bg" width="120" height="120" rx="2" />
       <rect className="face-plan-surface" width="120" height="120" />
+      <rect className="face-plan-grid" width="120" height="120" />
       <line x1="0" y1="60" x2="120" y2="60" className="face-axis" />
       <line x1="60" y1="0" x2="60" y2="120" className="face-axis" />
       <rect
