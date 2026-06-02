@@ -7,7 +7,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-07';
+const APP_VERSION = 'proto-2026-06-02-08';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -2376,6 +2376,7 @@ function App() {
             onRemoveInstance={removeAssemblyInstance}
             onViewRotationChange={updateAssemblyViewRotation}
             onViewRotationReset={resetAssemblyViewRotation}
+            onViewRotationPreset={setAssemblyViewRotation}
           />
         ) : null}
 
@@ -3107,6 +3108,7 @@ function AssemblyPanel({
   onRemoveInstance,
   onViewRotationChange,
   onViewRotationReset,
+  onViewRotationPreset,
 }) {
   const [selectedPartId, setSelectedPartId] = useState(savedParts[0]?.id ?? '');
   const hasSavedParts = savedParts.length > 0;
@@ -3137,7 +3139,7 @@ function AssemblyPanel({
         rotation={assembly.viewRotation}
         onChange={onViewRotationChange}
         onReset={onViewRotationReset}
-        onView={(view) => setAssemblyViewRotation(FACE_VIEW_ROTATIONS[view])}
+        onView={(view) => onViewRotationPreset(FACE_VIEW_ROTATIONS[view])}
       />
 
       <div className="part-storage-panel assembly-load-panel">
