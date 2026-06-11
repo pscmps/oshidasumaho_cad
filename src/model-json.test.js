@@ -96,4 +96,6 @@ test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, /JSON\.parse/);
   assert.match(AI_MODEL_JSON_PROMPT, /末尾カンマ/);
   assert.match(AI_MODEL_JSON_PROMPT, /areaLocks/);
+  assert.match(AI_MODEL_JSON_PROMPT, /topのy最小\/最大とrightのx最小\/最大/);
+  assert.match(AI_MODEL_JSON_PROMPT, /extrudeは互換用フィールド/);
 });

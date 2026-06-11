@@ -40,6 +40,8 @@ React state、localStorage、3D描画、ファイル出力、Fusion Add-inまで
 
 同じ呼び出し画面の入力欄へJSONを直接貼り付けて読み込むこともできます。AIが返した言語指定 `json` のMarkdownコードブロックをフェンスごと貼り付けた場合もJSON本文を抽出します。スマートクォートが含まれる場合は専用エラーを表示します。ヘルプには、このschemaに沿ったJSONをAIへ生成させるための指示文とコピーボタンがあります。AI生成JSONは安全のためエリアロックなしで作り、読み込み後に各面を確認してロックする前提です。
 
+エリアロックできない状態のボタンもタップできます。タップすると、幅・奥行・高さのどの範囲が不一致か、現在範囲と許容範囲を下部UIへ表示します。ロックは面積や詳細輪郭ではなく、add/cut後の外接範囲を共有軸ごとに比較します。
+
 現在のschemaは `schemaVersion: 1` です。version指定のない従来JSONはversion 0として読み込み、現在形式へ移行します。対応versionより新しいJSON、構文エラー、未対応図形、不正な数値は画面上にエラーを表示して読み込みません。
 
 サンプルは [examples/three-face-bracket.json](examples/three-face-bracket.json) にあります。

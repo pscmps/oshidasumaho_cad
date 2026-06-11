@@ -348,8 +348,8 @@ input[type="range"] {
 }
 
 .area-lock-button.disabled {
-  cursor: not-allowed;
-  opacity: 0.38;
+  cursor: help;
+  opacity: 0.5;
 }
 
 .iso-preview {
@@ -740,6 +740,45 @@ h1 {
   gap: 8px;
   align-items: end;
   margin-bottom: 12px;
+}
+
+.area-lock-feedback {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 10px;
+  border: 1px solid #f0a5a5;
+  border-radius: 6px;
+  background: #fff5f5;
+  color: #7f1d1d;
+}
+
+.area-lock-feedback > strong {
+  font-size: 0.9rem;
+}
+
+.area-lock-feedback p {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+}
+
+.area-lock-violation {
+  display: grid;
+  gap: 3px;
+  padding-top: 7px;
+  border-top: 1px solid #fecaca;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.area-lock-violation b {
+  color: #991b1b;
+}
+
+.area-lock-violation small {
+  color: #9f3030;
+  font-size: 0.74rem;
 }
 
 .active-face-control {

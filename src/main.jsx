@@ -43,6 +43,11 @@ const FACE_AXES = {
   front: { x: 'width', y: 'height' },
   right: { x: 'depth', y: 'height' },
 };
+const DIMENSION_LABELS = {
+  width: '幅',
+  depth: '奥行',
+  height: '高さ',
+};
 const DEFAULT_AREA_LOCKS = {
   top: false,
   front: false,
@@ -406,10 +411,29 @@ function areLockedFaceBoundsValid(document) {
 }
 
 function canLockFace(document, face, faceBounds = getAllFaceBounds(document.shapes)) {
+  return getAreaLockDiagnostic(document, face, faceBounds).canLock;
+}
+
+function getConstraintSourceFaces(document, targetFace, targetAxis) {
+  const dimension = FACE_AXES[targetFace][targetAxis];
+  return FACE_ORDER.filter((sourceFace) => {
+    if (!document.areaLocks?.[sourceFace] || !document.areaLockConstraints?.[sourceFace]) {
+      return false;
+    }
+    return Object.values(FACE_AXES[sourceFace]).includes(dimension);
+  });
+}
+
+function getAreaLockDiagnostic(document, face, faceBounds = getAllFaceBounds(document.shapes)) {
   const normalizedFace = normalizeFace(face);
   const sourceConstraint = getLockConstraintForBounds(faceBounds[normalizedFace]);
   if (!sourceConstraint) {
-    return false;
+    return {
+      canLock: false,
+      face: normalizedFace,
+      reason: 'missing-shape',
+      violations: [],
+    };
   }
 
   const proposedDocument = {
@@ -426,10 +450,48 @@ function canLockFace(document, face, faceBounds = getAllFaceBounds(document.shap
     },
   };
   const lockedConstraints = getAllLockedConstraints(proposedDocument);
+  const violations = FACE_ORDER.flatMap((targetFace) => {
+    const bounds = faceBounds[targetFace];
+    const constraint = lockedConstraints[targetFace];
+    if (!bounds || !hasAreaConstraint(constraint)) {
+      return [];
+    }
 
-  return FACE_ORDER.every((targetFace) =>
-    areBoundsWithinConstraint(faceBounds[targetFace], lockedConstraints[targetFace]),
-  );
+    return ['x', 'y'].flatMap((axis) => {
+      const constrained = axis === 'x' ? constraint.constrainedX : constraint.constrainedY;
+      if (!constrained) {
+        return [];
+      }
+      const actualMin = axis === 'x' ? bounds.minX : bounds.minY;
+      const actualMax = axis === 'x' ? bounds.maxX : bounds.maxY;
+      const expectedMin = axis === 'x' ? constraint.minX : constraint.minY;
+      const expectedMax = axis === 'x' ? constraint.maxX : constraint.maxY;
+      if (actualMin >= expectedMin - 0.001 && actualMax <= expectedMax + 0.001) {
+        return [];
+      }
+      return [{
+        targetFace,
+        axis,
+        dimension: FACE_AXES[targetFace][axis],
+        actualMin,
+        actualMax,
+        expectedMin,
+        expectedMax,
+        sourceFaces: getConstraintSourceFaces(proposedDocument, targetFace, axis),
+      }];
+    });
+  });
+
+  return {
+    canLock: violations.length === 0,
+    face: normalizedFace,
+    reason: violations.length ? 'range-mismatch' : null,
+    violations,
+  };
+}
+
+function formatRange(min, max) {
+  return `${min.toFixed(1)}～${max.toFixed(1)} mm（${(max - min).toFixed(1)} mm）`;
 }
 
 function clampValue(value, min, max) {
@@ -1786,6 +1848,7 @@ function App() {
   const [stlResolution, setStlResolution] = useState(1);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [jsonImportStatus, setJsonImportStatus] = useState(null);
+  const [areaLockFeedback, setAreaLockFeedback] = useState(null);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
   const assemblyRefs = useRef(new Map());
@@ -1795,9 +1858,13 @@ function App() {
   const activeShapes = document.shapes.filter((shape) => normalizeFace(shape.face) === activeFace);
   const faceBounds = useMemo(() => getAllFaceBounds(document.shapes), [document.shapes]);
   const lockedConstraints = useMemo(() => getAllLockedConstraints(document), [document]);
-  const areaLockAvailability = useMemo(
-    () => Object.fromEntries(FACE_ORDER.map((face) => [face, canLockFace(document, face, faceBounds)])),
+  const areaLockDiagnostics = useMemo(
+    () => Object.fromEntries(FACE_ORDER.map((face) => [face, getAreaLockDiagnostic(document, face, faceBounds)])),
     [document, faceBounds],
+  );
+  const areaLockAvailability = useMemo(
+    () => Object.fromEntries(FACE_ORDER.map((face) => [face, areaLockDiagnostics[face].canLock])),
+    [areaLockDiagnostics],
   );
   const previewDimensions = useMemo(() => getLockedPreviewDimensions(document), [document]);
   const stlResolutionMax = useMemo(() => getMeshResolutionMax(previewDimensions, STL_MESH_OPTIONS), [previewDimensions]);
@@ -1903,6 +1970,7 @@ function App() {
   function updateShape(id, patch) {
     setPreview3DSelected(false);
     setOutputOpen(false);
+    setAreaLockFeedback(null);
     setDocument((current) => {
       const nextDocument = applyAreaLocks({
         ...current,
@@ -1934,6 +2002,7 @@ function App() {
   function addShape(type) {
     setPreview3DSelected(false);
     setOutputOpen(false);
+    setAreaLockFeedback(null);
     setDocument((current) => {
       const id = getNextId(current.shapes);
       const face = normalizeFace(current.activeFace);
@@ -1954,6 +2023,7 @@ function App() {
   function removeShape(id) {
     setPreview3DSelected(false);
     setOutputOpen(false);
+    setAreaLockFeedback(null);
     setDocument((current) => {
       const nextShapes = current.shapes.filter((shape) => shape.id !== id);
       if (selectedId === id) {
@@ -1980,6 +2050,7 @@ function App() {
   }
 
   function moveShape(id, direction) {
+    setAreaLockFeedback(null);
     setDocument((current) => {
       const shape = current.shapes.find((item) => item.id === id);
       if (!shape) {
@@ -2014,9 +2085,12 @@ function App() {
       };
       const nextLockValue = !currentLocks[normalizedFace];
       const nextConstraint = getLockConstraintForBounds(getFaceBounds(current.shapes, normalizedFace));
-      if (nextLockValue && !canLockFace(current, normalizedFace)) {
+      const diagnostic = getAreaLockDiagnostic(current, normalizedFace);
+      if (nextLockValue && !diagnostic.canLock) {
+        setAreaLockFeedback(diagnostic);
         return current;
       }
+      setAreaLockFeedback(null);
 
       const nextDocument = {
         ...current,
@@ -2041,6 +2115,7 @@ function App() {
     setOutputOpen(false);
     setPreviewMenuOpen(false);
     setResetConfirmOpen(false);
+    setAreaLockFeedback(null);
   }
 
   function openSavePanel(format = 'json') {
@@ -2114,6 +2189,7 @@ function App() {
     setSelectedId(null);
     setPreview3DSelected(false);
     setFullPreviewFace(null);
+    setAreaLockFeedback(null);
     setJsonImportStatus({
       type: 'success',
       message: `「${nextDocument.partName || sourceLabel}」を読み込みました。`,
@@ -2275,6 +2351,7 @@ function App() {
   function setActiveFace(face) {
     setPreview3DSelected(false);
     setOutputOpen(false);
+    setAreaLockFeedback(null);
     updateDocument({ activeFace: normalizeFace(face) });
     setSelectedId(null);
   }
@@ -2397,6 +2474,7 @@ function App() {
             areaLocks={document.areaLocks}
             areaLockConstraints={document.areaLockConstraints}
             areaLockAvailability={areaLockAvailability}
+            areaLockDiagnostics={areaLockDiagnostics}
             previewDimensions={previewDimensions}
             rotation={document.rotation}
             transparent3D={document.transparent3D}
@@ -2471,6 +2549,10 @@ function App() {
               </strong>
             </div>
           </div>
+        ) : null}
+
+        {appMode === 'part' && showingFaceControls && areaLockFeedback ? (
+          <AreaLockFeedback diagnostic={areaLockFeedback} />
         ) : null}
 
         {appMode === 'part' && showingFaceControls ? (
@@ -2580,6 +2662,7 @@ function Viewer({
   areaLocks,
   areaLockConstraints,
   areaLockAvailability,
+  areaLockDiagnostics,
   previewDimensions,
   rotation,
   transparent3D,
@@ -2695,6 +2778,7 @@ function Viewer({
                 full={Boolean(previewFace)}
                 locked={Boolean(areaLocks?.[face])}
                 disabled={!areaLocks?.[face] && !areaLockAvailability?.[face]}
+                diagnostic={areaLockDiagnostics?.[face]}
                 onToggle={onAreaLockToggle}
               />
             ))}
@@ -3692,7 +3776,10 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       <h2>ロックのヒント</h2>
       <ul>
         <li>ロックは、その面の外形範囲を他の面へ反映して、3Dとして矛盾しない配置範囲を固定する機能です。</li>
+        <li>薄く表示されたロックボタンもタップできます。ロックできない場合は、幅・奥行・高さの不一致範囲を下に表示します。</li>
         <li>ロックできない時は、他の面の図形が灰色の禁止エリアにはみ出していないか確認してください。</li>
+        <li>共有範囲は、上面X＝正面X、上面Y＝右側面X、正面Y＝右側面Yです。サイズだけでなく開始・終了位置も合わせてください。</li>
+        <li>JSONのextrude値は互換用で、奥行の指定には使われません。奥行は上面Yと右側面Xで決まります。</li>
         <li>cut図形で外形を凹ませる場合は、図形の順番が影響します。後ろのaddは前のcutを上書きできます。</li>
         <li>上面は幅と奥行き、正面は幅と高さ、右側面は奥行きと高さに影響します。</li>
         <li>3面すべてをロックすると、3DプレビューとSTL/STEP保存が使えるようになります。</li>
@@ -3714,34 +3801,62 @@ function getAreaLockTransform(face, full) {
   return 'translate(6 54)';
 }
 
-function AreaLockButton({ face, full, locked, disabled, onToggle }) {
+function AreaLockButton({ face, full, locked, disabled, diagnostic, onToggle }) {
   return (
     <g
       className={`area-lock-button face-${face} ${locked ? 'locked' : ''} ${disabled ? 'disabled' : ''}`}
       transform={getAreaLockTransform(face, full)}
       role="button"
-      tabIndex={disabled ? -1 : 0}
+      tabIndex="0"
       aria-label={`${FACE_LABELS[face]} エリアロック`}
+      aria-disabled={disabled}
       onClick={(event) => {
         event.stopPropagation();
-        if (!disabled) {
-          onToggle(face);
-        }
+        onToggle(face);
       }}
       onDoubleClick={(event) => {
         event.stopPropagation();
       }}
       onKeyDown={(event) => {
-        if ((event.key === 'Enter' || event.key === ' ') && !disabled) {
+        if (event.key === 'Enter' || event.key === ' ') {
           event.preventDefault();
           onToggle(face);
         }
       }}
     >
+      <title>{disabled ? 'タップするとロックできない理由を表示します' : `${FACE_LABELS[face]}をロック`}</title>
       <rect width="50" height="24" rx="5" />
       <text x="25" y="16">エリア</text>
       <text x="43" y="16">🔒</text>
     </g>
+  );
+}
+
+function AreaLockFeedback({ diagnostic }) {
+  if (diagnostic.reason === 'missing-shape') {
+    return (
+      <section className="area-lock-feedback" role="alert">
+        <strong>{FACE_LABELS[diagnostic.face]}をロックできません</strong>
+        <p>この面に外形を作るadd図形がありません。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="area-lock-feedback" role="alert">
+      <strong>{FACE_LABELS[diagnostic.face]}をロックできません</strong>
+      {diagnostic.violations.map((violation, index) => {
+        const sourceLabels = violation.sourceFaces.map((face) => FACE_LABELS[face]).join('・');
+        return (
+          <div key={`${violation.targetFace}-${violation.axis}-${index}`} className="area-lock-violation">
+            <b>{DIMENSION_LABELS[violation.dimension]}範囲が一致していません</b>
+            <span>{FACE_LABELS[violation.targetFace]}: {formatRange(violation.actualMin, violation.actualMax)}</span>
+            <span>許容範囲: {formatRange(violation.expectedMin, violation.expectedMax)}</span>
+            <small>{sourceLabels || 'ロック済み面'}と共有する{DIMENSION_LABELS[violation.dimension]}の開始・終了位置を合わせてください。</small>
+          </div>
+        );
+      })}
+    </section>
   );
 }
 
