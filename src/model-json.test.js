@@ -65,6 +65,18 @@ test('invalid JSON syntax returns a model error', () => {
   );
 });
 
+test('JSON can be extracted from an AI markdown code block', () => {
+  const fenced = `AI output:\n\n\`\`\`json\n${serializeModelJson(model)}\n\`\`\``;
+  assert.deepEqual(parseModelJson(fenced), model);
+});
+
+test('smart quotes return a targeted error', () => {
+  assert.throws(
+    () => parseModelJson('{“schemaVersion”: 1, “shapes”: []}'),
+    (error) => error instanceof ModelJsonError && error.code === 'SMART_QUOTES',
+  );
+});
+
 test('future schema versions are rejected clearly', () => {
   assert.throws(
     () => parseModelJson(JSON.stringify({ ...model, schemaVersion: MODEL_SCHEMA_VERSION + 1 })),
@@ -77,8 +89,11 @@ test('invalid shape data is rejected', () => {
   assert.throws(() => parseModelJson(JSON.stringify(invalid)), ModelJsonError);
 });
 
-test('AI prompt targets the current schema and requests JSON-only output', () => {
+test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, new RegExp(`"schemaVersion": ${MODEL_SCHEMA_VERSION}`));
-  assert.match(AI_MODEL_JSON_PROMPT, /JSON本体だけ/);
+  assert.match(AI_MODEL_JSON_PROMPT, /```json/);
+  assert.match(AI_MODEL_JSON_PROMPT, /スマートクォート/);
+  assert.match(AI_MODEL_JSON_PROMPT, /JSON\.parse/);
+  assert.match(AI_MODEL_JSON_PROMPT, /末尾カンマ/);
   assert.match(AI_MODEL_JSON_PROMPT, /areaLocks/);
 });

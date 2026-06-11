@@ -7,7 +7,26 @@ const SUPPORTED_VIEW_MODES = new Set(['faces', '3d']);
 
 export const AI_MODEL_JSON_PROMPT = [
   'オシダスマホキャドで読み込めるJSONを作成してください。',
-  '回答はJSON本体だけにして、Markdownのコードブロックや説明文は付けないでください。',
+  '',
+  '出力形式:',
+  '- JSONは必ず ```json で始まるコードブロック内に出力してください。',
+  '- コードブロック内にはJSON以外の文章を含めないでください。',
+  '- 説明文が不要な場合は、コードブロック以外を出力しないでください。',
+  '- 説明文を書く場合も、JSONコードブロックの外側だけに書いてください。',
+  '',
+  '文字制約:',
+  '- JSON内ではASCII文字だけを使用してください。',
+  '- キーと文字列を囲む引用符はASCIIのダブルクォート "（U+0022）だけを使用してください。',
+  "- ASCIIのシングルクォート '（U+0027）は文字列内の文字としてのみ使用できます。JSONの区切りには使用しないでください。",
+  '- スマートクォート “ ” ‘ ’ は絶対に使用しないでください。',
+  '- partNameなどの文字列値も英数字、空白、ハイフンなどのASCII文字で記述してください。',
+  '',
+  '出力前の妥当性確認:',
+  '- JSON.parseできる構文であることを確認してください。',
+  '- 末尾カンマを付けないでください。',
+  '- 数値を引用符で囲まず、数値型として出力してください。',
+  '- true、false、nullは必ず小文字で出力してください。',
+  '- UTF-8テキストとして保存可能であることを確認してください。',
   '',
   '座標系と面:',
   '- 全面とも編集範囲は0〜120です。',
@@ -255,9 +274,17 @@ export function parseModelJson(text) {
   if (typeof text !== 'string') {
     throw new ModelJsonError('JSONデータは文字列である必要があります。');
   }
+  const fencedJson = text.match(/```json\s*([\s\S]*?)```/i);
+  const jsonText = (fencedJson ? fencedJson[1] : text).trim();
+  if (/[“”‘’]/u.test(jsonText)) {
+    throw new ModelJsonError(
+      'スマートクォート（“ ” ‘ ’）が含まれています。ASCIIのダブルクォート（"）へ置き換えてください。',
+      'SMART_QUOTES',
+    );
+  }
   let value;
   try {
-    value = JSON.parse(text);
+    value = JSON.parse(jsonText);
   } catch (error) {
     throw new ModelJsonError(`JSONの構文が正しくありません: ${error.message}`, 'INVALID_JSON_SYNTAX');
   }
