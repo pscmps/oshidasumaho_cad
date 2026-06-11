@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AI_MODEL_JSON_PROMPT,
   MODEL_SCHEMA_VERSION,
   ModelJsonError,
   parseModelJson,
@@ -74,4 +75,10 @@ test('future schema versions are rejected clearly', () => {
 test('invalid shape data is rejected', () => {
   const invalid = { ...model, shapes: [{ ...model.shapes[0], w: 0 }] };
   assert.throws(() => parseModelJson(JSON.stringify(invalid)), ModelJsonError);
+});
+
+test('AI prompt targets the current schema and requests JSON-only output', () => {
+  assert.match(AI_MODEL_JSON_PROMPT, new RegExp(`"schemaVersion": ${MODEL_SCHEMA_VERSION}`));
+  assert.match(AI_MODEL_JSON_PROMPT, /JSON本体だけ/);
+  assert.match(AI_MODEL_JSON_PROMPT, /areaLocks/);
 });

@@ -3,7 +3,9 @@ import { createRoot } from 'react-dom/client';
 import earcut from 'earcut';
 import polygonClipping from 'polygon-clipping';
 import {
+  AI_MODEL_JSON_PROMPT,
   MODEL_SCHEMA_VERSION,
+  parseModelJson,
   readModelJsonFile,
   serializeModelJson,
   validateAndMigrateModelDocument,
@@ -2106,19 +2108,35 @@ function App() {
     setPreviewMenuOpen(false);
   }
 
+  function restoreImportedDocument(importedDocument, sourceLabel) {
+    const nextDocument = normalizeDocument(importedDocument);
+    setDocument(nextDocument);
+    setSelectedId(null);
+    setPreview3DSelected(false);
+    setFullPreviewFace(null);
+    setJsonImportStatus({
+      type: 'success',
+      message: `「${nextDocument.partName || sourceLabel}」を読み込みました。`,
+    });
+  }
+
   async function importJsonFile(file) {
     setJsonImportStatus({ type: 'loading', message: 'JSONを読み込んでいます...' });
     try {
       const importedDocument = await readModelJsonFile(file);
-      const nextDocument = normalizeDocument(importedDocument);
-      setDocument(nextDocument);
-      setSelectedId(null);
-      setPreview3DSelected(false);
-      setFullPreviewFace(null);
+      restoreImportedDocument(importedDocument, file.name);
+    } catch (error) {
       setJsonImportStatus({
-        type: 'success',
-        message: `「${nextDocument.partName || file.name}」を読み込みました。`,
+        type: 'error',
+        message: error instanceof Error ? error.message : 'JSONの読み込みに失敗しました。',
       });
+    }
+  }
+
+  function importJsonText(text) {
+    setJsonImportStatus(null);
+    try {
+      restoreImportedDocument(parseModelJson(text), '貼り付けJSON');
     } catch (error) {
       setJsonImportStatus({
         type: 'error',
@@ -2528,6 +2546,9 @@ function App() {
             onLoadPart={loadPart}
             onDeleteSavedPart={deleteSavedPart}
             onImportJson={importJsonFile}
+            onImportJsonText={importJsonText}
+            aiPrompt={AI_MODEL_JSON_PROMPT}
+            onCopyAiPrompt={() => copyTextOutput(AI_MODEL_JSON_PROMPT)}
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
             onSaveWeb={savePartToWeb}
@@ -3425,6 +3446,9 @@ function OutputPanel({
   onLoadPart,
   onDeleteSavedPart,
   onImportJson,
+  onImportJsonText,
+  aiPrompt,
+  onCopyAiPrompt,
   onCopyJson,
   onSaveJson,
   onSaveWeb,
@@ -3432,6 +3456,8 @@ function OutputPanel({
   onSaveStl,
   onSaveStep,
 }) {
+  const [pastedJson, setPastedJson] = useState('');
+  const [promptCopied, setPromptCopied] = useState(false);
   const meshSaving = stlSaving || stepSaving;
   const hasSavedParts = savedParts.length > 0;
   const meshResolutionControl = (
@@ -3507,14 +3533,38 @@ function OutputPanel({
                 }}
               />
             </label>
-            {jsonImportStatus ? (
-              <p className={`json-import-status ${jsonImportStatus.type}`} role="status">
-                {jsonImportStatus.message}
-              </p>
-            ) : (
-              <p className="load-note">JSON保存したモデル、または同じschemaに沿ったJSONを読み込めます。</p>
-            )}
+            <p className="load-note">JSON保存したモデル、または同じschemaに沿ったJSONを読み込めます。</p>
           </div>
+          <div className="part-storage-panel load-panel">
+            <h2>JSON貼り付け</h2>
+            <label className="json-paste-field">
+              <span>JSON</span>
+              <textarea
+                value={pastedJson}
+                rows="10"
+                spellCheck="false"
+                placeholder='{"schemaVersion": 1, ...}'
+                onChange={(event) => setPastedJson(event.target.value)}
+              />
+            </label>
+            <div className="output-actions">
+              <button
+                type="button"
+                disabled={!pastedJson.trim()}
+                onClick={() => onImportJsonText(pastedJson)}
+              >
+                読み込む
+              </button>
+              <button type="button" disabled={!pastedJson} onClick={() => setPastedJson('')}>
+                クリア
+              </button>
+            </div>
+          </div>
+          {jsonImportStatus ? (
+            <p className={`json-import-status ${jsonImportStatus.type}`} role="status">
+              {jsonImportStatus.message}
+            </p>
+          ) : null}
           <div className="part-storage-panel load-panel">
             <h2>web保存データ</h2>
             <label className="saved-part-field">
@@ -3590,13 +3640,21 @@ function OutputPanel({
         )
       ) : null}
       {format === 'help' ? (
-        <HelpPanel />
+        <HelpPanel
+          aiPrompt={aiPrompt}
+          promptCopied={promptCopied}
+          onCopyAiPrompt={async () => {
+            await onCopyAiPrompt();
+            setPromptCopied(true);
+            window.setTimeout(() => setPromptCopied(false), 1800);
+          }}
+        />
       ) : null}
     </section>
   );
 }
 
-function HelpPanel() {
+function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
   return (
     <div className="help-panel">
       <h2>基本の流れ</h2>
@@ -3620,6 +3678,17 @@ function HelpPanel() {
         <li>STLはスライサー向けのメッシュとして保存します。</li>
         <li>STEPはOpenCascadeでCAD向けのB-repとして保存します。</li>
       </ul>
+      <h2>AIでJSONを作る</h2>
+      <p className="help-copy">下の指示文をAIへ貼り付け、最後の「作りたい部品の要件」を書き換えてください。返されたJSONは呼び出し画面へそのまま貼り付けられます。</p>
+      <div className="ai-prompt-actions">
+        <button type="button" onClick={onCopyAiPrompt}>
+          {promptCopied ? 'コピーしました' : 'AI指示文をコピー'}
+        </button>
+      </div>
+      <details className="ai-prompt-details">
+        <summary>指示文を表示</summary>
+        <pre>{aiPrompt}</pre>
+      </details>
       <h2>ロックのヒント</h2>
       <ul>
         <li>ロックは、その面の外形範囲を他の面へ反映して、3Dとして矛盾しない配置範囲を固定する機能です。</li>
