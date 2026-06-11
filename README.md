@@ -34,6 +34,32 @@ React state、localStorage、3D描画、ファイル出力、Fusion Add-inまで
 | `oshidasumaho-cad-saved-parts-v1` | 名前を付けてweb保存した部品一覧 |
 | `oshidasumaho-cad-assembly-v1` | アセンブリの部品配置と表示状態 |
 
+## JSON Import
+
+プレビュー右上のメニューから **呼び出し** を開き、ローカルのJSONファイルを選択するとモデルを復元できます。JSON保存直後のファイルは、図形、座標、サイズ、add/cutの順序、配置面、エリアロック、押出値、3D表示設定、寸法表示、部品名を読み戻します。
+
+現在のschemaは `schemaVersion: 1` です。version指定のない従来JSONはversion 0として読み込み、現在形式へ移行します。対応versionより新しいJSON、構文エラー、未対応図形、不正な数値は画面上にエラーを表示して読み込みません。
+
+サンプルは [examples/three-face-bracket.json](examples/three-face-bracket.json) にあります。
+
+保存対象外の一時的なUI状態:
+
+- 選択中の図形またはアセンブリ部品
+- 保存・呼び出し・ヘルプのパネル開閉
+- 面や3Dプレビューの一時的な拡大状態
+- STL出力画面で選んだ分割倍率
+
+これらはモデル形状に影響しないため、JSON読込時には初期状態へ戻ります。
+
+### JSONをCLIから利用する場合
+
+JSONの解析・version検証・移行は [src/model-json.js](src/model-json.js) に分離しています。このモジュールはDOMやReactに依存しません。将来のJSON→STL CLIでは再利用できますが、現状のSTL生成本体は [src/main.jsx](src/main.jsx) 内のUI・プレビュー処理と同居しています。CLI化する際は、次の処理をブラウザ非依存モジュールへ分離する必要があります。
+
+- 3面からの外形寸法確定
+- add/cut形状の評価
+- 符号付き距離場の生成
+- Marching TetrahedraとSTLシリアライズ
+
 ## Output
 
 - **JSON**: 図形、面、add/cut、エリアロック、表示状態を含む再編集用データ
@@ -47,6 +73,7 @@ React state、localStorage、3D描画、ファイル出力、Fusion Add-inまで
 npm install
 npm run dev
 npm run build
+npm test
 ```
 
 ## Fusion Add-in

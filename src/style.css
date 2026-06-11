@@ -1162,13 +1162,47 @@ h1 {
   background: #ffffff;
 }
 
+.load-sections {
+  display: grid;
+  gap: 12px;
+}
+
 .part-name-field,
-.saved-part-field {
+.saved-part-field,
+.json-file-field {
   display: grid;
   gap: 5px;
   color: #435365;
   font-size: 0.78rem;
   font-weight: 800;
+}
+
+.json-file-field input[type='file'] {
+  width: 100%;
+  min-width: 0;
+  padding: 7px;
+  border: 1px solid #c7d1dc;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #334155;
+  font: inherit;
+}
+
+.load-note,
+.json-import-status {
+  margin: 0;
+  color: #66788a;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.json-import-status.success {
+  color: #166534;
+}
+
+.json-import-status.error {
+  color: #b91c1c;
 }
 
 .saved-part-actions {

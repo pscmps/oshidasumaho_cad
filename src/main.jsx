@@ -2,6 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import earcut from 'earcut';
 import polygonClipping from 'polygon-clipping';
+import {
+  MODEL_SCHEMA_VERSION,
+  readModelJsonFile,
+  serializeModelJson,
+  validateAndMigrateModelDocument,
+} from './model-json.js';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
@@ -47,6 +53,7 @@ const DEFAULT_AREA_LOCK_CONSTRAINTS = {
 };
 
 const initialDocument = {
+  schemaVersion: MODEL_SCHEMA_VERSION,
   extrude: 12,
   activeFace: 'top',
   areaLocks: DEFAULT_AREA_LOCKS,
@@ -182,7 +189,9 @@ function normalizeRotation(rotation) {
 function loadDocument() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    return saved ? normalizeDocument(JSON.parse(saved)) : normalizeDocument(initialDocument);
+    return saved
+      ? normalizeDocument(validateAndMigrateModelDocument(JSON.parse(saved)))
+      : normalizeDocument(initialDocument);
   } catch {
     return normalizeDocument(initialDocument);
   }
@@ -1774,6 +1783,7 @@ function App() {
   const [stepSaving, setStepSaving] = useState(false);
   const [stlResolution, setStlResolution] = useState(1);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [jsonImportStatus, setJsonImportStatus] = useState(null);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
   const assemblyRefs = useRef(new Map());
@@ -1791,7 +1801,7 @@ function App() {
   const stlResolutionMax = useMemo(() => getMeshResolutionMax(previewDimensions, STL_MESH_OPTIONS), [previewDimensions]);
   const showing3DControls = !outputOpen && Boolean((document.viewMode === '3d' || preview3DSelected) && previewDimensions);
   const showingFaceControls = !showing3DControls && !outputOpen;
-  const jsonText = useMemo(() => JSON.stringify(document, null, 2), [document]);
+  const jsonText = useMemo(() => serializeModelJson(document), [document]);
   const selectedAssemblyInstance = assembly.instances.find((instance) => instance.id === selectedAssemblyId);
 
   useEffect(() => {
@@ -2046,6 +2056,7 @@ function App() {
   function openLoadPanel() {
     openSavePanel('load');
     setLoadPartId((current) => current || savedParts[0]?.id || '');
+    setJsonImportStatus(null);
   }
 
   function requestScreenReset() {
@@ -2093,6 +2104,27 @@ function App() {
     setPreview3DSelected(false);
     setFullPreviewFace(null);
     setPreviewMenuOpen(false);
+  }
+
+  async function importJsonFile(file) {
+    setJsonImportStatus({ type: 'loading', message: 'JSONを読み込んでいます...' });
+    try {
+      const importedDocument = await readModelJsonFile(file);
+      const nextDocument = normalizeDocument(importedDocument);
+      setDocument(nextDocument);
+      setSelectedId(null);
+      setPreview3DSelected(false);
+      setFullPreviewFace(null);
+      setJsonImportStatus({
+        type: 'success',
+        message: `「${nextDocument.partName || file.name}」を読み込みました。`,
+      });
+    } catch (error) {
+      setJsonImportStatus({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'JSONの読み込みに失敗しました。',
+      });
+    }
   }
 
   function deleteSavedPart() {
@@ -2489,11 +2521,13 @@ function App() {
             partName={saveName}
             savedParts={savedParts}
             selectedSavedPartId={loadPartId}
+            jsonImportStatus={jsonImportStatus}
             onFormatChange={setOutputFormat}
             onPartNameChange={updatePartName}
             onSavedPartSelect={setLoadPartId}
             onLoadPart={loadPart}
             onDeleteSavedPart={deleteSavedPart}
+            onImportJson={importJsonFile}
             onCopyJson={() => copyTextOutput(jsonText)}
             onSaveJson={() => saveTextOutput(jsonText, 'json', 'application/json')}
             onSaveWeb={savePartToWeb}
@@ -3384,11 +3418,13 @@ function OutputPanel({
   partName,
   savedParts,
   selectedSavedPartId,
+  jsonImportStatus,
   onFormatChange,
   onPartNameChange,
   onSavedPartSelect,
   onLoadPart,
   onDeleteSavedPart,
+  onImportJson,
   onCopyJson,
   onSaveJson,
   onSaveWeb,
@@ -3453,29 +3489,56 @@ function OutputPanel({
         </>
       ) : null}
       {format === 'load' ? (
-        <div className="part-storage-panel load-panel">
-          <h2>web保存データ</h2>
-          <label className="saved-part-field">
-            <span>呼び出しデータ</span>
-            <select
-              value={selectedSavedPartId}
-              disabled={!hasSavedParts}
-              onChange={(event) => onSavedPartSelect(event.target.value)}
-            >
-              {hasSavedParts ? savedParts.map((part) => (
-                <option key={part.id} value={part.id}>{part.name}</option>
-              )) : (
-                <option value="">保存データなし</option>
-              )}
-            </select>
-          </label>
-          <div className="saved-part-actions">
-            <button type="button" onClick={onLoadPart} disabled={!hasSavedParts || !selectedSavedPartId}>
-              呼び出し
-            </button>
-            <button type="button" onClick={onDeleteSavedPart} disabled={!hasSavedParts || !selectedSavedPartId}>
-              削除
-            </button>
+        <div className="load-sections">
+          <div className="part-storage-panel load-panel">
+            <h2>JSONファイル</h2>
+            <label className="json-file-field">
+              <span>ローカルファイル</span>
+              <input
+                type="file"
+                accept=".json,application/json"
+                disabled={jsonImportStatus?.type === 'loading'}
+                onChange={(event) => {
+                  const [file] = event.target.files;
+                  if (file) {
+                    onImportJson(file);
+                  }
+                  event.target.value = '';
+                }}
+              />
+            </label>
+            {jsonImportStatus ? (
+              <p className={`json-import-status ${jsonImportStatus.type}`} role="status">
+                {jsonImportStatus.message}
+              </p>
+            ) : (
+              <p className="load-note">JSON保存したモデル、または同じschemaに沿ったJSONを読み込めます。</p>
+            )}
+          </div>
+          <div className="part-storage-panel load-panel">
+            <h2>web保存データ</h2>
+            <label className="saved-part-field">
+              <span>呼び出しデータ</span>
+              <select
+                value={selectedSavedPartId}
+                disabled={!hasSavedParts}
+                onChange={(event) => onSavedPartSelect(event.target.value)}
+              >
+                {hasSavedParts ? savedParts.map((part) => (
+                  <option key={part.id} value={part.id}>{part.name}</option>
+                )) : (
+                  <option value="">保存データなし</option>
+                )}
+              </select>
+            </label>
+            <div className="saved-part-actions">
+              <button type="button" onClick={onLoadPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+                呼び出し
+              </button>
+              <button type="button" onClick={onDeleteSavedPart} disabled={!hasSavedParts || !selectedSavedPartId}>
+                削除
+              </button>
+            </div>
           </div>
         </div>
       ) : null}
@@ -3553,7 +3616,7 @@ function HelpPanel() {
       </ul>
       <h2>保存</h2>
       <ul>
-        <li>JSONは現在の編集データです。ファイル保存とweb保存ができます。</li>
+        <li>JSONは現在の編集データです。ファイル保存、ファイル読込、web保存ができます。</li>
         <li>STLはスライサー向けのメッシュとして保存します。</li>
         <li>STEPはOpenCascadeでCAD向けのB-repとして保存します。</li>
       </ul>

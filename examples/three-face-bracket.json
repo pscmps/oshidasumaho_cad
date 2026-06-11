@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "partName": "three-face-bracket",
+  "extrude": 12,
+  "activeFace": "top",
+  "areaLocks": {
+    "top": true,
+    "front": true,
+    "right": true
+  },
+  "areaLockConstraints": {
+    "top": {
+      "minX": 10,
+      "maxX": 80,
+      "minY": 10,
+      "maxY": 52,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "front": {
+      "minX": 10,
+      "maxX": 80,
+      "minY": 16,
+      "maxY": 70,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "right": {
+      "minX": 10,
+      "maxX": 52,
+      "minY": 16,
+      "maxY": 70,
+      "constrainedX": true,
+      "constrainedY": true
+    }
+  },
+  "viewMode": "faces",
+  "rotation": {
+    "x": 24,
+    "y": -34,
+    "z": 0
+  },
+  "transparent3D": true,
+  "show3DGrid": false,
+  "show3DEdges": true,
+  "showAllDimensions": false,
+  "shapes": [
+    {
+      "id": 1,
+      "type": "rect",
+      "x": 10,
+      "y": 10,
+      "w": 70,
+      "h": 42,
+      "mode": "add",
+      "face": "top",
+      "showDimensions": false
+    },
+    {
+      "id": 2,
+      "type": "circle",
+      "x": 42,
+      "y": 31,
+      "r": 9,
+      "mode": "cut",
+      "face": "top",
+      "showDimensions": false
+    },
+    {
+      "id": 3,
+      "type": "rect",
+      "x": 10,
+      "y": 16,
+      "w": 70,
+      "h": 54,
+      "mode": "add",
+      "face": "front",
+      "showDimensions": false
+    },
+    {
+      "id": 4,
+      "type": "circle",
+      "x": 42,
+      "y": 40,
+      "r": 5,
+      "mode": "cut",
+      "face": "front",
+      "showDimensions": false
+    },
+    {
+      "id": 5,
+      "type": "rect",
+      "x": 10,
+      "y": 16,
+      "w": 42,
+      "h": 54,
+      "mode": "add",
+      "face": "right",
+      "showDimensions": false
+    }
+  ]
+}
