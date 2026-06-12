@@ -281,14 +281,7 @@ export function parseModelJson(text) {
   if (typeof text !== 'string') {
     throw new ModelJsonError('JSONデータは文字列である必要があります。');
   }
-  const fencedJson = text.match(/```json\s*([\s\S]*?)```/i);
-  const jsonText = (fencedJson ? fencedJson[1] : text).trim();
-  if (/[“”‘’]/u.test(jsonText)) {
-    throw new ModelJsonError(
-      'スマートクォート（“ ” ‘ ’）が含まれています。ASCIIのダブルクォート（"）へ置き換えてください。',
-      'SMART_QUOTES',
-    );
-  }
+  const jsonText = normalizeModelJsonText(text);
   let value;
   try {
     value = JSON.parse(jsonText);
@@ -296,6 +289,17 @@ export function parseModelJson(text) {
     throw new ModelJsonError(`JSONの構文が正しくありません: ${error.message}`, 'INVALID_JSON_SYNTAX');
   }
   return validateAndMigrateModelDocument(value);
+}
+
+export function normalizeModelJsonText(text) {
+  if (typeof text !== 'string') {
+    throw new ModelJsonError('JSONデータは文字列である必要があります。');
+  }
+  const fencedJson = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  return (fencedJson ? fencedJson[1] : text)
+    .trim()
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'");
 }
 
 export function serializeModelJson(document, space = 2) {

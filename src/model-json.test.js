@@ -4,6 +4,7 @@ import {
   AI_MODEL_JSON_PROMPT,
   MODEL_SCHEMA_VERSION,
   ModelJsonError,
+  normalizeModelJsonText,
   parseModelJson,
   serializeModelJson,
 } from './model-json.js';
@@ -70,10 +71,16 @@ test('JSON can be extracted from an AI markdown code block', () => {
   assert.deepEqual(parseModelJson(fenced), model);
 });
 
-test('smart quotes return a targeted error', () => {
-  assert.throws(
-    () => parseModelJson('{“schemaVersion”: 1, “shapes”: []}'),
-    (error) => error instanceof ModelJsonError && error.code === 'SMART_QUOTES',
+test('smart double quotes are normalized before parsing', () => {
+  const parsed = parseModelJson('{“schemaVersion”: 1, “shapes”: []}');
+  assert.equal(parsed.schemaVersion, 1);
+  assert.deepEqual(parsed.shapes, []);
+});
+
+test('plain markdown code fences and smart quotes are normalized together', () => {
+  assert.equal(
+    normalizeModelJsonText('  ```\n{“schemaVersion”: 1, “shapes”: []}\n```  '),
+    '{"schemaVersion": 1, "shapes": []}',
   );
 });
 

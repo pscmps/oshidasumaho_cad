@@ -10,6 +10,11 @@ import {
   serializeModelJson,
   validateAndMigrateModelDocument,
 } from './model-json.js';
+import { parseUrlAutomationRequest } from './url-automation.js';
+import {
+  createLockedDocumentFromBounds,
+  diagnoseProjectionConsistency,
+} from './projection-consistency.js';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
@@ -676,6 +681,30 @@ function getPreviewDimensionsFromFaceBounds(document) {
 function getDocumentPreviewDimensions(documentData) {
   const normalizedDocument = normalizeDocument(documentData);
   return getLockedPreviewDimensions(normalizedDocument) ?? getPreviewDimensionsFromFaceBounds(normalizedDocument);
+}
+
+function getAutomaticExportPreparation(documentData) {
+  const normalizedDocument = normalizeDocument(documentData);
+  const faceBounds = getAllFaceBounds(normalizedDocument.shapes);
+  const diagnostic = diagnoseProjectionConsistency(faceBounds);
+  if (!diagnostic.valid) {
+    const details = [
+      ...diagnostic.missingFaces.map((face) => `${FACE_LABELS[face]}に有効なadd外形がありません`),
+      ...diagnostic.mismatches.map((mismatch) => (
+        `${DIMENSION_LABELS[mismatch.dimension]}: ` +
+        `${FACE_LABELS[mismatch.first.face]} ${formatRange(mismatch.firstRange.min, mismatch.firstRange.max)} / ` +
+        `${FACE_LABELS[mismatch.second.face]} ${formatRange(mismatch.secondRange.min, mismatch.secondRange.max)}`
+      )),
+    ];
+    throw new Error(`3面ロック不可: ${details.join('、')}`);
+  }
+
+  const lockedDocument = normalizeDocument(createLockedDocumentFromBounds(normalizedDocument, faceBounds));
+  const dimensions = getLockedPreviewDimensions(lockedDocument);
+  if (!dimensions) {
+    throw new Error('3D寸法を確定できませんでした。');
+  }
+  return { document: lockedDocument, dimensions };
 }
 
 function pointInShape(shape, x, y) {
@@ -1422,7 +1451,9 @@ function formatStlNumber(value) {
 }
 
 function getOutputBaseName(documentData) {
-  return (documentData.partName || 'oshidasumaho-cad-part').replace(/[\\/:*?"<>|]+/g, '-');
+  return (documentData.partName || 'oshidasumaho-cad-output')
+    .trim()
+    .replace(/[\\/:*?"<>|\u0000-\u001f]+/g, '-') || 'oshidasumaho-cad-output';
 }
 
 let replicadReadyPromise = null;
@@ -1849,6 +1880,8 @@ function App() {
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
   const [jsonImportStatus, setJsonImportStatus] = useState(null);
   const [areaLockFeedback, setAreaLockFeedback] = useState(null);
+  const [urlAutomationStatus, setUrlAutomationStatus] = useState(null);
+  const urlAutomationStartedRef = useRef(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
   const assemblyRefs = useRef(new Map());
@@ -1876,6 +1909,14 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
   }, [document]);
+
+  useEffect(() => {
+    if (urlAutomationStartedRef.current) {
+      return;
+    }
+    urlAutomationStartedRef.current = true;
+    void runUrlAutomation();
+  }, []);
 
   useEffect(() => {
     localStorage.setItem(ASSEMBLY_STORAGE_KEY, JSON.stringify(assembly));
@@ -2408,13 +2449,78 @@ function App() {
   }
 
   function saveBlobOutput(blob, extension) {
-    const fileNameBase = getOutputBaseName(document);
+    saveBlobOutputForDocument(blob, extension, document);
+  }
+
+  function saveBlobOutputForDocument(blob, extension, documentData) {
+    const fileNameBase = getOutputBaseName(documentData);
     const url = URL.createObjectURL(blob);
     const anchor = window.document.createElement('a');
     anchor.href = url;
     anchor.download = `${fileNameBase}.${extension}`;
+    anchor.style.display = 'none';
+    window.document.body.appendChild(anchor);
     anchor.click();
-    URL.revokeObjectURL(url);
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  async function runUrlAutomation() {
+    let request;
+    try {
+      request = parseUrlAutomationRequest(window.location.search);
+      if (!request) {
+        return;
+      }
+      const importedDocument = normalizeDocument(request.document);
+      setDocument(importedDocument);
+      setSelectedId(null);
+      setPreview3DSelected(false);
+      setFullPreviewFace(null);
+      setAreaLockFeedback(null);
+
+      if (!request.download) {
+        setUrlAutomationStatus({
+          type: 'success',
+          message: request.format
+            ? `URLからJSONを読み込みました。download=1を指定すると${request.format.toUpperCase()}を自動保存します。`
+            : 'URLからJSONを読み込みました。',
+        });
+        return;
+      }
+
+      setUrlAutomationStatus({
+        type: 'loading',
+        message: `${request.format.toUpperCase()}を生成しています...`,
+      });
+      const prepared = getAutomaticExportPreparation(importedDocument);
+      setDocument(prepared.document);
+      await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
+
+      if (request.format === 'stl') {
+        const stlText = buildStlText(prepared.document, prepared.dimensions, 1);
+        if (!stlText.includes('facet normal')) {
+          throw new Error('STLメッシュに有効な三角形がありません。');
+        }
+        saveBlobOutputForDocument(new Blob([stlText], { type: 'model/stl' }), 'stl', prepared.document);
+      } else {
+        const stepBlob = await buildReplicadStepBlob(prepared.document, prepared.dimensions);
+        if (!stepBlob || stepBlob.size === 0) {
+          throw new Error('STEPデータを生成できませんでした。');
+        }
+        saveBlobOutputForDocument(stepBlob, 'step', prepared.document);
+      }
+      setUrlAutomationStatus({
+        type: 'success',
+        message: `${request.format.toUpperCase()}のダウンロードを開始しました。`,
+      });
+    } catch (error) {
+      console.error('URL automation failed', error);
+      setUrlAutomationStatus({
+        type: 'error',
+        message: error instanceof Error ? error.message : 'URL自動出力に失敗しました。',
+      });
+    }
   }
 
   async function saveStlOutput() {
@@ -2500,6 +2606,15 @@ function App() {
       </section>
 
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
+        {urlAutomationStatus ? (
+          <section
+            className={`url-automation-status ${urlAutomationStatus.type}`}
+            role={urlAutomationStatus.type === 'error' ? 'alert' : 'status'}
+          >
+            <strong>URL読込・自動出力</strong>
+            <span>{urlAutomationStatus.message}</span>
+          </section>
+        ) : null}
         {appMode === 'assembly' ? (
           <AssemblyPanel
             assembly={assembly}

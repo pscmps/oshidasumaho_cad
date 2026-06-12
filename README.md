@@ -71,6 +71,32 @@ JSONの解析・version検証・移行は [src/model-json.js](src/model-json.js)
 - **STEP**: `replicad` + `OpenCascade.js`で面別ソリッドを構築し、3方向の交差形状をB-Repとして出力
 - **Fusion**: JSONをPython Add-inで読み込み、Fusion API上で3方向のソリッドを再構築
 
+## URL Import And Automatic Download
+
+GitHub PagesのURLへJSONを渡すと、ページロード時にモデルを読み込めます。自動ダウンロードは意図しない保存を避けるため `download=1` が必須です。
+
+```text
+https://pscmps.github.io/oshidasumaho_cad/?json=<encodeURIComponentしたJSON>
+https://pscmps.github.io/oshidasumaho_cad/?json=<encoded-json>&format=stl&download=1
+https://pscmps.github.io/oshidasumaho_cad/?json=<encoded-json>&format=step&download=1
+```
+
+- `json`: URLエンコードしたモデルJSON。Markdownコードブロックとスマートクォートも読込前に正規化します。
+- `format`: `stl` または `step`。自動ダウンロード時に省略すると `stl` です。
+- `download=1`: 3面整合性を検証し、内部で3面をロックして自動生成・ダウンロードします。
+
+URLSearchParamsがパーセントエンコードを復元するため、アプリ側では `decodeURIComponent` を重ねて呼びません。生成側ではJavaScriptの `encodeURIComponent(JSON.stringify(model))` などを使用してください。
+
+自動出力時は次を検証します。
+
+- 上面Xと正面Xの幅範囲
+- 上面Yと右側面Xの奥行範囲
+- 正面Yと右側面Yの高さ範囲
+- 3面すべてに有効なadd外形があること
+- STLに有効な三角形が生成されたこと、またはSTEP Blobが生成されたこと
+
+失敗時はダウンロードせず、画面上とブラウザコンソールへ理由を表示します。JSONをクエリへ直接含めるためURL長にはブラウザ依存の上限があります。大きなJSON向けのbase64url、圧縮、`jsonUrl` は今後の拡張候補です。
+
 ## Development
 
 ```bash
