@@ -17,12 +17,45 @@ const document = {
   ],
 };
 
+function encodeBase64UrlUtf8(text) {
+  const bytes = new TextEncoder().encode(text);
+  let binary = '';
+  bytes.forEach((byte) => {
+    binary += String.fromCharCode(byte);
+  });
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 test('URL query imports encoded JSON and STL download settings', () => {
   const json = encodeURIComponent(serializeModelJson(document));
   const request = parseUrlAutomationRequest(`?json=${json}&format=stl&download=1`);
   assert.equal(request.document.partName, 'url-test');
   assert.equal(request.format, 'stl');
   assert.equal(request.download, true);
+  assert.equal(request.automationMode, false);
+  assert.equal(request.source, 'json');
+});
+
+test('base64url UTF-8 JSON is imported', () => {
+  const json64 = encodeBase64UrlUtf8(serializeModelJson({ ...document, partName: '日本語部品' }));
+  const request = parseUrlAutomationRequest(`?json64=${json64}&format=stl`);
+  assert.equal(request.document.partName, '日本語部品');
+  assert.equal(request.source, 'json64');
+});
+
+test('mode=automation enables automation UI mode', () => {
+  const json64 = encodeBase64UrlUtf8(serializeModelJson(document));
+  const request = parseUrlAutomationRequest(`?json64=${json64}&format=stl&download=1&mode=automation`);
+  assert.equal(request.automationMode, true);
+});
+
+test('ui=none enables automation UI mode', () => {
+  const json = encodeURIComponent(serializeModelJson(document));
+  const request = parseUrlAutomationRequest(`?json=${json}&ui=none`);
+  assert.equal(request.automationMode, true);
 });
 
 test('download defaults to STL when format is omitted', () => {
@@ -63,5 +96,28 @@ test('download request without JSON is rejected', () => {
   assert.throws(
     () => parseUrlAutomationRequest('?format=stl&download=1'),
     (error) => error instanceof UrlAutomationError && error.code === 'JSON_PARAMETER_REQUIRED',
+  );
+});
+
+test('automation mode without JSON is rejected', () => {
+  assert.throws(
+    () => parseUrlAutomationRequest('?mode=automation'),
+    (error) => error instanceof UrlAutomationError && error.code === 'JSON_PARAMETER_REQUIRED',
+  );
+});
+
+test('json and json64 cannot be specified together', () => {
+  const json = encodeURIComponent(serializeModelJson(document));
+  const json64 = encodeBase64UrlUtf8(serializeModelJson(document));
+  assert.throws(
+    () => parseUrlAutomationRequest(`?json=${json}&json64=${json64}`),
+    (error) => error instanceof UrlAutomationError && error.code === 'MULTIPLE_JSON_PARAMETERS',
+  );
+});
+
+test('invalid json64 is rejected', () => {
+  assert.throws(
+    () => parseUrlAutomationRequest('?json64=not%20base64url'),
+    (error) => error instanceof UrlAutomationError && error.code === 'INVALID_JSON64',
   );
 });

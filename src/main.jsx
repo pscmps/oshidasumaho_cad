@@ -20,7 +20,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
-const APP_VERSION = 'proto-2026-06-02-09';
+const APP_VERSION = 'proto-2026-06-02-10';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -1881,6 +1881,12 @@ function App() {
   const [jsonImportStatus, setJsonImportStatus] = useState(null);
   const [areaLockFeedback, setAreaLockFeedback] = useState(null);
   const [urlAutomationStatus, setUrlAutomationStatus] = useState(null);
+  const [urlAutomationMode, setUrlAutomationMode] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    return params.get('mode')?.trim().toLowerCase() === 'automation'
+      || params.get('ui')?.trim().toLowerCase() === 'none';
+  });
+  const [urlDownloadArtifact, setUrlDownloadArtifact] = useState(null);
   const urlAutomationStartedRef = useRef(false);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
@@ -2467,24 +2473,34 @@ function App() {
 
   async function runUrlAutomation() {
     let request;
+    const queryParams = new URLSearchParams(window.location.search);
+    const explicitAutomationMode = queryParams.get('mode')?.trim().toLowerCase() === 'automation'
+      || queryParams.get('ui')?.trim().toLowerCase() === 'none';
+    setUrlAutomationMode(explicitAutomationMode);
+    setUrlDownloadArtifact(null);
     try {
       request = parseUrlAutomationRequest(window.location.search);
       if (!request) {
         return;
       }
+      setUrlAutomationMode(request.automationMode);
       const importedDocument = normalizeDocument(request.document);
       setDocument(importedDocument);
       setSelectedId(null);
       setPreview3DSelected(false);
       setFullPreviewFace(null);
       setAreaLockFeedback(null);
+      console.log('[Oshida CAD URL] JSON loaded', {
+        source: request.source,
+        format: request.format,
+        download: request.download,
+        mode: request.automationMode ? 'automation' : 'normal',
+      });
 
-      if (!request.download) {
+      if (!request.format) {
         setUrlAutomationStatus({
           type: 'success',
-          message: request.format
-            ? `URLからJSONを読み込みました。download=1を指定すると${request.format.toUpperCase()}を自動保存します。`
-            : 'URLからJSONを読み込みました。',
+          message: 'URLからJSONを読み込みました。',
         });
         return;
       }
@@ -2497,30 +2513,72 @@ function App() {
       setDocument(prepared.document);
       await new Promise((resolve) => window.requestAnimationFrame(() => window.requestAnimationFrame(resolve)));
 
+      let artifact;
       if (request.format === 'stl') {
         const stlText = buildStlText(prepared.document, prepared.dimensions, 1);
         if (!stlText.includes('facet normal')) {
           throw new Error('STLメッシュに有効な三角形がありません。');
         }
-        saveBlobOutputForDocument(new Blob([stlText], { type: 'model/stl' }), 'stl', prepared.document);
+        artifact = {
+          blob: new Blob([stlText], { type: 'model/stl' }),
+          extension: 'stl',
+          document: prepared.document,
+        };
       } else {
         const stepBlob = await buildReplicadStepBlob(prepared.document, prepared.dimensions);
         if (!stepBlob || stepBlob.size === 0) {
           throw new Error('STEPデータを生成できませんでした。');
         }
-        saveBlobOutputForDocument(stepBlob, 'step', prepared.document);
+        artifact = {
+          blob: stepBlob,
+          extension: 'step',
+          document: prepared.document,
+        };
+      }
+      console.log('[Oshida CAD URL] Export generated', {
+        format: artifact.extension,
+        bytes: artifact.blob.size,
+      });
+
+      if (!request.automationMode) {
+        setUrlDownloadArtifact(artifact);
+      }
+      if (request.download) {
+        saveBlobOutputForDocument(artifact.blob, artifact.extension, artifact.document);
+        console.log('[Oshida CAD URL] Automatic download requested', {
+          format: artifact.extension,
+          fileName: `${getOutputBaseName(artifact.document)}.${artifact.extension}`,
+        });
       }
       setUrlAutomationStatus({
         type: 'success',
-        message: `${request.format.toUpperCase()}のダウンロードを開始しました。`,
+        message: request.automationMode
+          ? `${request.format.toUpperCase()} ${request.download ? 'download requested' : 'generated'}`
+          : request.download
+            ? `${request.format.toUpperCase()}の自動保存を試行しました。開始されない場合は手動保存してください。`
+            : `${request.format.toUpperCase()}を生成しました。`,
       });
     } catch (error) {
-      console.error('URL automation failed', error);
+      console.error('[Oshida CAD URL] Automation failed', error);
       setUrlAutomationStatus({
         type: 'error',
         message: error instanceof Error ? error.message : 'URL自動出力に失敗しました。',
       });
     }
+  }
+
+  function saveUrlDownloadArtifact() {
+    if (!urlDownloadArtifact) {
+      return;
+    }
+    saveBlobOutputForDocument(
+      urlDownloadArtifact.blob,
+      urlDownloadArtifact.extension,
+      urlDownloadArtifact.document,
+    );
+    console.log('[Oshida CAD URL] Manual download requested', {
+      format: urlDownloadArtifact.extension,
+    });
   }
 
   async function saveStlOutput() {
@@ -2554,6 +2612,19 @@ function App() {
     } finally {
       setStepSaving(false);
     }
+  }
+
+  if (urlAutomationMode) {
+    return (
+      <main className="url-automation-shell">
+        <output
+          className={`url-automation-minimal-status ${urlAutomationStatus?.type ?? 'loading'}`}
+          aria-live="polite"
+        >
+          {urlAutomationStatus?.message ?? 'Processing URL input...'}
+        </output>
+      </main>
+    );
   }
 
   return (
@@ -2608,11 +2679,16 @@ function App() {
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
         {urlAutomationStatus ? (
           <section
-            className={`url-automation-status ${urlAutomationStatus.type}`}
+            className={`url-automation-status ${urlAutomationStatus.type}${urlAutomationMode ? ' automation' : ''}`}
             role={urlAutomationStatus.type === 'error' ? 'alert' : 'status'}
           >
             <strong>URL読込・自動出力</strong>
             <span>{urlAutomationStatus.message}</span>
+            {!urlAutomationMode && urlDownloadArtifact ? (
+              <button type="button" onClick={saveUrlDownloadArtifact}>
+                {urlDownloadArtifact.extension.toUpperCase()}を手動保存
+              </button>
+            ) : null}
           </section>
         ) : null}
         {appMode === 'assembly' ? (

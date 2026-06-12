@@ -709,6 +709,27 @@ input[type="range"] {
   color: #7f1d1d;
 }
 
+.url-automation-status button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.url-automation-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  background: #ffffff;
+}
+
+.url-automation-minimal-status {
+  color: #64748b;
+  font-size: 0.72rem;
+}
+
+.url-automation-minimal-status.error {
+  color: #991b1b;
+}
+
 .app-credit {
   margin: 18px 0 2px;
   color: #94a3b8;
