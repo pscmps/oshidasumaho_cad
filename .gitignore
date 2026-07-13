@@ -2,3 +2,7 @@ node_modules/
 dist/
 __pycache__/
 *.py[cod]
+receiver/uploads/*
+!receiver/uploads/.gitkeep
+receiver/outputs/*
+!receiver/outputs/.gitkeep

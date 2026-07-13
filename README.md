@@ -122,3 +122,31 @@ FusionでJSONを読み込み、Fusion上のソリッドとして再構築するP
 ## Discord notification
 
 Set `DISCORD_WEBHOOK_URL` in your local `.env` or shell environment before running `scripts/codex_notify_discord.py`. Do not commit webhook URLs.
+
+## Optional Local STL Receiver
+
+The local STL receiver is an advanced optional bonus feature. It is not required for normal use: the GitHub Pages version works as a static web app without any local server.
+
+The receiver cannot run on GitHub Pages. It runs only when a local Windows server is started, and the public Pages app has no receiver button or dependency.
+
+The receiver is intended only for private Tailscale access from a phone to a home Windows PC. Do not expose it directly to the internet, and do not configure router port forwarding.
+
+See [receiver/README.md](receiver/README.md) for setup details.
+
+Start, inspect, and stop it from any directory, including an SSH session:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\start-receiver.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\status-receiver.ps1"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\stop-receiver.ps1"
+```
+
+Phone upload URL example over Tailscale:
+
+```text
+https://desktop-dmlkcj9.tail3b847d.ts.net/upload
+```
+
+When the local receiver is running, open `https://desktop-dmlkcj9.tail3b847d.ts.net/` to use the CAD and the top-right **ローカル3Dプリント** dialog on the same Tailnet HTTPS origin. This item is detected at runtime and remains hidden on GitHub Pages.
+
+On this PC the optional receiver token is disabled, so the dialog does not require token entry. Access is restricted by Tailnet membership and Tailscale Serve remains `tailnet only`; Funnel and public port exposure must remain disabled.

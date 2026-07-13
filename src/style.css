@@ -210,6 +210,101 @@ input[type="range"] {
   padding: 0 12px;
 }
 
+.local-print-dialog {
+  width: min(420px, 100%);
+}
+
+.local-print-printer,
+.local-print-warning,
+.local-print-status {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.local-print-printer {
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
+.local-print-source {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.local-print-source label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 38px;
+  border: 1px solid #c9d3df;
+  border-radius: 6px;
+  padding: 0 9px;
+  color: #334155;
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.local-print-warning {
+  color: #9a3412;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.local-print-settings {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+}
+
+.local-print-support {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 34px;
+  border: 1px solid #c9d3df;
+  border-radius: 6px;
+  padding: 0 9px;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.local-print-support input {
+  width: 18px;
+  min-width: 18px;
+  height: 18px;
+  min-height: 0;
+  flex: 0 0 auto;
+}
+
+@media (max-width: 390px) {
+  .local-print-settings {
+    grid-template-columns: 1fr;
+  }
+}
+
+.local-print-status {
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: #eef2f7;
+  color: #334155;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.local-print-status.success {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.local-print-status.error {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
 .final-face.face-top,
 .face-swatch.face-top {
   fill: rgba(37, 99, 235, 0.18);

@@ -20,6 +20,7 @@ import './style.css';
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
+const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
 const APP_VERSION = 'proto-2026-06-02-10';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
@@ -1878,6 +1879,15 @@ function App() {
   const [stepSaving, setStepSaving] = useState(false);
   const [stlResolution, setStlResolution] = useState(1);
   const [resetConfirmOpen, setResetConfirmOpen] = useState(false);
+  const [localPrintInfo, setLocalPrintInfo] = useState(null);
+  const [localPrintOpen, setLocalPrintOpen] = useState(false);
+  const [localPrintSource, setLocalPrintSource] = useState('current');
+  const [localPrintFile, setLocalPrintFile] = useState(null);
+  const [localPrintToken, setLocalPrintToken] = useState(() => localStorage.getItem(RECEIVER_TOKEN_KEY) || '');
+  const [localPrintStatus, setLocalPrintStatus] = useState(null);
+  const [localPrintSubmitting, setLocalPrintSubmitting] = useState(false);
+  const [localPrintLayerHeight, setLocalPrintLayerHeight] = useState('0.20');
+  const [localPrintSupport, setLocalPrintSupport] = useState(false);
   const [jsonImportStatus, setJsonImportStatus] = useState(null);
   const [areaLockFeedback, setAreaLockFeedback] = useState(null);
   const [urlAutomationStatus, setUrlAutomationStatus] = useState(null);
@@ -1915,6 +1925,17 @@ function App() {
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
   }, [document]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/health', { signal: controller.signal, cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((info) => {
+        if (info?.localPrintUi === true) setLocalPrintInfo(info);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (urlAutomationStartedRef.current) {
@@ -2614,6 +2635,65 @@ function App() {
     }
   }
 
+  function openLocalPrintDialog() {
+    setPreviewMenuOpen(false);
+    setLocalPrintSource(previewDimensions ? 'current' : 'file');
+    setLocalPrintFile(null);
+    setLocalPrintStatus(null);
+    setLocalPrintOpen(true);
+  }
+
+  async function submitLocalPrint() {
+    if (localPrintSubmitting) return;
+    setLocalPrintSubmitting(true);
+    setLocalPrintStatus({ type: 'working', message: 'STLを送信し、印刷開始を待っています...' });
+
+    try {
+      let blob;
+      let filename;
+      if (localPrintSource === 'current') {
+        if (!previewDimensions) throw new Error('現在のモデルはまだSTLを生成できません。');
+        await new Promise((resolveFrame) => window.requestAnimationFrame(resolveFrame));
+        const stlText = buildStlText(document, previewDimensions, stlResolution);
+        if (!stlText.includes('facet normal')) throw new Error('STLに有効な三角形がありません。');
+        blob = new Blob([stlText], { type: 'model/stl' });
+        filename = `${getOutputBaseName(document)}.stl`;
+      } else {
+        if (!localPrintFile) throw new Error('STLファイルを選択してください。');
+        blob = localPrintFile;
+        filename = localPrintFile.name;
+      }
+
+      if (localPrintInfo?.tokenRequired && !localPrintToken.trim()) {
+        throw new Error('Receiver tokenを入力してください。');
+      }
+      if (localPrintToken.trim()) localStorage.setItem(RECEIVER_TOKEN_KEY, localPrintToken.trim());
+
+      const response = await fetch('/upload', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'model/stl',
+          'X-Filename': filename,
+          'X-Layer-Height': localPrintLayerHeight,
+          'X-Enable-Support': localPrintSupport ? '1' : '0',
+          ...(localPrintToken.trim() ? { 'X-Receiver-Token': localPrintToken.trim() } : {}),
+        },
+        body: blob,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `送信に失敗しました (${response.status})`);
+      const pipelineStatus = result.pipeline?.status || 'completed';
+      setLocalPrintStatus({
+        type: 'success',
+        message: `処理完了: ${pipelineStatus} / ${localPrintLayerHeight} mm / サポート${localPrintSupport ? 'あり' : 'なし'}`,
+      });
+    } catch (error) {
+      setLocalPrintStatus({ type: 'error', message: error instanceof Error ? error.message : '送信に失敗しました。' });
+    } finally {
+      setLocalPrintSubmitting(false);
+    }
+  }
+
   if (urlAutomationMode) {
     return (
       <main className="url-automation-shell">
@@ -2672,6 +2752,8 @@ function App() {
             onLoadOpen={openLoadPanel}
             onHelpOpen={openHelpPanel}
             onAssemblyOpen={openAssemblyMode}
+            localPrintAvailable={Boolean(localPrintInfo)}
+            onLocalPrintOpen={openLocalPrintDialog}
           />
         )}
       </section>
@@ -2842,6 +2924,26 @@ function App() {
           onCancel={() => setResetConfirmOpen(false)}
         />
       ) : null}
+      {localPrintOpen ? (
+        <LocalPrintDialog
+          info={localPrintInfo}
+          currentModelReady={Boolean(previewDimensions)}
+          source={localPrintSource}
+          file={localPrintFile}
+          token={localPrintToken}
+          status={localPrintStatus}
+          submitting={localPrintSubmitting}
+          layerHeight={localPrintLayerHeight}
+          support={localPrintSupport}
+          onSourceChange={setLocalPrintSource}
+          onFileChange={setLocalPrintFile}
+          onTokenChange={setLocalPrintToken}
+          onLayerHeightChange={setLocalPrintLayerHeight}
+          onSupportChange={setLocalPrintSupport}
+          onSubmit={submitLocalPrint}
+          onClose={() => !localPrintSubmitting && setLocalPrintOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }
@@ -2874,6 +2976,8 @@ function Viewer({
   onLoadOpen,
   onHelpOpen,
   onAssemblyOpen,
+  localPrintAvailable,
+  onLocalPrintOpen,
 }) {
   const activeFace = normalizeFace(document.activeFace);
   const previewFace = fullPreviewFace ? normalizeFace(fullPreviewFace) : null;
@@ -2909,6 +3013,9 @@ function Viewer({
               <button type="button" onClick={onSaveOpen}>保存</button>
               <button type="button" onClick={onLoadOpen}>呼び出し</button>
               <button type="button" onClick={onHelpOpen}>ヘルプ</button>
+              {localPrintAvailable ? (
+                <button type="button" onClick={onLocalPrintOpen}>ローカル3Dプリント</button>
+              ) : null}
               <button type="button" onClick={onAssemblyOpen}>アセンブリ(開発中)</button>
               <button type="button" onClick={onReset}>画面リセット</button>
             </div>
@@ -3417,6 +3524,119 @@ function ConfirmDialog({ title, message, confirmLabel, cancelLabel, onConfirm, o
         <div className="dialog-actions">
           <button type="button" onClick={onConfirm}>{confirmLabel}</button>
           <button type="button" onClick={onCancel}>{cancelLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LocalPrintDialog({
+  info,
+  currentModelReady,
+  source,
+  file,
+  token,
+  status,
+  submitting,
+  layerHeight,
+  support,
+  onSourceChange,
+  onFileChange,
+  onTokenChange,
+  onLayerHeightChange,
+  onSupportChange,
+  onSubmit,
+  onClose,
+}) {
+  const canSubmit = !submitting
+    && (source === 'current' ? currentModelReady : Boolean(file))
+    && (!info?.tokenRequired || Boolean(token.trim()));
+
+  return (
+    <div className="dialog-backdrop" role="presentation">
+      <div className="part-dialog local-print-dialog" role="dialog" aria-modal="true" aria-label="ローカル3Dプリント">
+        <header><h2>ローカル3Dプリント</h2></header>
+        <p className="local-print-printer">送信先: {info?.printerName || 'ローカルプリンタ'}</p>
+        <div className="local-print-source" role="radiogroup" aria-label="印刷データ">
+          <label>
+            <input
+              type="radio"
+              name="local-print-source"
+              value="current"
+              checked={source === 'current'}
+              disabled={!currentModelReady || submitting}
+              onChange={() => onSourceChange('current')}
+            />
+            現在のCADモデル
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="local-print-source"
+              value="file"
+              checked={source === 'file'}
+              disabled={submitting}
+              onChange={() => onSourceChange('file')}
+            />
+            STLファイル
+          </label>
+        </div>
+        {source === 'file' ? (
+          <label className="dialog-field">
+            STLファイル
+            <input
+              type="file"
+              accept=".stl,model/stl,application/octet-stream"
+              disabled={submitting}
+              onChange={(event) => onFileChange(event.target.files?.[0] || null)}
+            />
+          </label>
+        ) : null}
+        {info?.tokenRequired ? (
+          <label className="dialog-field">
+            Receiver token
+            <input
+              type="password"
+              value={token}
+              autoComplete="current-password"
+              disabled={submitting}
+              onChange={(event) => onTokenChange(event.target.value)}
+            />
+          </label>
+        ) : null}
+        <div className="local-print-settings">
+          <label className="dialog-field">
+            レイヤー高さ
+            <select
+              value={layerHeight}
+              disabled={submitting}
+              onChange={(event) => onLayerHeightChange(event.target.value)}
+            >
+              <option value="0.08">0.08 mm（高精細）</option>
+              <option value="0.12">0.12 mm</option>
+              <option value="0.16">0.16 mm</option>
+              <option value="0.20">0.20 mm（標準）</option>
+              <option value="0.24">0.24 mm</option>
+              <option value="0.28">0.28 mm（高速）</option>
+            </select>
+          </label>
+          <label className="local-print-support">
+            <input
+              type="checkbox"
+              checked={support}
+              disabled={submitting}
+              onChange={(event) => onSupportChange(event.target.checked)}
+            />
+            サポートを自動生成
+          </label>
+        </div>
+        <p className="local-print-warning">送信するとスライス後に実際の印刷を開始します。プリンタとベッドを確認してください。</p>
+        {status ? <output className={`local-print-status ${status.type}`} aria-live="polite">{status.message}</output> : null}
+        <div className="dialog-actions">
+          <button type="button" onClick={onClose} disabled={submitting}>閉じる</button>
+          <button type="button" onClick={onSubmit} disabled={!canSubmit}>
+            {submitting ? '処理中...' : '送信して印刷'}
+          </button>
         </div>
       </div>
     </div>

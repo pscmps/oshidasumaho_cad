@@ -1,0 +1,15 @@
+{
+  "RECEIVER_PORT": "8787",
+  "RECEIVER_TOKEN": "replace-with-a-long-random-token",
+  "BAMBU_AUTO_PRINT": "0",
+  "BAMBU_PRINT_TEST_ONLY": "1",
+  "BAMBU_PRINTER_HOST": "192.168.11.104",
+  "BAMBU_PRINTER_SERIAL": "your-printer-serial",
+  "BAMBU_PRINTER_NAME": "Bambu Lab X1 Carbon",
+  "BAMBU_GCODE_3MF_TEMPLATE": "C:\\path\\to\\known-good-template.gcode.3mf",
+  "BAMBU_BED_LEVELING": "1",
+  "BAMBU_FLOW_CALI": "1",
+  "BAMBU_USE_AMS": "1",
+  "BAMBU_AMS_AUTO_SELECT": "1",
+  "BAMBU_AMS_FILAMENT_TYPE": "PLA"
+}
