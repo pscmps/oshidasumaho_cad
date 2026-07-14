@@ -41,13 +41,9 @@ test('automatic locking stores each face bounds', () => {
   });
 });
 
-test('top lock marks contained front width and right depth as ready', () => {
+test('top lock marks exact front width and right depth as ready', () => {
   const readiness = getProjectionReadiness(
-    {
-      ...consistentBounds,
-      front: { ...consistentBounds.front, minX: 15, maxX: 50 },
-      right: { ...consistentBounds.right, minX: 22, maxX: 48 },
-    },
+    consistentBounds,
     { top: true, front: false, right: false },
     { top: { ...consistentBounds.top, constrainedX: true, constrainedY: true } },
   );
@@ -58,7 +54,21 @@ test('top lock marks contained front width and right depth as ready', () => {
   assert.equal(readiness.right.x.dimension, 'depth');
 });
 
-test('range overflow marks the corresponding axis as failed', () => {
+test('contained range stays failed until both locked edges match', () => {
+  const readiness = getProjectionReadiness(
+    {
+      ...consistentBounds,
+      front: { ...consistentBounds.front, minX: 15, maxX: 50 },
+    },
+    { top: true, front: false, right: false },
+    { top: { ...consistentBounds.top, constrainedX: true, constrainedY: true } },
+  );
+
+  assert.equal(readiness.front.x.status, 'fail');
+  assert.deepEqual(readiness.front.x.expectedRange, { min: 10, max: 55 });
+});
+
+test('range overflow also marks the corresponding axis as failed', () => {
   const readiness = getProjectionReadiness(
     {
       ...consistentBounds,
@@ -69,31 +79,25 @@ test('range overflow marks the corresponding axis as failed', () => {
   );
 
   assert.equal(readiness.front.x.status, 'fail');
-  assert.deepEqual(readiness.front.x.expectedRange, { min: 10, max: 55 });
 });
 
-test('prospective lock checks existing shapes on an unlocked counterpart', () => {
-  const readiness = getProjectionReadiness({
-    ...consistentBounds,
-    top: { ...consistentBounds.top, minX: 15, maxX: 50 },
-    front: { ...consistentBounds.front, minX: 10, maxX: 55 },
-  });
-
-  assert.equal(readiness.top.x.status, 'fail');
-  assert.equal(readiness.top.x.reason, 'prospective-lock');
-  assert.equal(readiness.front.x.status, 'pass');
-});
-
-test('missing counterpart waits while a missing target fails', () => {
+test('unconstrained directions stay hidden while a constrained missing target fails', () => {
   const readiness = getProjectionReadiness(
     { top: consistentBounds.top, front: consistentBounds.front, right: null },
     { top: true, front: false, right: false },
     { top: { ...consistentBounds.top, constrainedX: true, constrainedY: true } },
   );
 
-  assert.equal(readiness.front.y.status, 'waiting');
+  assert.equal(readiness.front.y.status, 'hidden');
   assert.equal(readiness.right.x.status, 'fail');
-  assert.equal(readiness.right.y.status, 'fail');
+  assert.equal(readiness.right.y.status, 'hidden');
+});
+
+test('all indicators stay hidden before the first lock', () => {
+  const readiness = getProjectionReadiness(consistentBounds);
+  assert.equal(readiness.top.x.status, 'hidden');
+  assert.equal(readiness.front.x.status, 'hidden');
+  assert.equal(readiness.right.y.status, 'hidden');
 });
 
 test('starting from front or right activates the matching axes', () => {
@@ -126,4 +130,20 @@ test('a locked face keeps using its frozen range after its shape shrinks', () =>
 
   assert.equal(readiness.right.x.status, 'pass');
   assert.deepEqual(readiness.right.x.expectedRange, { min: 20, max: 50 });
+});
+
+test('indicators disappear from a face after it is locked', () => {
+  const readiness = getProjectionReadiness(
+    consistentBounds,
+    { top: true, front: true, right: true },
+    {
+      top: { ...consistentBounds.top, constrainedX: true, constrainedY: true },
+      front: { ...consistentBounds.front, constrainedX: true, constrainedY: true },
+      right: { ...consistentBounds.right, constrainedX: true, constrainedY: true },
+    },
+  );
+
+  assert.equal(readiness.top.x.status, 'hidden');
+  assert.equal(readiness.front.y.status, 'hidden');
+  assert.equal(readiness.right.x.status, 'hidden');
 });

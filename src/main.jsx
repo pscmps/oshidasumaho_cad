@@ -15,6 +15,7 @@ import {
   createLockedDocumentFromBounds,
   diagnoseProjectionConsistency,
   getProjectionReadiness,
+  projectionRangesMatch,
 } from './projection-consistency.js';
 import './style.css';
 
@@ -22,7 +23,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-11';
+const APP_VERSION = 'proto-2026-06-02-12';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -443,6 +444,37 @@ function getAreaLockDiagnostic(document, face, faceBounds = getAllFaceBounds(doc
     };
   }
 
+  const existingConstraint = getLockedFaceConstraint(document, normalizedFace);
+  const exactEdgeViolations = ['x', 'y'].flatMap((axis) => {
+    const constrained = axis === 'x'
+      ? existingConstraint?.constrainedX
+      : existingConstraint?.constrainedY;
+    if (!constrained) {
+      return [];
+    }
+    const actualMin = axis === 'x' ? sourceConstraint.minX : sourceConstraint.minY;
+    const actualMax = axis === 'x' ? sourceConstraint.maxX : sourceConstraint.maxY;
+    const expectedMin = axis === 'x' ? existingConstraint.minX : existingConstraint.minY;
+    const expectedMax = axis === 'x' ? existingConstraint.maxX : existingConstraint.maxY;
+    if (projectionRangesMatch(
+      { min: actualMin, max: actualMax },
+      { min: expectedMin, max: expectedMax },
+    )) {
+      return [];
+    }
+    return [{
+      targetFace: normalizedFace,
+      axis,
+      dimension: FACE_AXES[normalizedFace][axis],
+      actualMin,
+      actualMax,
+      expectedMin,
+      expectedMax,
+      sourceFaces: getConstraintSourceFaces(document, normalizedFace, axis),
+      matchMode: 'exact-edges',
+    }];
+  });
+
   const proposedDocument = {
     ...document,
     areaLocks: {
@@ -457,7 +489,7 @@ function getAreaLockDiagnostic(document, face, faceBounds = getAllFaceBounds(doc
     },
   };
   const lockedConstraints = getAllLockedConstraints(proposedDocument);
-  const violations = FACE_ORDER.flatMap((targetFace) => {
+  const containmentViolations = FACE_ORDER.flatMap((targetFace) => {
     const bounds = faceBounds[targetFace];
     const constraint = lockedConstraints[targetFace];
     if (!bounds || !hasAreaConstraint(constraint)) {
@@ -487,6 +519,15 @@ function getAreaLockDiagnostic(document, face, faceBounds = getAllFaceBounds(doc
         sourceFaces: getConstraintSourceFaces(proposedDocument, targetFace, axis),
       }];
     });
+  });
+  const violations = [...containmentViolations];
+  exactEdgeViolations.forEach((violation) => {
+    const duplicate = violations.some((current) =>
+      current.targetFace === violation.targetFace && current.axis === violation.axis,
+    );
+    if (!duplicate) {
+      violations.push(violation);
+    }
   });
 
   return {
@@ -4194,7 +4235,7 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       <ul>
         <li>ロックは、その面の外形範囲を他の面へ反映して、3Dとして矛盾しない配置範囲を固定する機能です。</li>
         <li>薄く表示されたロックボタンもタップできます。ロックできない場合は、幅・奥行・高さの不一致範囲を下に表示します。</li>
-        <li>各面の下辺と右辺の矢印は共有寸法の状態です。緑の○は許容範囲内、赤の×は範囲外、灰色の点は比較する面の図形待ちを示します。</li>
+        <li>未ロック面に出る下辺と右辺の矢印は、ロック済み面と共有する寸法です。両端が一致すると緑の○、一致していない間は赤の×になります。ロック後は消えます。</li>
         <li>ロックできない時は、他の面の図形が灰色の禁止エリアにはみ出していないか確認してください。</li>
         <li>共有範囲は、上面X＝正面X、上面Y＝右側面X、正面Y＝右側面Yです。サイズだけでなく開始・終了位置も合わせてください。</li>
         <li>JSONのextrude値は互換用で、奥行の指定には使われません。奥行は上面Yと右側面Xで決まります。</li>
@@ -4267,7 +4308,11 @@ function AreaLockFeedback({ diagnostic }) {
         const sourceLabels = violation.sourceFaces.map((face) => FACE_LABELS[face]).join('・');
         return (
           <div key={`${violation.targetFace}-${violation.axis}-${index}`} className="area-lock-violation">
-            <b>{DIMENSION_LABELS[violation.dimension]}範囲が一致していません</b>
+            <b>
+              {violation.matchMode === 'exact-edges'
+                ? `${DIMENSION_LABELS[violation.dimension]}の両端が一致していません`
+                : `${DIMENSION_LABELS[violation.dimension]}範囲が一致していません`}
+            </b>
             <span>{FACE_LABELS[violation.targetFace]}: {formatRange(violation.actualMin, violation.actualMax)}</span>
             <span>許容範囲: {formatRange(violation.expectedMin, violation.expectedMax)}</span>
             <small>{sourceLabels || 'ロック済み面'}と共有する{DIMENSION_LABELS[violation.dimension]}の開始・終了位置を合わせてください。</small>
@@ -4640,19 +4685,19 @@ function getProjectionReadinessLabel(readiness) {
   const dimension = DIMENSION_LABELS[readiness.dimension];
   const counterpart = FACE_LABELS[readiness.counterpartFace];
   if (readiness.status === 'pass') {
-    return `${dimension}: ${counterpart}との許容範囲内です`;
+    return `${dimension}: ${counterpart}の固定範囲と両端が一致しています`;
   }
   if (readiness.reason === 'missing-shape') {
     return `${dimension}: この面にadd外形がありません`;
   }
   if (readiness.status === 'fail') {
-    return `${dimension}: ${counterpart}の許容範囲外です`;
+    return `${dimension}: ${counterpart}の固定範囲と両端を合わせてください`;
   }
-  return `${dimension}: ${counterpart}の図形待ちです`;
+  return `${dimension}: 補助表示なし`;
 }
 
 function ProjectionReadinessIndicator({ axis, readiness }) {
-  if (!readiness) {
+  if (!readiness || readiness.status === 'hidden') {
     return null;
   }
 
@@ -4689,9 +4734,6 @@ function ProjectionReadinessIndicator({ axis, readiness }) {
           <line x1={statusX - 3.2} y1={statusY - 3.2} x2={statusX + 3.2} y2={statusY + 3.2} />
           <line x1={statusX + 3.2} y1={statusY - 3.2} x2={statusX - 3.2} y2={statusY + 3.2} />
         </g>
-      ) : null}
-      {readiness.status === 'waiting' ? (
-        <circle className="projection-readiness-waiting" cx={statusX} cy={statusY} r="2.3" />
       ) : null}
     </g>
   );
