@@ -37,6 +37,7 @@ import {
   getRackGearDimensions,
   getRackGearOutlineRing,
   getRackGearSignedDistance,
+  normalizeRackRotation,
   pointInRackGear,
 } from './rack-gear-geometry.js';
 import {
@@ -66,7 +67,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-18';
+const APP_VERSION = 'proto-2026-06-02-19';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -170,11 +171,22 @@ function normalizeDocument(document) {
     [face]: normalizeConstraint(document?.areaLockConstraints?.[face]),
   }), DEFAULT_AREA_LOCK_CONSTRAINTS);
   const shapes = Array.isArray(document?.shapes)
-    ? document.shapes.map((shape) => ({
-        ...shape,
-        face: normalizeFace(shape.face ?? activeFace),
-        showDimensions: Boolean(shape.showDimensions),
-      }))
+    ? document.shapes.map((shape) => {
+        const normalizedShape = {
+          ...shape,
+          face: normalizeFace(shape.face ?? activeFace),
+          showDimensions: Boolean(shape.showDimensions),
+        };
+        if (normalizedShape.type !== 'rack') {
+          return normalizedShape;
+        }
+        const dimensions = getRackGearDimensions(normalizedShape);
+        return {
+          ...normalizedShape,
+          width: dimensions.width,
+          rotation: dimensions.rotation,
+        };
+      })
     : initialDocument.shapes;
 
   return {
@@ -675,28 +687,40 @@ function constrainShapeToConstraint(shape, constraint) {
     };
   }
   if (shape.type === 'rack') {
-    const teeth = clampValue(Math.round(shape.teeth), RACK_TEETH_MIN, RACK_TEETH_MAX);
     const availableWidth = constraint.maxX - constraint.minX;
     const availableHeight = constraint.maxY - constraint.minY;
+    const rotation = normalizeRackRotation(shape.rotation);
+    const vertical = rotation === 90 || rotation === 270;
+    const availableRackWidth = vertical ? availableHeight : availableWidth;
+    const availableRackHeight = vertical ? availableWidth : availableHeight;
+    const maximumTeeth = Math.max(
+      RACK_TEETH_MIN,
+      Math.min(RACK_TEETH_MAX, Math.floor(availableRackWidth / (Math.PI * GEAR_MODULE_MIN))),
+    );
+    const teeth = clampValue(Math.round(shape.teeth), RACK_TEETH_MIN, maximumTeeth);
     const maximumModule = Math.min(
       GEAR_MODULE_MAX,
-      availableWidth / (Math.PI * teeth),
-      availableHeight / 2.25,
+      availableRackWidth / (Math.PI * teeth),
+      availableRackHeight / 2.25,
     );
     const moduleValue = clampValue(shape.module, GEAR_MODULE_MIN, Math.max(GEAR_MODULE_MIN, maximumModule));
-    const provisional = getRackGearDimensions({ ...shape, teeth, module: moduleValue });
+    const provisional = getRackGearDimensions({ ...shape, teeth, module: moduleValue, rotation });
     const height = clampValue(
       Math.round(shape.height),
       provisional.minimumHeight,
-      Math.max(provisional.minimumHeight, Math.floor(availableHeight)),
+      Math.max(provisional.minimumHeight, Math.floor(availableRackHeight)),
     );
-    const constrainedRack = { ...shape, teeth, module: moduleValue, height };
-    const { width } = getRackGearDimensions(constrainedRack);
-    const constrainedWidth = roundToModelPrecision(width);
+    const width = clampValue(
+      roundToModelPrecision(shape.width ?? provisional.profileWidth),
+      provisional.profileWidth,
+      floorToModelPrecision(availableRackWidth),
+    );
+    const constrainedRack = { ...shape, teeth, module: moduleValue, height, width, rotation };
+    const dimensions = getRackGearDimensions(constrainedRack);
     return {
       ...constrainedRack,
-      x: clampValue(shape.x, constraint.minX, constraint.maxX - constrainedWidth),
-      y: clampValue(shape.y, constraint.minY, constraint.maxY - height),
+      x: clampValue(shape.x, constraint.minX, constraint.maxX - dimensions.boundsWidth),
+      y: clampValue(shape.y, constraint.minY, constraint.maxY - dimensions.boundsHeight),
     };
   }
 
@@ -813,18 +837,24 @@ function getShapeControlLimits(shape, constraint, locked) {
   }
   if (shape.type === 'rack') {
     const dimensions = getRackGearDimensions(shape);
-    const constrainedWidth = roundToModelPrecision(dimensions.width);
-    const availableWidth = Math.max(0, fullConstraint.maxX - shape.x);
-    const availableHeight = Math.max(0, fullConstraint.maxY - shape.y);
+    const vertical = dimensions.rotation === 90 || dimensions.rotation === 270;
+    const availableX = Math.max(0, fullConstraint.maxX - shape.x);
+    const availableY = Math.max(0, fullConstraint.maxY - shape.y);
+    const availableRackWidth = vertical ? availableY : availableX;
+    const availableRackHeight = vertical ? availableX : availableY;
     return {
-      x: { min: fullConstraint.minX, max: Math.max(fullConstraint.minX, fullConstraint.maxX - constrainedWidth) },
-      y: { min: fullConstraint.minY, max: Math.max(fullConstraint.minY, fullConstraint.maxY - dimensions.height) },
+      x: { min: fullConstraint.minX, max: Math.max(fullConstraint.minX, fullConstraint.maxX - dimensions.boundsWidth) },
+      y: { min: fullConstraint.minY, max: Math.max(fullConstraint.minY, fullConstraint.maxY - dimensions.boundsHeight) },
+      width: {
+        min: dimensions.profileWidth,
+        max: Math.max(dimensions.profileWidth, floorToModelPrecision(availableRackWidth)),
+      },
       module: {
         min: GEAR_MODULE_MIN,
         max: Math.max(
           GEAR_MODULE_MIN,
           roundToModelPrecision(
-            Math.min(GEAR_MODULE_MAX, availableWidth / (Math.PI * shape.teeth), shape.height / 2.25),
+            Math.min(GEAR_MODULE_MAX, availableRackWidth / (Math.PI * shape.teeth), shape.height / 2.25),
           ),
         ),
       },
@@ -832,12 +862,12 @@ function getShapeControlLimits(shape, constraint, locked) {
         min: RACK_TEETH_MIN,
         max: Math.max(
           RACK_TEETH_MIN,
-          Math.min(RACK_TEETH_MAX, Math.floor(availableWidth / (Math.PI * shape.module))),
+          Math.min(RACK_TEETH_MAX, Math.floor(availableRackWidth / (Math.PI * shape.module))),
         ),
       },
       height: {
         min: dimensions.minimumHeight,
-        max: Math.max(dimensions.minimumHeight, Math.min(RACK_HEIGHT_MAX, Math.floor(availableHeight))),
+        max: Math.max(dimensions.minimumHeight, Math.min(RACK_HEIGHT_MAX, Math.floor(availableRackHeight))),
       },
     };
   }
@@ -1811,12 +1841,12 @@ function getReplicadPlaneConfig(shape, face, dimensions) {
   const centerU = shape.type === 'rect'
     ? shape.x + shape.w / 2
     : shape.type === 'rack'
-      ? shape.x + rackDimensions.width / 2
+      ? shape.x + rackDimensions.boundsWidth / 2
       : shape.x;
   const centerV = shape.type === 'rect'
     ? shape.y + shape.h / 2
     : shape.type === 'rack'
-      ? shape.y + rackDimensions.height / 2
+      ? shape.y + rackDimensions.boundsHeight / 2
       : shape.y;
 
   if (face === 'top') {
@@ -1883,8 +1913,8 @@ function createReplicadPrism(replicad, shape, face, dimensions) {
     const rackDimensions = getRackGearDimensions(shape);
     const localRack = {
       ...shape,
-      x: -rackDimensions.width / 2,
-      y: -rackDimensions.height / 2,
+      x: -rackDimensions.boundsWidth / 2,
+      y: -rackDimensions.boundsHeight / 2,
     };
     const ring = getRackGearOutlineRing(localRack);
     const pen = replicad.draw(ring[0]);
@@ -2466,7 +2496,7 @@ function App() {
             : type === 'gear'
               ? { id, type: 'gear', x: 45, y: 45, module: 1, teeth: 24, bore: 6, mode: 'add', face }
               : type === 'rack'
-                ? { id, type: 'rack', x: 20, y: 45, module: 1, teeth: 20, height: 10, mode: 'add', face }
+                ? { id, type: 'rack', x: 20, y: 45, module: 1, teeth: 20, width: 62.8, height: 10, rotation: 0, mode: 'add', face }
                 : { id, type: 'internalGear', x: 60, y: 60, module: 1, teeth: 50, outerDiameter: 68, mode: 'add', face };
       const constraint = getLockedFaceConstraint(current, face);
       const shape = shapeBase.mode !== 'cut' && hasAreaConstraint(constraint)
@@ -4436,7 +4466,7 @@ function OutputPanel({
                 value={pastedJson}
                 rows="10"
                 spellCheck="false"
-                placeholder='{"schemaVersion": 4, ...}'
+                placeholder='{"schemaVersion": 5, ...}'
                 onChange={(event) => setPastedJson(event.target.value)}
               />
             </label>
@@ -4865,13 +4895,13 @@ function getShapeBounds2D(shape) {
     const dimensions = getRackGearDimensions(shape);
     return {
       minX: shape.x,
-      maxX: shape.x + dimensions.width,
+      maxX: shape.x + dimensions.boundsWidth,
       minY: shape.y,
-      maxY: shape.y + dimensions.height,
-      width: dimensions.width,
-      height: dimensions.height,
-      centerX: shape.x + dimensions.width / 2,
-      centerY: shape.y + dimensions.height / 2,
+      maxY: shape.y + dimensions.boundsHeight,
+      width: dimensions.boundsWidth,
+      height: dimensions.boundsHeight,
+      centerX: shape.x + dimensions.boundsWidth / 2,
+      centerY: shape.y + dimensions.boundsHeight / 2,
     };
   }
 
@@ -5388,6 +5418,7 @@ function ShapeEditor({
   onRemove,
 }) {
   const limits = getShapeControlLimits(shape, constraint, locked);
+  const rackRotation = shape.type === 'rack' ? normalizeRackRotation(shape.rotation) : 0;
 
   return (
     <article ref={editorRef} className={`shape-card ${selected ? 'selected' : ''}`}>
@@ -5427,7 +5458,7 @@ function ShapeEditor({
         </div>
       </header>
 
-      <div className={`shape-control-grid ${shape.type === 'gear' || shape.type === 'rack' || shape.type === 'internalGear' ? 'gear-controls' : ''}`}>
+      <div className={`shape-control-grid ${shape.type === 'gear' || shape.type === 'internalGear' ? 'gear-controls' : ''} ${shape.type === 'rack' ? 'rack-controls' : ''}`}>
         <ControlField
           axis="x"
           label="X"
@@ -5508,6 +5539,15 @@ function ShapeEditor({
           <>
             <ControlField
               axis="x"
+              label="W"
+              value={shape.width ?? limits.width.min}
+              min={limits.width.min}
+              max={limits.width.max}
+              step={1}
+              onChange={(width) => onChange({ width })}
+            />
+            <ControlField
+              axis="x"
               label="M"
               value={shape.module}
               min={limits.module.min}
@@ -5533,6 +5573,23 @@ function ShapeEditor({
               step={1}
               onChange={(height) => onChange({ height: Math.round(height) })}
             />
+            <div className="rack-rotation-controls" aria-label={`ラック回転 ${rackRotation}度`}>
+              <span>回転</span>
+              <button
+                type="button"
+                onClick={() => onChange({ rotation: normalizeRackRotation(rackRotation + 90) })}
+                title="ラックを90度回転"
+              >
+                +90
+              </button>
+              <button
+                type="button"
+                onClick={() => onChange({ rotation: normalizeRackRotation(rackRotation - 90) })}
+                title="ラックを-90度回転"
+              >
+                -90
+              </button>
+            </div>
           </>
         ) : (
           <>

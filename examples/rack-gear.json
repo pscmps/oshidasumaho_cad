@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 5,
   "partName": "rack-gear-m1-z20-h10",
   "extrude": 12,
   "activeFace": "top",
@@ -52,7 +52,9 @@
       "y": 20,
       "module": 1,
       "teeth": 20,
+      "width": 62.8,
       "height": 10,
+      "rotation": 0,
       "mode": "add",
       "face": "top",
       "showDimensions": false

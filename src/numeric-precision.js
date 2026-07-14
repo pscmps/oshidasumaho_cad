@@ -10,6 +10,8 @@ const SHAPE_NUMERIC_FIELDS = [
   'module',
   'bore',
   'height',
+  'width',
+  'rotation',
   'outerDiameter',
 ];
 

@@ -30,7 +30,7 @@ const model = {
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top', showDimensions: true },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top', showDimensions: false },
     { id: 3, type: 'gear', x: 60, y: 60, module: 1, teeth: 24, bore: 6, mode: 'add', face: 'top', showDimensions: false },
-    { id: 4, type: 'rack', x: 20, y: 70, module: 1, teeth: 20, height: 10, mode: 'add', face: 'top', showDimensions: false },
+    { id: 4, type: 'rack', x: 20, y: 70, module: 1, teeth: 20, width: 64.3, height: 10, rotation: 90, mode: 'add', face: 'top', showDimensions: false },
     { id: 5, type: 'internalGear', x: 60, y: 60, module: 1, teeth: 50, outerDiameter: 68, mode: 'add', face: 'top', showDimensions: false },
   ],
 };
@@ -139,9 +139,31 @@ test('rack requires integer teeth, integer total height, and add mode', () => {
     ModelJsonError,
   );
   assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...rack, width: 60 }] })),
+    ModelJsonError,
+  );
+  assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...rack, rotation: 45 }] })),
+    ModelJsonError,
+  );
+  assert.throws(
     () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...rack, mode: 'cut' }] })),
     ModelJsonError,
   );
+});
+
+test('version 4 racks gain nominal width and zero rotation', () => {
+  const rack = model.shapes.find((shape) => shape.type === 'rack');
+  const { width, rotation, ...legacyRack } = rack;
+  const parsed = parseModelJson(JSON.stringify({
+    ...model,
+    schemaVersion: 4,
+    shapes: [legacyRack],
+  }));
+
+  assert.equal(parsed.schemaVersion, MODEL_SCHEMA_VERSION);
+  assert.equal(parsed.shapes[0].width, 62.8);
+  assert.equal(parsed.shapes[0].rotation, 0);
 });
 
 test('internal gear requires an involute-safe tooth count, rim, and add mode', () => {
@@ -170,6 +192,7 @@ test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, /topのy最小\/最大とrightのx最小\/最大/);
   assert.match(AI_MODEL_JSON_PROMPT, /extrudeは互換用フィールド/);
   assert.match(AI_MODEL_JSON_PROMPT, /gearのmodule/);
-  assert.match(AI_MODEL_JSON_PROMPT, /rackの幅/);
+  assert.match(AI_MODEL_JSON_PROMPT, /rackの最小幅/);
+  assert.match(AI_MODEL_JSON_PROMPT, /rackのrotation/);
   assert.match(AI_MODEL_JSON_PROMPT, /internalGearのouterDiameter/);
 });

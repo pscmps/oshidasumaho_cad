@@ -10,6 +10,7 @@ import {
   RACK_TEETH_MAX,
   RACK_TEETH_MIN,
   getRackGearDimensions,
+  normalizeRackRotation,
 } from './rack-gear-geometry.js';
 import {
   INTERNAL_GEAR_TEETH_MAX,
@@ -18,7 +19,7 @@ import {
 } from './internal-gear-geometry.js';
 import { ceilToModelPrecision, normalizeModelPrecision } from './numeric-precision.js';
 
-export const MODEL_SCHEMA_VERSION = 4;
+export const MODEL_SCHEMA_VERSION = 5;
 
 const SUPPORTED_FACES = new Set(['top', 'front', 'right']);
 const SUPPORTED_SHAPE_TYPES = new Set(['rect', 'circle', 'gear', 'rack', 'internalGear']);
@@ -56,7 +57,7 @@ export const AI_MODEL_JSON_PROMPT = [
   '- rectのx,yは左上、w,hは幅と高さです。',
   '- circleのx,yは中心、rは半径です。',
   '- gearのx,yは中心、moduleはモジュール、teethは歯数、boreは中央穴径です。',
-  '- rackのx,yは外接範囲の左上、moduleはモジュール、teethは歯数、heightは歯先から底面までの全高です。',
+  '- rackのx,yは回転後の外接範囲の左上、moduleはモジュール、teethは歯数、widthはラック全長、heightは歯先から底面までの全高、rotationは0/90/180/270度です。',
   '- internalGearのx,yは中心、moduleはモジュール、teethは歯数、outerDiameterは外径です。',
   '',
   '図形ルール:',
@@ -66,7 +67,8 @@ export const AI_MODEL_JSON_PROMPT = [
   '- gearのmoduleは0.5〜5、teethは8〜80の整数、boreは0以上で歯底径より小さくしてください。',
   '- rackは通常の20度圧力角のラックギヤで、modeはaddだけを指定してください。',
   '- rackのmoduleは0.5〜5、teethは1〜80の整数、heightは整数でmodule×2.25以上にしてください。',
-  '- rackの幅はmodule×π×teethを小数第1位へ丸めた値です。左右端は歯底位置で終わります。',
+  '- rackの最小幅はmodule×π×teethを小数第1位へ丸めた値です。widthは最小幅以上120以下で指定でき、余長は終端側の歯底ランドとして追加されます。',
+  '- rackのrotationは0、90、180、270のいずれかにしてください。',
   '- internalGearは通常の20度圧力角の内歯車で、modeはaddだけを指定してください。',
   '- internalGearのmoduleは0.5〜5、teethは34〜120の整数にしてください。',
   '- internalGearのouterDiameterは歯底円の外側に最低リム厚を確保し、0〜120の範囲内に収めてください。',
@@ -85,7 +87,7 @@ export const AI_MODEL_JSON_PROMPT = [
   '- rectはx〜x+w、y〜y+hが0〜120に収まるようにしてください。',
   '- circleはx-r〜x+r、y-r〜y+rが0〜120に収まるようにしてください。',
   '- gearの外径はmodule×(teeth+2)です。外径全体が0〜120に収まるようにしてください。',
-  '- rackはx〜x+module×π×teeth、y〜y+heightが0〜120に収まるようにしてください。',
+  '- rackはrotationが0/180ならx〜x+width、y〜y+height、90/270ならx〜x+height、y〜y+widthが0〜120に収まるようにしてください。',
   '- internalGearはx±outerDiameter/2、y±outerDiameter/2が0〜120に収まるようにしてください。',
   '- showDimensionsは各図形にfalseを指定してください。',
   '',
@@ -96,7 +98,7 @@ export const AI_MODEL_JSON_PROMPT = [
   '',
   '必須の基本構造:',
   '{',
-  '  "schemaVersion": 4,',
+  '  "schemaVersion": 5,',
   '  "partName": "internal-gear-part",',
   '  "extrude": 12,',
   '  "activeFace": "top",',
@@ -224,16 +226,24 @@ function validateShape(shape, index, ids) {
   } else if (shape.type === 'rack') {
     assertFiniteNumber(shape.module, `${path}.module`, { positive: true });
     assertFiniteNumber(shape.teeth, `${path}.teeth`, { positive: true });
+    assertFiniteNumber(shape.width, `${path}.width`, { positive: true });
     assertFiniteNumber(shape.height, `${path}.height`, { positive: true });
+    assertFiniteNumber(shape.rotation, `${path}.rotation`);
     if (shape.module < GEAR_MODULE_MIN || shape.module > GEAR_MODULE_MAX) {
       throw new ModelJsonError(`${path}.module は${GEAR_MODULE_MIN}〜${GEAR_MODULE_MAX}である必要があります。`);
     }
     if (!Number.isInteger(shape.teeth) || shape.teeth < RACK_TEETH_MIN || shape.teeth > RACK_TEETH_MAX) {
       throw new ModelJsonError(`${path}.teeth は${RACK_TEETH_MIN}〜${RACK_TEETH_MAX}の整数である必要があります。`);
     }
-    const { minimumHeight } = getRackGearDimensions(shape);
+    const { minimumHeight, profileWidth } = getRackGearDimensions(shape);
+    if (shape.width < profileWidth - 0.001 || shape.width > 120) {
+      throw new ModelJsonError(`${path}.width は${profileWidth}〜120である必要があります。`);
+    }
     if (!Number.isInteger(shape.height) || shape.height < minimumHeight || shape.height > RACK_HEIGHT_MAX) {
       throw new ModelJsonError(`${path}.height は${minimumHeight}〜${RACK_HEIGHT_MAX}の整数である必要があります。`);
+    }
+    if (normalizeRackRotation(shape.rotation) !== shape.rotation) {
+      throw new ModelJsonError(`${path}.rotation は0、90、180、270のいずれかである必要があります。`);
     }
     if (shape.mode !== 'add') {
       throw new ModelJsonError(`${path}.mode はrackの場合addである必要があります。`);
@@ -303,11 +313,32 @@ function migrateV3ToV4(document) {
   return { ...document, schemaVersion: 4 };
 }
 
+function migrateV4ToV5(document) {
+  return {
+    ...document,
+    schemaVersion: 5,
+    shapes: Array.isArray(document.shapes)
+      ? document.shapes.map((shape) => {
+          if (!isRecord(shape) || shape.type !== 'rack') {
+            return shape;
+          }
+          const dimensions = getRackGearDimensions(shape);
+          return {
+            ...shape,
+            width: shape.width ?? dimensions.profileWidth,
+            rotation: normalizeRackRotation(shape.rotation),
+          };
+        })
+      : document.shapes,
+  };
+}
+
 const MODEL_MIGRATIONS = new Map([
   [0, migrateV0ToV1],
   [1, migrateV1ToV2],
   [2, migrateV2ToV3],
   [3, migrateV3ToV4],
+  [4, migrateV4ToV5],
 ]);
 
 function migrateModelDocument(document, sourceVersion) {

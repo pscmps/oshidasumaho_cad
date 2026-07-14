@@ -28,10 +28,10 @@
   <text x="70" y="325" class="section">2. 共通モデル化・検証</text>
   <rect x="76" y="352" width="244" height="130" class="box process"/>
   <text x="198" y="381" text-anchor="middle" class="label">JSON正規化・移行</text>
-  <text x="198" y="405" text-anchor="middle" class="body">スマートクォート正規化</text><text x="198" y="426" text-anchor="middle" class="body">schemaVersion 0〜4を移行</text><text x="198" y="447" text-anchor="middle" class="body">型・範囲・必須値を検証</text><text x="198" y="468" text-anchor="middle" class="small">新しい未対応versionは拒否</text>
+  <text x="198" y="405" text-anchor="middle" class="body">スマートクォート正規化</text><text x="198" y="426" text-anchor="middle" class="body">schemaVersion 0〜5を移行</text><text x="198" y="447" text-anchor="middle" class="body">型・範囲・必須値を検証</text><text x="198" y="468" text-anchor="middle" class="small">新しい未対応versionは拒否</text>
   <rect x="362" y="342" width="330" height="150" class="box model"/>
   <text x="527" y="371" text-anchor="middle" class="label">React document state</text>
-  <text x="527" y="395" text-anchor="middle" class="body">shapes[] / areaLocks / constraints</text><text x="527" y="416" text-anchor="middle" class="body">activeFace / rotation / partName / 表示設定</text><text x="527" y="437" text-anchor="middle" class="body">rect / circle / gear / rack / internalGear</text><text x="527" y="458" text-anchor="middle" class="small">座標・寸法・拘束範囲は最大0.1 mm単位</text><text x="527" y="479" text-anchor="middle" class="small">add / cutはshapes[]の順番で評価</text>
+  <text x="527" y="395" text-anchor="middle" class="body">shapes[] / areaLocks / constraints</text><text x="527" y="416" text-anchor="middle" class="body">activeFace / rotation / partName / 表示設定</text><text x="527" y="437" text-anchor="middle" class="body">rect / circle / gear / rack / internalGear</text><text x="527" y="458" text-anchor="middle" class="small">座標・寸法・拘束範囲は最大0.1 mm単位</text><text x="527" y="479" text-anchor="middle" class="small">rack幅延長・90度回転 / add・cut順序</text>
   <rect x="734" y="352" width="244" height="130" class="box process"/>
   <text x="856" y="381" text-anchor="middle" class="label">形状・拘束評価</text>
   <text x="856" y="405" text-anchor="middle" class="body">polygon-clippingで2Dブール</text><text x="856" y="426" text-anchor="middle" class="body">共有3軸の外接範囲を比較</text><text x="856" y="447" text-anchor="middle" class="body">ロック制約とスライダー上限へ反映</text><text x="856" y="468" text-anchor="middle" class="small">幅・奥行・高さの不一致を診断</text>
@@ -54,7 +54,7 @@
   <rect x="48" y="774" width="1104" height="202" class="group"/>
   <text x="70" y="803" class="section">4. 保存・3D出力</text>
   <rect x="76" y="832" width="216" height="108" class="box output"/>
-  <text x="184" y="861" text-anchor="middle" class="label">JSON</text><text x="184" y="885" text-anchor="middle" class="body">schemaVersion 4</text><text x="184" y="906" text-anchor="middle" class="body">コピー / ファイル保存</text><text x="184" y="927" text-anchor="middle" class="small">再編集・AI・外部処理の基準</text>
+  <text x="184" y="861" text-anchor="middle" class="label">JSON</text><text x="184" y="885" text-anchor="middle" class="body">schemaVersion 5</text><text x="184" y="906" text-anchor="middle" class="body">コピー / ファイル保存</text><text x="184" y="927" text-anchor="middle" class="small">再編集・AI・外部処理の基準</text>
   <rect x="332" y="822" width="250" height="128" class="box output"/>
   <text x="457" y="851" text-anchor="middle" class="label">STL</text><text x="457" y="875" text-anchor="middle" class="body">3面形状の符号付き距離場</text><text x="457" y="896" text-anchor="middle" class="body">Marching Tetrahedraで表面抽出</text><text x="457" y="917" text-anchor="middle" class="body">閉じた三角形メッシュを生成</text><text x="457" y="938" text-anchor="middle" class="small">出力時に分割倍率を指定</text>
   <rect x="622" y="822" width="250" height="128" class="box output"/>
