@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 4,
+  "partName": "internal-gear-m1-z50-od68",
+  "extrude": 12,
+  "activeFace": "top",
+  "areaLocks": {
+    "top": true,
+    "front": true,
+    "right": true
+  },
+  "areaLockConstraints": {
+    "top": {
+      "minX": 26,
+      "maxX": 94,
+      "minY": 26,
+      "maxY": 94,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "front": {
+      "minX": 26,
+      "maxX": 94,
+      "minY": 45,
+      "maxY": 75,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "right": {
+      "minX": 26,
+      "maxX": 94,
+      "minY": 45,
+      "maxY": 75,
+      "constrainedX": true,
+      "constrainedY": true
+    }
+  },
+  "viewMode": "faces",
+  "rotation": {
+    "x": 24,
+    "y": -34,
+    "z": 0
+  },
+  "transparent3D": true,
+  "show3DGrid": false,
+  "show3DEdges": true,
+  "showAllDimensions": false,
+  "shapes": [
+    {
+      "id": 1,
+      "type": "internalGear",
+      "x": 60,
+      "y": 60,
+      "module": 1,
+      "teeth": 50,
+      "outerDiameter": 68,
+      "mode": "add",
+      "face": "top",
+      "showDimensions": false
+    },
+    {
+      "id": 2,
+      "type": "rect",
+      "x": 26,
+      "y": 45,
+      "w": 68,
+      "h": 30,
+      "mode": "add",
+      "face": "front",
+      "showDimensions": false
+    },
+    {
+      "id": 3,
+      "type": "rect",
+      "x": 26,
+      "y": 45,
+      "w": 68,
+      "h": 30,
+      "mode": "add",
+      "face": "right",
+      "showDimensions": false
+    }
+  ]
+}

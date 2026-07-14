@@ -11,11 +11,16 @@ import {
   RACK_TEETH_MIN,
   getRackGearDimensions,
 } from './rack-gear-geometry.js';
+import {
+  INTERNAL_GEAR_TEETH_MAX,
+  INTERNAL_GEAR_TEETH_MIN,
+  getInternalGearMinimumOuterDiameter,
+} from './internal-gear-geometry.js';
 
-export const MODEL_SCHEMA_VERSION = 3;
+export const MODEL_SCHEMA_VERSION = 4;
 
 const SUPPORTED_FACES = new Set(['top', 'front', 'right']);
-const SUPPORTED_SHAPE_TYPES = new Set(['rect', 'circle', 'gear', 'rack']);
+const SUPPORTED_SHAPE_TYPES = new Set(['rect', 'circle', 'gear', 'rack', 'internalGear']);
 const SUPPORTED_SHAPE_MODES = new Set(['add', 'cut']);
 const SUPPORTED_VIEW_MODES = new Set(['faces', '3d']);
 
@@ -51,15 +56,19 @@ export const AI_MODEL_JSON_PROMPT = [
   '- circleのx,yは中心、rは半径です。',
   '- gearのx,yは中心、moduleはモジュール、teethは歯数、boreは中央穴径です。',
   '- rackのx,yは外接範囲の左上、moduleはモジュール、teethは歯数、heightは歯先から底面までの全高です。',
+  '- internalGearのx,yは中心、moduleはモジュール、teethは歯数、outerDiameterは外径です。',
   '',
   '図形ルール:',
-  '- typeはrect、circle、gear、rackです。',
+  '- typeはrect、circle、gear、rack、internalGearです。',
   '- modeはaddまたはcutです。',
   '- gearは通常の20度圧力角の平歯車で、modeはaddだけを指定してください。',
   '- gearのmoduleは0.5〜5、teethは8〜80の整数、boreは0以上で歯底径より小さくしてください。',
   '- rackは通常の20度圧力角のラックギヤで、modeはaddだけを指定してください。',
   '- rackのmoduleは0.5〜5、teethは1〜80の整数、heightは整数でmodule×2.25以上にしてください。',
   '- rackの幅はmodule×π×teethです。左右端は歯底位置で終わります。',
+  '- internalGearは通常の20度圧力角の内歯車で、modeはaddだけを指定してください。',
+  '- internalGearのmoduleは0.5〜5、teethは34〜120の整数にしてください。',
+  '- internalGearのouterDiameterは歯底円の外側に最低リム厚を確保し、0〜120の範囲内に収めてください。',
   '- shapesは上から順番に評価され、後のaddは前のcutを上書きできます。',
   '- idはJSON内で重複しない0以上の整数にしてください。',
   '- 各面に外形を決めるadd図形を最低1個置いてください。',
@@ -75,6 +84,7 @@ export const AI_MODEL_JSON_PROMPT = [
   '- circleはx-r〜x+r、y-r〜y+rが0〜120に収まるようにしてください。',
   '- gearの外径はmodule×(teeth+2)です。外径全体が0〜120に収まるようにしてください。',
   '- rackはx〜x+module×π×teeth、y〜y+heightが0〜120に収まるようにしてください。',
+  '- internalGearはx±outerDiameter/2、y±outerDiameter/2が0〜120に収まるようにしてください。',
   '- showDimensionsは各図形にfalseを指定してください。',
   '',
   'ロックルール:',
@@ -84,8 +94,8 @@ export const AI_MODEL_JSON_PROMPT = [
   '',
   '必須の基本構造:',
   '{',
-  '  "schemaVersion": 3,',
-  '  "partName": "rack-gear-part",',
+  '  "schemaVersion": 4,',
+  '  "partName": "internal-gear-part",',
   '  "extrude": 12,',
   '  "activeFace": "top",',
   '  "areaLocks": { "top": false, "front": false, "right": false },',
@@ -97,9 +107,9 @@ export const AI_MODEL_JSON_PROMPT = [
   '  "show3DEdges": true,',
   '  "showAllDimensions": false,',
   '  "shapes": [',
-  '    { "id": 1, "type": "rack", "x": 20, "y": 20, "module": 1, "teeth": 20, "height": 10, "mode": "add", "face": "top", "showDimensions": false },',
-  '    { "id": 2, "type": "rect", "x": 20, "y": 30, "w": 62.83185307179586, "h": 30, "mode": "add", "face": "front", "showDimensions": false },',
-  '    { "id": 3, "type": "rect", "x": 20, "y": 30, "w": 10, "h": 30, "mode": "add", "face": "right", "showDimensions": false }',
+  '    { "id": 1, "type": "internalGear", "x": 60, "y": 60, "module": 1, "teeth": 50, "outerDiameter": 68, "mode": "add", "face": "top", "showDimensions": false },',
+  '    { "id": 2, "type": "rect", "x": 26, "y": 45, "w": 68, "h": 30, "mode": "add", "face": "front", "showDimensions": false },',
+  '    { "id": 3, "type": "rect", "x": 26, "y": 45, "w": 68, "h": 30, "mode": "add", "face": "right", "showDimensions": false }',
   '  ]',
   '}',
   '',
@@ -178,7 +188,7 @@ function validateShape(shape, index, ids) {
   ids.add(shape.id);
 
   if (!SUPPORTED_SHAPE_TYPES.has(shape.type)) {
-    throw new ModelJsonError(`${path}.type はrect、circle、gear、rackのいずれかである必要があります。`);
+    throw new ModelJsonError(`${path}.type はrect、circle、gear、rack、internalGearのいずれかである必要があります。`);
   }
   if (!SUPPORTED_SHAPE_MODES.has(shape.mode)) {
     throw new ModelJsonError(`${path}.mode はaddまたはcutである必要があります。`);
@@ -209,7 +219,7 @@ function validateShape(shape, index, ids) {
     if (shape.mode !== 'add') {
       throw new ModelJsonError(`${path}.mode はgearの場合addである必要があります。`);
     }
-  } else {
+  } else if (shape.type === 'rack') {
     assertFiniteNumber(shape.module, `${path}.module`, { positive: true });
     assertFiniteNumber(shape.teeth, `${path}.teeth`, { positive: true });
     assertFiniteNumber(shape.height, `${path}.height`, { positive: true });
@@ -225,6 +235,31 @@ function validateShape(shape, index, ids) {
     }
     if (shape.mode !== 'add') {
       throw new ModelJsonError(`${path}.mode はrackの場合addである必要があります。`);
+    }
+  } else {
+    assertFiniteNumber(shape.module, `${path}.module`, { positive: true });
+    assertFiniteNumber(shape.teeth, `${path}.teeth`, { positive: true });
+    assertFiniteNumber(shape.outerDiameter, `${path}.outerDiameter`, { positive: true });
+    if (shape.module < GEAR_MODULE_MIN || shape.module > GEAR_MODULE_MAX) {
+      throw new ModelJsonError(`${path}.module は${GEAR_MODULE_MIN}〜${GEAR_MODULE_MAX}である必要があります。`);
+    }
+    if (
+      !Number.isInteger(shape.teeth)
+      || shape.teeth < INTERNAL_GEAR_TEETH_MIN
+      || shape.teeth > INTERNAL_GEAR_TEETH_MAX
+    ) {
+      throw new ModelJsonError(
+        `${path}.teeth は${INTERNAL_GEAR_TEETH_MIN}〜${INTERNAL_GEAR_TEETH_MAX}の整数である必要があります。`,
+      );
+    }
+    const minimumOuterDiameter = getInternalGearMinimumOuterDiameter(shape);
+    if (shape.outerDiameter < minimumOuterDiameter - 0.001 || shape.outerDiameter > 120) {
+      throw new ModelJsonError(
+        `${path}.outerDiameter は${minimumOuterDiameter}〜120である必要があります。`,
+      );
+    }
+    if (shape.mode !== 'add') {
+      throw new ModelJsonError(`${path}.mode はinternalGearの場合addである必要があります。`);
     }
   }
   assertOptionalBoolean(shape.showDimensions, `${path}.showDimensions`);
@@ -262,10 +297,15 @@ function migrateV2ToV3(document) {
   return { ...document, schemaVersion: 3 };
 }
 
+function migrateV3ToV4(document) {
+  return { ...document, schemaVersion: 4 };
+}
+
 const MODEL_MIGRATIONS = new Map([
   [0, migrateV0ToV1],
   [1, migrateV1ToV2],
   [2, migrateV2ToV3],
+  [3, migrateV3ToV4],
 ]);
 
 function migrateModelDocument(document, sourceVersion) {

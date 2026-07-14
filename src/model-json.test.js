@@ -31,6 +31,7 @@ const model = {
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top', showDimensions: false },
     { id: 3, type: 'gear', x: 60, y: 60, module: 1, teeth: 24, bore: 6, mode: 'add', face: 'top', showDimensions: false },
     { id: 4, type: 'rack', x: 20, y: 70, module: 1, teeth: 20, height: 10, mode: 'add', face: 'top', showDimensions: false },
+    { id: 5, type: 'internalGear', x: 60, y: 60, module: 1, teeth: 50, outerDiameter: 68, mode: 'add', face: 'top', showDimensions: false },
   ],
 };
 
@@ -126,6 +127,22 @@ test('rack requires integer teeth, integer total height, and add mode', () => {
   );
 });
 
+test('internal gear requires an involute-safe tooth count, rim, and add mode', () => {
+  const internalGear = model.shapes.find((shape) => shape.type === 'internalGear');
+  assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...internalGear, teeth: 33 }] })),
+    ModelJsonError,
+  );
+  assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...internalGear, outerDiameter: 52.5 }] })),
+    ModelJsonError,
+  );
+  assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...internalGear, mode: 'cut' }] })),
+    ModelJsonError,
+  );
+});
+
 test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, new RegExp(`"schemaVersion": ${MODEL_SCHEMA_VERSION}`));
   assert.match(AI_MODEL_JSON_PROMPT, /```json/);
@@ -137,4 +154,5 @@ test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, /extrudeは互換用フィールド/);
   assert.match(AI_MODEL_JSON_PROMPT, /gearのmodule/);
   assert.match(AI_MODEL_JSON_PROMPT, /rackの幅/);
+  assert.match(AI_MODEL_JSON_PROMPT, /internalGearのouterDiameter/);
 });

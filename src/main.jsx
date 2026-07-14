@@ -39,13 +39,26 @@ import {
   getRackGearSignedDistance,
   pointInRackGear,
 } from './rack-gear-geometry.js';
+import {
+  INTERNAL_GEAR_TEETH_MAX,
+  INTERNAL_GEAR_TEETH_MIN,
+  getInternalGearInnerRing,
+  getInternalGearInnerSignedDistance,
+  getInternalGearMaximumModule,
+  getInternalGearMaximumTeeth,
+  getInternalGearMinimumOuterDiameter,
+  getInternalGearOuterRing,
+  getInternalGearOuterSignedDistance,
+  getInternalGearRadii,
+  pointInInternalGear,
+} from './internal-gear-geometry.js';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-15';
+const APP_VERSION = 'proto-2026-06-02-16';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -275,7 +288,9 @@ function getShapeLabel(shape) {
       ? 'Circle'
       : shape.type === 'gear'
         ? 'Gear'
-        : 'Rack';
+        : shape.type === 'rack'
+          ? 'Rack'
+          : 'Internal Gear';
   return `${typeLabel} ${shape.id}`;
 }
 
@@ -615,6 +630,41 @@ function constrainShape(shape, constraint) {
       y: clampValue(shape.y, constraint.minY + outerRadius, constraint.maxY - outerRadius),
     };
   }
+  if (shape.type === 'internalGear') {
+    const maximumOuterDiameter = Math.min(
+      constraint.maxX - constraint.minX,
+      constraint.maxY - constraint.minY,
+    );
+    let moduleValue = clampValue(shape.module, GEAR_MODULE_MIN, GEAR_MODULE_MAX);
+    let teeth = clampValue(
+      Math.round(shape.teeth),
+      INTERNAL_GEAR_TEETH_MIN,
+      getInternalGearMaximumTeeth({ ...shape, module: moduleValue }, maximumOuterDiameter),
+    );
+    moduleValue = clampValue(
+      moduleValue,
+      GEAR_MODULE_MIN,
+      getInternalGearMaximumModule({ ...shape, teeth }, maximumOuterDiameter),
+    );
+    teeth = clampValue(
+      teeth,
+      INTERNAL_GEAR_TEETH_MIN,
+      getInternalGearMaximumTeeth({ ...shape, module: moduleValue }, maximumOuterDiameter),
+    );
+    const internalGear = { ...shape, module: moduleValue, teeth };
+    const outerDiameter = clampValue(
+      shape.outerDiameter,
+      getInternalGearMinimumOuterDiameter(internalGear),
+      maximumOuterDiameter,
+    );
+    const outerRadius = outerDiameter / 2;
+    return {
+      ...internalGear,
+      outerDiameter,
+      x: clampValue(shape.x, constraint.minX + outerRadius, constraint.maxX - outerRadius),
+      y: clampValue(shape.y, constraint.minY + outerRadius, constraint.maxY - outerRadius),
+    };
+  }
   if (shape.type === 'rack') {
     const teeth = clampValue(Math.round(shape.teeth), RACK_TEETH_MIN, RACK_TEETH_MAX);
     const availableWidth = constraint.maxX - constraint.minX;
@@ -715,6 +765,34 @@ function getShapeControlLimits(shape, constraint, locked) {
         ),
       },
       bore: { min: 0, max: getGearBoreMax(shape) },
+    };
+  }
+  if (shape.type === 'internalGear') {
+    const { outerRadius } = getInternalGearRadii(shape);
+    const availableDiameter = Math.max(
+      getInternalGearMinimumOuterDiameter(shape),
+      Math.min(
+        shape.x - fullConstraint.minX,
+        fullConstraint.maxX - shape.x,
+        shape.y - fullConstraint.minY,
+        fullConstraint.maxY - shape.y,
+      ) * 2,
+    );
+    return {
+      x: { min: fullConstraint.minX + outerRadius, max: fullConstraint.maxX - outerRadius },
+      y: { min: fullConstraint.minY + outerRadius, max: fullConstraint.maxY - outerRadius },
+      module: {
+        min: GEAR_MODULE_MIN,
+        max: getInternalGearMaximumModule(shape, shape.outerDiameter),
+      },
+      teeth: {
+        min: INTERNAL_GEAR_TEETH_MIN,
+        max: Math.min(INTERNAL_GEAR_TEETH_MAX, getInternalGearMaximumTeeth(shape, shape.outerDiameter)),
+      },
+      outerDiameter: {
+        min: getInternalGearMinimumOuterDiameter(shape),
+        max: availableDiameter,
+      },
     };
   }
   if (shape.type === 'rack') {
@@ -884,6 +962,9 @@ function pointInShape(shape, x, y) {
   if (shape.type === 'gear') {
     return pointInGearOuter(shape, x, y) && getGearBoreSignedDistance(shape, x, y) >= 0;
   }
+  if (shape.type === 'internalGear') {
+    return pointInInternalGear(shape, x, y);
+  }
   if (shape.type === 'rack') {
     return pointInRackGear(shape, x, y);
   }
@@ -900,6 +981,12 @@ function pointInFaceSolid(shapes, face, x, y) {
       }
       return pointInGearOuter(shape, x, y) ? true : solid;
     }
+    if (shape.type === 'internalGear' && shape.mode === 'add') {
+      if (getInternalGearInnerSignedDistance(shape, x, y) < 0) {
+        return false;
+      }
+      return getInternalGearOuterSignedDistance(shape, x, y) >= 0 ? true : solid;
+    }
     if (!pointInShape(shape, x, y)) {
       return solid;
     }
@@ -915,6 +1002,12 @@ function getShapeSignedDistance(shape, x, y) {
     return Math.min(
       getGearOuterSignedDistance(shape, x, y),
       getGearBoreSignedDistance(shape, x, y),
+    );
+  }
+  if (shape.type === 'internalGear') {
+    return Math.min(
+      getInternalGearOuterSignedDistance(shape, x, y),
+      getInternalGearInnerSignedDistance(shape, x, y),
     );
   }
   if (shape.type === 'rack') {
@@ -939,6 +1032,10 @@ function getFaceSignedDistance(faceShapes, x, y) {
     if (shape.type === 'gear' && shape.mode === 'add') {
       const withGear = Math.max(distance, getGearOuterSignedDistance(shape, x, y));
       return Math.min(withGear, getGearBoreSignedDistance(shape, x, y));
+    }
+    if (shape.type === 'internalGear' && shape.mode === 'add') {
+      const withOuter = Math.max(distance, getInternalGearOuterSignedDistance(shape, x, y));
+      return Math.min(withOuter, getInternalGearInnerSignedDistance(shape, x, y));
     }
     const shapeDistance = getShapeSignedDistance(shape, x, y);
     if (shape.mode === 'add') {
@@ -1058,6 +1155,9 @@ function getShapePlanRing(shape, circleSegments = CIRCLE_MESH_SEGMENTS) {
   if (shape.type === 'gear') {
     return getGearOutlineRing(shape, Math.max(3, Math.round(circleSegments / 16)));
   }
+  if (shape.type === 'internalGear') {
+    return getInternalGearOuterRing(shape, Math.max(64, circleSegments));
+  }
   if (shape.type === 'rack') {
     return getRackGearOutlineRing(shape);
   }
@@ -1096,6 +1196,10 @@ function getFaceBooleanPolygons(faceShapes, circleSegments = CIRCLE_MESH_SEGMENT
       if (shape.type === 'gear' && shape.bore > 0) {
         const borePolygon = [[getGearBoreRing(shape, circleSegments)]];
         return normalizeMultiPolygon(polygonClipping.difference(added, borePolygon));
+      }
+      if (shape.type === 'internalGear') {
+        const innerPolygon = [[getInternalGearInnerRing(shape)]];
+        return normalizeMultiPolygon(polygonClipping.difference(added, innerPolygon));
       }
       return added;
     }
@@ -1745,6 +1849,17 @@ function createReplicadPrism(replicad, shape, face, dimensions) {
       .sketchOnPlane(planeConfig.plane, planeConfig.origin)
       .extrude(planeConfig.distance);
   }
+  if (shape.type === 'internalGear') {
+    const localGear = { ...shape, x: 0, y: 0 };
+    const innerRing = getInternalGearInnerRing(localGear);
+    const innerPen = replicad.draw(innerRing[0]);
+    innerRing.slice(1).forEach((point) => innerPen.lineTo(point));
+    const { outerRadius } = getInternalGearRadii(localGear);
+    return replicad.drawCircle(outerRadius)
+      .cut(innerPen.close())
+      .sketchOnPlane(planeConfig.plane, planeConfig.origin)
+      .extrude(planeConfig.distance);
+  }
   if (shape.type === 'rack') {
     const rackDimensions = getRackGearDimensions(shape);
     const localRack = {
@@ -2292,7 +2407,7 @@ function App() {
           const nextShape = { ...shape, ...patch };
           const face = normalizeFace(nextShape.face);
           const constraint = getLockedFaceConstraint(current, face);
-          if (nextShape.type === 'gear' || nextShape.type === 'rack') {
+          if (nextShape.type === 'gear' || nextShape.type === 'rack' || nextShape.type === 'internalGear') {
             return constrainShape(
               nextShape,
               hasAreaConstraint(constraint)
@@ -2331,7 +2446,9 @@ function App() {
             ? { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face }
             : type === 'gear'
               ? { id, type: 'gear', x: 45, y: 45, module: 1, teeth: 24, bore: 6, mode: 'add', face }
-              : { id, type: 'rack', x: 20, y: 45, module: 1, teeth: 20, height: 10, mode: 'add', face };
+              : type === 'rack'
+                ? { id, type: 'rack', x: 20, y: 45, module: 1, teeth: 20, height: 10, mode: 'add', face }
+                : { id, type: 'internalGear', x: 60, y: 60, module: 1, teeth: 50, outerDiameter: 68, mode: 'add', face };
       const constraint = getLockedFaceConstraint(current, face);
       const shape = shapeBase.mode !== 'cut' && hasAreaConstraint(constraint)
         ? constrainShape(shapeBase, constraint)
@@ -3065,6 +3182,7 @@ function App() {
               <button type="button" onClick={() => addShape('circle')}>+円</button>
               <button type="button" onClick={() => addShape('gear')}>+ギヤ</button>
               <button type="button" onClick={() => addShape('rack')}>+ラック</button>
+              <button type="button" onClick={() => addShape('internalGear')}>+内歯</button>
             </div>
           </header>
         ) : null}
@@ -4299,7 +4417,7 @@ function OutputPanel({
                 value={pastedJson}
                 rows="10"
                 spellCheck="false"
-                placeholder='{"schemaVersion": 3, ...}'
+                placeholder='{"schemaVersion": 4, ...}'
                 onChange={(event) => setPastedJson(event.target.value)}
               />
             </label>
@@ -4424,6 +4542,7 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       <ul>
         <li>「+ギヤ」では20度圧力角の平歯車を追加し、モジュール・歯数・中央穴径を調整できます。</li>
         <li>「+ラック」では20度圧力角のラックギヤを追加し、モジュール・歯数・歯先からの全高を調整できます。</li>
+        <li>「+内歯」では20度圧力角の内歯車を追加し、モジュール・歯数・外径を成立範囲内で調整できます。</li>
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
         <li>面をダブルタップすると、その面だけを拡大表示します。もう一度ダブルタップすると3面図へ戻ります。</li>
@@ -4693,6 +4812,19 @@ function getShapeBounds2D(shape) {
       maxY: shape.y + shape.r,
       width: shape.r * 2,
       height: shape.r * 2,
+      centerX: shape.x,
+      centerY: shape.y,
+    };
+  }
+  if (shape.type === 'internalGear') {
+    const { outerRadius } = getInternalGearRadii(shape);
+    return {
+      minX: shape.x - outerRadius,
+      maxX: shape.x + outerRadius,
+      minY: shape.y - outerRadius,
+      maxY: shape.y + outerRadius,
+      width: outerRadius * 2,
+      height: outerRadius * 2,
       centerX: shape.x,
       centerY: shape.y,
     };
@@ -5064,6 +5196,10 @@ function getGearBodySvgPath(shape) {
   return `${ringToSvgPath(getGearOutlineRing(shape))} ${getGearBoreSvgPath(shape)}`.trim();
 }
 
+function getInternalGearBodySvgPath(shape) {
+  return `${ringToSvgPath(getInternalGearOuterRing(shape))} ${ringToSvgPath(getInternalGearInnerRing(shape))}`;
+}
+
 function MaskShape({ shape }) {
   const fill = shape.mode === 'cut' ? 'black' : 'white';
   if (shape.type === 'circle') {
@@ -5075,6 +5211,14 @@ function MaskShape({ shape }) {
       <>
         <path d={ringToSvgPath(getGearOutlineRing(shape))} fill={fill} />
         {boreRadius > 0 ? <circle cx={shape.x} cy={shape.y} r={boreRadius} fill="black" /> : null}
+      </>
+    );
+  }
+  if (shape.type === 'internalGear') {
+    return (
+      <>
+        <path d={ringToSvgPath(getInternalGearOuterRing(shape))} fill={fill} />
+        <path d={ringToSvgPath(getInternalGearInnerRing(shape))} fill="black" />
       </>
     );
   }
@@ -5114,6 +5258,14 @@ function FinalOutline({ shape }) {
         {boreRadius > 0 ? (
           <circle className={className} cx={shape.x} cy={shape.y} r={boreRadius} />
         ) : null}
+      </>
+    );
+  }
+  if (shape.type === 'internalGear') {
+    return (
+      <>
+        <path className={className} d={ringToSvgPath(getInternalGearOuterRing(shape))} />
+        <path className={className} d={ringToSvgPath(getInternalGearInnerRing(shape))} />
       </>
     );
   }
@@ -5161,6 +5313,17 @@ function ShapePreview({ shape, selected, onSelect }) {
       <path
         className={className}
         d={getGearBodySvgPath(shape)}
+        fillRule="evenodd"
+        onClick={handleSelect}
+        onDoubleClick={handleDoubleClick}
+      />
+    );
+  }
+  if (shape.type === 'internalGear') {
+    return (
+      <path
+        className={className}
+        d={getInternalGearBodySvgPath(shape)}
         fillRule="evenodd"
         onClick={handleSelect}
         onDoubleClick={handleDoubleClick}
@@ -5218,8 +5381,8 @@ function ShapeEditor({
           value={shape.mode}
           onChange={(event) => onChange({ mode: event.target.value })}
           aria-label={`${getShapeLabel(shape)} operation`}
-          disabled={shape.type === 'gear' || shape.type === 'rack'}
-          title={shape.type === 'gear' || shape.type === 'rack' ? 'ギヤ形状はadd専用です' : undefined}
+          disabled={shape.type === 'gear' || shape.type === 'rack' || shape.type === 'internalGear'}
+          title={shape.type === 'gear' || shape.type === 'rack' || shape.type === 'internalGear' ? 'ギヤ形状はadd専用です' : undefined}
         >
           <option value="add">add</option>
           <option value="cut">cut</option>
@@ -5245,7 +5408,7 @@ function ShapeEditor({
         </div>
       </header>
 
-      <div className={`shape-control-grid ${shape.type === 'gear' || shape.type === 'rack' ? 'gear-controls' : ''}`}>
+      <div className={`shape-control-grid ${shape.type === 'gear' || shape.type === 'rack' || shape.type === 'internalGear' ? 'gear-controls' : ''}`}>
         <ControlField
           axis="x"
           label="X"
@@ -5322,7 +5485,7 @@ function ShapeEditor({
               onChange={(bore) => onChange({ bore })}
             />
           </>
-        ) : (
+        ) : shape.type === 'rack' ? (
           <>
             <ControlField
               axis="x"
@@ -5350,6 +5513,36 @@ function ShapeEditor({
               max={limits.height.max}
               step={1}
               onChange={(height) => onChange({ height: Math.round(height) })}
+            />
+          </>
+        ) : (
+          <>
+            <ControlField
+              axis="x"
+              label="M"
+              value={shape.module}
+              min={limits.module.min}
+              max={limits.module.max}
+              step={0.5}
+              onChange={(moduleValue) => onChange({ module: moduleValue })}
+            />
+            <ControlField
+              axis="x"
+              label="歯数"
+              value={shape.teeth}
+              min={limits.teeth.min}
+              max={limits.teeth.max}
+              step={1}
+              onChange={(teeth) => onChange({ teeth: Math.round(teeth) })}
+            />
+            <ControlField
+              axis="x"
+              label="外径"
+              value={shape.outerDiameter}
+              min={limits.outerDiameter.min}
+              max={limits.outerDiameter.max}
+              step={0.5}
+              onChange={(outerDiameter) => onChange({ outerDiameter })}
             />
           </>
         )}
