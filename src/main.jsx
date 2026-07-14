@@ -67,7 +67,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-20';
+const APP_VERSION = 'proto-2026-06-02-21';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -3527,21 +3527,36 @@ function Viewer({
                 onToggle={onAreaLockToggle}
               />
             ))}
-            {!previewFace && previewDimensions ? (
-              <IsometricPreview
-                dimensions={previewDimensions}
-                shapes={document.shapes}
-                rotation={rotation}
-                transparent={transparent3D}
-                showGrid={show3DGrid}
-                showEdges={show3DEdges}
-                selected={preview3DSelected}
-                onSelect={on3DSelect}
-                onDoubleSelect={on3DDoubleSelect}
+            {visibleFaces.map((face) => (
+              <PreviewScaleButton
+                key={`scale-${face}`}
+                face={face}
+                full={Boolean(previewFace)}
+                expanded={Boolean(previewFace)}
+                onToggle={() => onFaceDoubleSelect(face)}
               />
+            ))}
+            {!previewFace && previewDimensions ? (
+              <>
+                <IsometricPreview
+                  dimensions={previewDimensions}
+                  shapes={document.shapes}
+                  rotation={rotation}
+                  transparent={transparent3D}
+                  showGrid={show3DGrid}
+                  showEdges={show3DEdges}
+                  selected={preview3DSelected}
+                  onSelect={on3DSelect}
+                  onDoubleSelect={on3DDoubleSelect}
+                />
+                <PreviewScaleButton is3D onToggle={on3DDoubleSelect} />
+              </>
             ) : null}
           </>
         )}
+        {is3DMode ? (
+          <PreviewScaleButton is3D expanded onToggle={on3DDoubleSelect} />
+        ) : null}
       </svg>
     </div>
   );
@@ -4599,6 +4614,15 @@ function OutputPanel({
 function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
   return (
     <div className="help-panel">
+      <div className="help-video">
+        <iframe
+          src="https://www.youtube-nocookie.com/embed/wOr0bMkgqu4"
+          title="オシダスマホキャドの使い方"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+          loading="lazy"
+          allowFullScreen
+        />
+      </div>
       <h2>基本の流れ</h2>
       <ol>
         <li>上面に図形を置き、エリアをロックします。</li>
@@ -4608,14 +4632,16 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       </ol>
       <h2>操作</h2>
       <ul>
+        <li>「+四角」で四角形を追加し、X・Y位置と幅・高さを調整します。addで外形を足し、cutで切り欠きや角穴を作れます。</li>
+        <li>「+円」で円を追加し、中心のX・Y位置と半径を調整します。addで円形外形を足し、cutで丸穴を作れます。</li>
         <li>「+ギヤ」では20度圧力角の平歯車を追加し、モジュール・歯数・中央穴径を調整できます。</li>
         <li>「+ラック」では20度圧力角のラックギヤを追加し、モジュール・歯数・歯先からの全高を調整できます。</li>
         <li>「+内歯」では20度圧力角の内歯車を追加し、モジュール・歯数・外径を成立範囲内で調整できます。</li>
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
-        <li>面をダブルタップすると、その面だけを拡大表示します。もう一度ダブルタップすると3面図へ戻ります。</li>
+        <li>各面の「拡大」を押すか面をダブルタップすると、その面だけを表示します。「縮小」または再度のダブルタップで3面図へ戻ります。</li>
         <li>3Dプレビューをタップすると、回転・透過・グリッド・エッジの表示を調整できます。</li>
-        <li>3Dプレビューをダブルタップすると、3D表示を拡大します。</li>
+        <li>3Dプレビューの「拡大」を押すかダブルタップすると3D表示を拡大し、「縮小」または再度のダブルタップで戻ります。</li>
       </ul>
       <h2>保存</h2>
       <ul>
@@ -4690,6 +4716,47 @@ function AreaLockButton({ face, full, locked, disabled, diagnostic, onToggle }) 
       <rect width="50" height="24" rx="5" />
       <text x="25" y="16">エリア</text>
       <text x="43" y="16">🔒</text>
+    </g>
+  );
+}
+
+function getPreviewScaleTransform(face, full, is3D) {
+  if (is3D) {
+    return full ? 'translate(310 22)' : 'translate(330 54)';
+  }
+  const lockTransform = getAreaLockTransform(face, full);
+  return lockTransform.replace(/translate\(([-\d.]+) ([-\d.]+)\)/, (_, x, y) => (
+    `translate(${x} ${Number(y) + 28})`
+  ));
+}
+
+function PreviewScaleButton({ face = 'top', full = false, expanded = false, is3D = false, onToggle }) {
+  const label = expanded ? '縮小' : '拡大';
+  const targetLabel = is3D ? '3Dプレビュー' : FACE_LABELS[face];
+  return (
+    <g
+      className="preview-scale-button"
+      transform={getPreviewScaleTransform(face, full, is3D)}
+      role="button"
+      tabIndex="0"
+      aria-label={`${targetLabel}を${label}`}
+      onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}
+      onDoubleClick={(event) => {
+        event.stopPropagation();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onToggle();
+        }
+      }}
+    >
+      <title>{targetLabel}を{label}</title>
+      <rect width="50" height="22" rx="4" />
+      <text x="25" y="15">{label}</text>
     </g>
   );
 }
