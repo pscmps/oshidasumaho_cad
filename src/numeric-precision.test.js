@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ceilToModelPrecision,
+  createDiscreteSliderScale,
   floorToModelPrecision,
   normalizeModelPrecision,
   roundToModelPrecision,
@@ -33,4 +34,21 @@ test('shape dimensions and lock constraints use the same precision', () => {
   });
   assert.equal(document.shapes[0].w, 62.8);
   assert.equal(document.shapes[1].outerDiameter, 68);
+});
+
+test('one-unit sliders retain a fractional maximum as the final stop', () => {
+  const scale = createDiscreteSliderScale(1, 103.4, 1);
+
+  assert.equal(scale.maxPosition, 103);
+  assert.equal(scale.valueAt(102), 103);
+  assert.equal(scale.valueAt(103), 103.4);
+  assert.equal(scale.positionFor(103.4), 103);
+});
+
+test('aligned slider ranges do not add a duplicate terminal stop', () => {
+  const scale = createDiscreteSliderScale(0.5, 5, 0.5);
+
+  assert.equal(scale.maxPosition, 9);
+  assert.equal(scale.valueAt(9), 5);
+  assert.equal(scale.positionFor(5), 9);
 });

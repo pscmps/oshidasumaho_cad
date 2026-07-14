@@ -54,6 +54,7 @@ import {
 } from './internal-gear-geometry.js';
 import {
   ceilToModelPrecision,
+  createDiscreteSliderScale,
   floorToModelPrecision,
   normalizeModelPrecision,
   normalizeShapePrecision,
@@ -65,7 +66,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-17';
+const APP_VERSION = 'proto-2026-06-02-18';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -5654,13 +5655,16 @@ function ControlField({ axis, label, value, min, max, step = 1, invert = false, 
   const controlMin = ceilToModelPrecision(min);
   const controlMax = Math.max(controlMin, floorToModelPrecision(max));
   const controlValue = roundToModelPrecision(clampValue(value, controlMin, controlMax));
-  const sliderValue = invert ? controlMax - controlValue + controlMin : controlValue;
+  const sliderScale = createDiscreteSliderScale(controlMin, controlMax, step);
+  const controlPosition = sliderScale.positionFor(controlValue);
+  const sliderValue = invert ? sliderScale.maxPosition - controlPosition : controlPosition;
 
   function handleSliderChange(event) {
-    const nextValue = Number(event.target.value);
-    onChange(roundToModelPrecision(
-      invert ? controlMax - nextValue + controlMin : nextValue,
-    ));
+    const nextPosition = Number(event.target.value);
+    const controlNextPosition = invert
+      ? sliderScale.maxPosition - nextPosition
+      : nextPosition;
+    onChange(sliderScale.valueAt(controlNextPosition));
   }
 
   return (
@@ -5668,9 +5672,9 @@ function ControlField({ axis, label, value, min, max, step = 1, invert = false, 
       <span>{label}</span>
       <input
         type="range"
-        min={controlMin}
-        max={controlMax}
-        step={step}
+        min="0"
+        max={sliderScale.maxPosition}
+        step="1"
         value={sliderValue}
         onChange={handleSliderChange}
       />

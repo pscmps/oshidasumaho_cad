@@ -36,6 +36,34 @@ export function ceilToModelPrecision(value) {
   return Math.ceil((Number(value) - Number.EPSILON) * scale) / scale;
 }
 
+export function createDiscreteSliderScale(min, max, step = 1) {
+  const minimum = roundToModelPrecision(Number(min));
+  const maximum = roundToModelPrecision(Math.max(Number(min), Number(max)));
+  const interval = Math.max(MODEL_PRECISION, Number(step) || 1);
+  const regularStepCount = Math.floor(((maximum - minimum) + Number.EPSILON) / interval);
+  const regularMaximum = roundToModelPrecision(minimum + regularStepCount * interval);
+  const hasTerminalMaximum = regularMaximum < maximum;
+  const maxPosition = regularStepCount + (hasTerminalMaximum ? 1 : 0);
+
+  return {
+    maxPosition,
+    valueAt(position) {
+      const normalizedPosition = Math.max(0, Math.min(maxPosition, Math.round(Number(position) || 0)));
+      if (hasTerminalMaximum && normalizedPosition === maxPosition) {
+        return maximum;
+      }
+      return roundToModelPrecision(minimum + normalizedPosition * interval);
+    },
+    positionFor(value) {
+      const normalizedValue = roundToModelPrecision(Math.max(minimum, Math.min(maximum, Number(value))));
+      if (hasTerminalMaximum && normalizedValue === maximum) {
+        return maxPosition;
+      }
+      return Math.max(0, Math.min(regularStepCount, Math.round((normalizedValue - minimum) / interval)));
+    },
+  };
+}
+
 export function normalizeShapePrecision(shape) {
   if (!shape || typeof shape !== 'object') {
     return shape;
