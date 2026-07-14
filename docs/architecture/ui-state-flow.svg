@@ -1,111 +1,111 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="920" viewBox="0 0 1200 920" role="img" aria-labelledby="title desc">
-  <title id="title">Oshida Smartphone CAD screen state flow</title>
-  <desc id="desc">Part editing, output panels, three-dimensional preview, and assembly mode transitions.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1040" viewBox="0 0 1200 1040" role="img" aria-labelledby="title desc">
+  <title id="title">オシダスマホキャドの画面状態遷移</title>
+  <desc id="desc">通常起動、JSON入力、単品部品、アセンブリ、保存、URL自動出力、任意のローカル印刷の画面遷移。</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
       <path d="M0,0 L9,3 L0,6 Z" fill="#334155"/>
     </marker>
     <style>
-      .title { font: 700 28px sans-serif; fill: #111827; }
-      .subtitle { font: 400 14px sans-serif; fill: #64748b; }
-      .section { font: 700 18px sans-serif; fill: #0f172a; }
-      .label { font: 700 16px sans-serif; fill: #0f172a; }
-      .body { font: 400 13px sans-serif; fill: #334155; }
-      .small { font: 400 12px sans-serif; fill: #475569; }
-      .box { stroke: #334155; stroke-width: 2; rx: 8; }
-      .part { fill: #e8f1ff; }
-      .preview { fill: #e9f8ef; }
-      .panel { fill: #fff7df; }
-      .assembly { fill: #f5edff; }
-      .modal { fill: #fff0f0; }
-      .line { fill: none; stroke: #334155; stroke-width: 2; marker-end: url(#arrow); }
-      .dash { fill: none; stroke: #64748b; stroke-width: 1.6; stroke-dasharray: 7 5; marker-end: url(#arrow); }
-      .note { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 1.5; rx: 6; }
+      .title{font:700 28px sans-serif;fill:#111827}.subtitle{font:400 14px sans-serif;fill:#64748b}.section{font:700 18px sans-serif;fill:#0f172a}.label{font:700 15px sans-serif;fill:#0f172a}.body{font:400 12.5px sans-serif;fill:#334155}.small{font:400 11.5px sans-serif;fill:#475569}.box{stroke:#334155;stroke-width:2;rx:7}.entry{fill:#edf2f7}.part{fill:#e8f1ff}.preview{fill:#e9f8ef}.panel{fill:#fff7df}.assembly{fill:#f5edff}.optional{fill:#fff0f0}.automation{fill:#e5f7f6}.group{fill:none;stroke:#cbd5e1;stroke-width:1.5;stroke-dasharray:5 4;rx:10}.line{fill:none;stroke:#334155;stroke-width:2;marker-end:url(#arrow)}.dash{fill:none;stroke:#64748b;stroke-width:1.6;stroke-dasharray:7 5;marker-end:url(#arrow)}
     </style>
   </defs>
-
-  <rect width="1200" height="920" fill="#ffffff"/>
+  <rect width="1200" height="1040" fill="#fff"/>
   <text x="48" y="48" class="title">画面状態遷移</text>
-  <text x="48" y="73" class="subtitle">単品部品、保存・出力、3Dプレビュー、アセンブリの主要な画面状態</text>
+  <text x="48" y="73" class="subtitle">通常編集、JSON読込、URL自動化、アセンブリ、任意のローカル印刷</text>
 
-  <rect x="450" y="96" width="300" height="64" class="box part"/>
-  <text x="600" y="122" text-anchor="middle" class="label">起動</text>
-  <text x="600" y="145" text-anchor="middle" class="body">localStorageを復元して単品部品モードへ</text>
+  <rect x="48" y="100" width="1104" height="150" class="group"/>
+  <text x="70" y="128" class="section">1. 起動経路</text>
+  <rect x="76" y="150" width="216" height="70" class="box entry"/>
+  <text x="184" y="178" text-anchor="middle" class="label">通常起動</text>
+  <text x="184" y="201" text-anchor="middle" class="body">localStorageを復元</text>
+  <rect x="354" y="150" width="216" height="70" class="box entry"/>
+  <text x="462" y="178" text-anchor="middle" class="label">JSON読込</text>
+  <text x="462" y="201" text-anchor="middle" class="body">ファイル / テキスト貼付</text>
+  <rect x="632" y="150" width="216" height="70" class="box entry"/>
+  <text x="740" y="178" text-anchor="middle" class="label">URL読込</text>
+  <text x="740" y="201" text-anchor="middle" class="body">json / json64</text>
+  <rect x="910" y="150" width="216" height="70" class="box automation"/>
+  <text x="1018" y="178" text-anchor="middle" class="label">自動化モード</text>
+  <text x="1018" y="201" text-anchor="middle" class="body">STL / STEP生成・保存</text>
+  <path d="M848 185 H910" class="dash"/>
+  <text x="879" y="173" text-anchor="middle" class="small">mode</text>
 
-  <rect x="60" y="205" width="430" height="250" class="box part"/>
-  <text x="82" y="235" class="section">単品部品モード</text>
-  <rect x="88" y="258" width="176" height="72" class="box part"/>
-  <text x="176" y="285" text-anchor="middle" class="label">面編集</text>
-  <text x="176" y="308" text-anchor="middle" class="body">上面 / 正面 / 右側面</text>
-  <rect x="286" y="258" width="176" height="72" class="box part"/>
-  <text x="374" y="285" text-anchor="middle" class="label">図形編集</text>
-  <text x="374" y="308" text-anchor="middle" class="body">選択、add/cut、寸法</text>
-  <rect x="88" y="357" width="176" height="72" class="box preview"/>
-  <text x="176" y="384" text-anchor="middle" class="label">面拡大</text>
-  <text x="176" y="407" text-anchor="middle" class="body">面をダブルタップ</text>
-  <rect x="286" y="357" width="176" height="72" class="box preview"/>
-  <text x="374" y="384" text-anchor="middle" class="label">3D操作</text>
-  <text x="374" y="407" text-anchor="middle" class="body">3面ロック後に利用可能</text>
-  <path d="M264 294 H286" class="line"/>
-  <path d="M176 330 V357" class="line"/>
-  <path d="M374 330 V357" class="line"/>
-  <path d="M286 393 H264" class="dash"/>
-  <text x="275" y="448" text-anchor="middle" class="small">タップで選択、再ダブルタップで通常表示</text>
+  <rect x="48" y="282" width="530" height="300" class="group"/>
+  <text x="70" y="312" class="section">2. 単品部品モード</text>
+  <rect x="76" y="338" width="214" height="86" class="box part"/>
+  <text x="183" y="367" text-anchor="middle" class="label">三面図編集</text>
+  <text x="183" y="391" text-anchor="middle" class="body">上面 / 正面 / 右側面</text>
+  <text x="183" y="411" text-anchor="middle" class="small">図形・寸法・ロック補助</text>
+  <rect x="326" y="338" width="224" height="86" class="box preview"/>
+  <text x="438" y="367" text-anchor="middle" class="label">3Dプレビュー</text>
+  <text x="438" y="391" text-anchor="middle" class="body">3面ロック後に表示</text>
+  <text x="438" y="411" text-anchor="middle" class="small">回転・透過・グリッド・エッジ</text>
+  <rect x="76" y="462" width="214" height="86" class="box preview"/>
+  <text x="183" y="491" text-anchor="middle" class="label">拡大表示</text>
+  <text x="183" y="515" text-anchor="middle" class="body">面または3Dをダブルタップ</text>
+  <text x="183" y="535" text-anchor="middle" class="small">再ダブルタップで復帰</text>
+  <rect x="326" y="462" width="224" height="86" class="box part"/>
+  <text x="438" y="491" text-anchor="middle" class="label">図形エディタ</text>
+  <text x="438" y="515" text-anchor="middle" class="body">位置・寸法・add / cut</text>
+  <text x="438" y="535" text-anchor="middle" class="small">四角・円・平歯車・ラック・内歯</text>
+  <path d="M290 381 H326" class="line"/><path d="M183 424 V462" class="line"/><path d="M438 424 V462" class="line"/>
 
-  <rect x="710" y="205" width="430" height="250" class="box assembly"/>
-  <text x="732" y="235" class="section">アセンブリモード</text>
-  <rect x="738" y="258" width="176" height="72" class="box assembly"/>
-  <text x="826" y="285" text-anchor="middle" class="label">3D全体表示</text>
-  <text x="826" y="308" text-anchor="middle" class="body">初期フォーカス / 視点回転</text>
-  <rect x="936" y="258" width="176" height="72" class="box assembly"/>
-  <text x="1024" y="285" text-anchor="middle" class="label">部品配置</text>
-  <text x="1024" y="308" text-anchor="middle" class="body">web保存部品を追加</text>
-  <rect x="738" y="357" width="176" height="72" class="box preview"/>
-  <text x="826" y="384" text-anchor="middle" class="label">投影面</text>
-  <text x="826" y="407" text-anchor="middle" class="body">上面 / 正面 / 右側面</text>
-  <rect x="936" y="357" width="176" height="72" class="box assembly"/>
-  <text x="1024" y="384" text-anchor="middle" class="label">部品編集</text>
-  <text x="1024" y="407" text-anchor="middle" class="body">XYZ位置、90度回転、色</text>
-  <path d="M914 294 H936" class="line"/>
-  <path d="M826 330 V357" class="line"/>
-  <path d="M1024 330 V357" class="line"/>
-  <path d="M936 393 H914" class="dash"/>
-  <text x="925" y="448" text-anchor="middle" class="small">各画面はダブルタップで拡大 / 復帰</text>
+  <rect x="622" y="282" width="530" height="300" class="group"/>
+  <text x="644" y="312" class="section">3. アセンブリモード</text>
+  <rect x="650" y="338" width="214" height="86" class="box assembly"/>
+  <text x="757" y="367" text-anchor="middle" class="label">3D全体表示</text>
+  <text x="757" y="391" text-anchor="middle" class="body">視点回転・6方向指定</text>
+  <text x="757" y="411" text-anchor="middle" class="small">配置範囲へ自動フィット</text>
+  <rect x="900" y="338" width="224" height="86" class="box assembly"/>
+  <text x="1012" y="367" text-anchor="middle" class="label">部品配置</text>
+  <text x="1012" y="391" text-anchor="middle" class="body">web保存部品を追加</text>
+  <text x="1012" y="411" text-anchor="middle" class="small">XYZ位置・90度回転・色</text>
+  <rect x="650" y="462" width="214" height="86" class="box preview"/>
+  <text x="757" y="491" text-anchor="middle" class="label">三面投影</text>
+  <text x="757" y="515" text-anchor="middle" class="body">上面 / 正面 / 右側面</text>
+  <text x="757" y="535" text-anchor="middle" class="small">各画面をダブルタップで拡大</text>
+  <rect x="900" y="462" width="224" height="86" class="box assembly"/>
+  <text x="1012" y="491" text-anchor="middle" class="label">選択部品エディタ</text>
+  <text x="1012" y="515" text-anchor="middle" class="body">3DではXYZ、面では対応2軸</text>
+  <text x="1012" y="535" text-anchor="middle" class="small">選択部品へUIをスクロール</text>
+  <path d="M864 381 H900" class="line"/><path d="M757 424 V462" class="line"/><path d="M1012 424 V462" class="line"/>
 
-  <path d="M600 160 V185 H275 V205" class="line"/>
-  <path d="M490 225 C580 185, 620 185, 710 225" class="line"/>
-  <text x="600" y="196" text-anchor="middle" class="small">☰ アセンブリ（開発中）</text>
-  <path d="M710 246 C620 285, 580 285, 490 246" class="dash"/>
-  <text x="600" y="277" text-anchor="middle" class="small">☰ 単品部品</text>
+  <path d="M184 220 V265 H183 V338" class="line"/>
+  <path d="M462 220 V265 H270 V338" class="line"/>
+  <path d="M740 220 V265 H510 V338" class="line"/>
+  <path d="M578 324 C600 276 600 276 622 324" class="line"/>
+  <text x="600" y="289" text-anchor="middle" class="small">☰ 切替</text>
+  <path d="M622 350 C600 398 600 398 578 350" class="dash"/>
 
-  <rect x="60" y="525" width="760" height="218" class="box panel"/>
-  <text x="82" y="555" class="section">単品部品の下部パネル切替</text>
-  <rect x="88" y="582" width="154" height="72" class="box panel"/>
-  <text x="165" y="609" text-anchor="middle" class="label">保存</text>
-  <text x="165" y="632" text-anchor="middle" class="body">JSON / STL / STEP</text>
-  <rect x="264" y="582" width="154" height="72" class="box panel"/>
-  <text x="341" y="609" text-anchor="middle" class="label">呼び出し</text>
-  <text x="341" y="632" text-anchor="middle" class="body">web保存データ</text>
-  <rect x="440" y="582" width="154" height="72" class="box panel"/>
-  <text x="517" y="609" text-anchor="middle" class="label">ヘルプ</text>
-  <text x="517" y="632" text-anchor="middle" class="body">操作手順とロック条件</text>
-  <rect x="616" y="582" width="176" height="72" class="box modal"/>
-  <text x="704" y="609" text-anchor="middle" class="label">画面リセット確認</text>
-  <text x="704" y="632" text-anchor="middle" class="body">はい / いいえ</text>
-  <text x="88" y="691" class="body">保存・呼び出し・ヘルプは、プレビュー右上のハンバーガーメニューから開く。</text>
-  <text x="88" y="716" class="body">パネルを開くと図形編集または3D操作UIを置き換え、面や3Dを選ぶと編集へ戻る。</text>
-  <path d="M275 455 V495 H180 V525" class="line"/>
-  <path d="M235 525 V480 H330 V455" class="dash"/>
+  <rect x="48" y="620" width="1104" height="230" class="group"/>
+  <text x="70" y="650" class="section">4. ハンバーガーメニューと下部パネル</text>
+  <rect x="76" y="680" width="190" height="94" class="box panel"/>
+  <text x="171" y="709" text-anchor="middle" class="label">保存</text>
+  <text x="171" y="733" text-anchor="middle" class="body">名前・web保存</text>
+  <text x="171" y="754" text-anchor="middle" class="body">JSON / STL / STEP</text>
+  <rect x="294" y="680" width="190" height="94" class="box panel"/>
+  <text x="389" y="709" text-anchor="middle" class="label">呼び出し</text>
+  <text x="389" y="733" text-anchor="middle" class="body">web保存データ</text>
+  <text x="389" y="754" text-anchor="middle" class="body">JSONファイル / 貼付</text>
+  <rect x="512" y="680" width="190" height="94" class="box panel"/>
+  <text x="607" y="709" text-anchor="middle" class="label">ヘルプ</text>
+  <text x="607" y="733" text-anchor="middle" class="body">操作・ロック条件</text>
+  <text x="607" y="754" text-anchor="middle" class="body">AI指示文コピー</text>
+  <rect x="730" y="680" width="190" height="94" class="box optional"/>
+  <text x="825" y="709" text-anchor="middle" class="label">画面リセット</text>
+  <text x="825" y="733" text-anchor="middle" class="body">確認ダイアログ</text>
+  <text x="825" y="754" text-anchor="middle" class="body">はい / いいえ</text>
+  <rect x="948" y="680" width="176" height="94" class="box optional"/>
+  <text x="1036" y="709" text-anchor="middle" class="label">ローカル印刷</text>
+  <text x="1036" y="733" text-anchor="middle" class="body">受信機検出時のみ</text>
+  <text x="1036" y="754" text-anchor="middle" class="small">GitHub Pagesでは非表示</text>
+  <path d="M313 582 V610 H171 V680" class="line"/>
+  <path d="M887 582 V610 H1036 V680" class="dash"/>
+  <text x="76" y="813" class="body">面または3Dを選ぶと編集UIへ戻る。選択中の図形・拡大状態・パネル開閉は一時的なUI状態。</text>
 
-  <rect x="860" y="525" width="280" height="218" class="note"/>
-  <text x="882" y="556" class="section">状態を決める主な値</text>
-  <text x="882" y="590" class="body">appMode: part / assembly</text>
-  <text x="882" y="618" class="body">activeFace: top / front / right</text>
-  <text x="882" y="646" class="body">viewMode: faces / 3d</text>
-  <text x="882" y="674" class="body">outputOpen + outputFormat</text>
-  <text x="882" y="702" class="body">fullPreviewFace / fullAssemblyPreview</text>
-
-  <rect x="60" y="790" width="1080" height="82" class="note"/>
-  <text x="82" y="820" class="label">選択状態</text>
-  <text x="82" y="846" class="body">プレビュー上の図形または部品をタップすると selectedId / selectedAssemblyId が更新され、下部UIが該当エディタまでスクロールする。</text>
+  <rect x="48" y="884" width="1104" height="108" class="box automation"/>
+  <text x="70" y="915" class="section">URL自動化モード</text>
+  <text x="70" y="944" class="body">mode=automation または ui=none: 通常UIを表示せず、JSON検証 → 3面整合 → STL / STEP生成 → download=1で保存を試行。</text>
+  <text x="70" y="970" class="body">通常URLモードではモデルを画面へ反映し、自動保存に失敗した場合の手動保存ボタンを表示する。</text>
+  <path d="M1018 220 H1138 V866 L1080 884" class="dash"/>
 </svg>

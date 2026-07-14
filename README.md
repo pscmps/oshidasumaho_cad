@@ -2,19 +2,23 @@
 
 スマートフォンのブラウザで、上面・正面・右側面に四角形、円、平歯車、ラックギヤ、内歯車を配置して機械部品を作る軽量CADです。単品部品の3面編集、3Dプレビュー、JSON/STL/STEP出力と、保存した部品を配置するアセンブリ機能を開発しています。
 
-## Architecture
+## 構成図
 
 ### 画面状態遷移
 
 単品部品の面編集、3D操作、保存・呼び出し、アセンブリへの切替を示しています。
 
-![画面状態遷移](docs/architecture/ui-state-flow.svg)
+![画面状態遷移](docs/architecture/ui-state-flow.png)
+
+[SVG版](docs/architecture/ui-state-flow.svg)
 
 ### データと処理の流れ
 
-React state、localStorage、3D描画、ファイル出力、Fusion Add-inまでのデータ経路を示しています。
+JSONの入力、React state、形状処理、localStorage、3D描画、ファイル出力と任意の外部連携までのデータ経路を示しています。
 
-![データと処理の流れ](docs/architecture/data-processing-flow.svg)
+![データと処理の流れ](docs/architecture/data-processing-flow.png)
+
+[SVG版](docs/architecture/data-processing-flow.svg)
 
 ## Frontend
 
@@ -80,7 +84,7 @@ JSONの解析・version検証・移行は [src/model-json.js](src/model-json.js)
 - **JSON**: 図形、面、add/cut、エリアロック、表示状態を含む再編集用データ
 - **STL**: 3面形状から距離場を作り、Marching Tetrahedraで閉じた三角形メッシュを生成
 - **STEP**: `replicad` + `OpenCascade.js`で面別ソリッドを構築し、3方向の交差形状をB-Repとして出力
-- **Fusion**: JSONをPython Add-inで読み込み、Fusion API上で3方向のソリッドを再構築
+- **Fusion Add-in（任意）**: 出力したJSONを別途Fusionへ読み込み、Fusion API上で3方向のソリッドを再構築。Webアプリ本体からは使用しません
 
 ## URL Import And Automatic Download
 
@@ -124,29 +128,31 @@ npm run build
 npm test
 ```
 
-## Fusion Add-in
+## Fusion Add-in（任意）
 
 FusionでJSONを読み込み、Fusion上のソリッドとして再構築するPython Add-inを `fusion_addin/` に追加しています。
+
+これはWebアプリやSTL/STEP出力が内部で使用するものではありません。オシダスマホキャドのJSONをFusion側で再構築したい場合だけ、利用者が別途Fusionへインストールして使用する補助ツールです。
 
 現時点のFusion Add-inは四角形と円に対応しています。`gear`、`rack`、`internalGear` はWeb版の2D/3D表示、JSON、STL、STEP出力に対応していますが、Fusion Add-inでの再構築は未対応です。
 
 詳しくは [fusion_addin/README.md](fusion_addin/README.md) を参照してください。
 
-## Discord notification
+## Discord通知
 
-Set `DISCORD_WEBHOOK_URL` in your local `.env` or shell environment before running `scripts/codex_notify_discord.py`. Do not commit webhook URLs.
+`scripts/codex_notify_discord.py`を実行する前に、ローカルの`.env`またはシェル環境へ`DISCORD_WEBHOOK_URL`を設定してください。Webhook URLはコミットしないでください。
 
-## Optional Local STL Receiver
+## 任意のローカルSTL受信機
 
-The local STL receiver is an advanced optional bonus feature. It is not required for normal use: the GitHub Pages version works as a static web app without any local server.
+ローカルSTL受信機は、必要な場合だけ使用する上級者向けの追加機能です。通常利用には必要なく、GitHub Pages版はローカルサーバーなしの静的Webアプリとして動作します。
 
-The receiver cannot run on GitHub Pages. It runs only when a local Windows server is started, and the public Pages app has no receiver button or dependency.
+受信機はGitHub Pages上では動作しません。ローカルのWindows PCでサーバーを起動した場合だけ動作し、公開中のGitHub Pages版には受信機ボタンも依存関係もありません。
 
-The receiver is intended only for private Tailscale access from a phone to a home Windows PC. Do not expose it directly to the internet, and do not configure router port forwarding.
+スマートフォンから自宅のWindows PCへ、Tailscale内で非公開アクセスする用途を想定しています。インターネットへ直接公開したり、ルーターでポート転送したりしないでください。
 
-See [receiver/README.md](receiver/README.md) for setup details.
+設定方法は [receiver/README.md](receiver/README.md) を参照してください。
 
-Start, inspect, and stop it from any directory, including an SSH session:
+次のコマンドで、SSH接続中を含む任意のディレクトリから起動、状態確認、停止ができます。
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\start-receiver.ps1"
@@ -154,12 +160,12 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumah
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\stop-receiver.ps1"
 ```
 
-Phone upload URL example over Tailscale:
+Tailscale経由で使用するURLの例：
 
 ```text
-https://desktop-dmlkcj9.tail3b847d.ts.net/upload
+https://<端末名>.<Tailnet名>.ts.net/upload
 ```
 
-When the local receiver is running, open `https://desktop-dmlkcj9.tail3b847d.ts.net/` to use the CAD and the top-right **ローカル3Dプリント** dialog on the same Tailnet HTTPS origin. This item is detected at runtime and remains hidden on GitHub Pages.
+ローカル受信機の起動中に `https://<端末名>.<Tailnet名>.ts.net/` を開くと、CADと右上の **ローカル3Dプリント** ダイアログを同じTailnet HTTPSオリジンで利用できます。この項目は実行時に受信機を検出した場合だけ表示され、GitHub Pages版では非表示です。
 
-On this PC the optional receiver token is disabled, so the dialog does not require token entry. Access is restricted by Tailnet membership and Tailscale Serve remains `tailnet only`; Funnel and public port exposure must remain disabled.
+受信トークンは任意です。無効にする場合はTailnetの参加者を適切に制限し、Tailscale Serveを `tailnet only` のまま使用してください。Funnelや公開ポートは有効にしないでください。

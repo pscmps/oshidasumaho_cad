@@ -1,129 +1,74 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1040" viewBox="0 0 1200 1040" role="img" aria-labelledby="title desc">
-  <title id="title">Oshida Smartphone CAD data and processing flow</title>
-  <desc id="desc">React state, browser storage, previews, exports, assembly, and Fusion integration.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1120" viewBox="0 0 1200 1120" role="img" aria-labelledby="title desc">
+  <title id="title">オシダスマホキャドのデータと処理の流れ</title>
+  <desc id="desc">入力、共通JSON、形状評価、表示、保存、STL、STEP、任意のFusion Add-inとローカル受信機。</desc>
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
-      <path d="M0,0 L9,3 L0,6 Z" fill="#334155"/>
-    </marker>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L9,3 L0,6 Z" fill="#334155"/></marker>
     <style>
-      .title { font: 700 28px sans-serif; fill: #111827; }
-      .subtitle { font: 400 14px sans-serif; fill: #64748b; }
-      .section { font: 700 18px sans-serif; fill: #0f172a; }
-      .label { font: 700 15px sans-serif; fill: #0f172a; }
-      .body { font: 400 12.5px sans-serif; fill: #334155; }
-      .small { font: 400 11.5px sans-serif; fill: #475569; }
-      .box { stroke: #334155; stroke-width: 2; rx: 8; }
-      .ui { fill: #e8f1ff; }
-      .state { fill: #f5edff; }
-      .process { fill: #e9f8ef; }
-      .storage { fill: #fff7df; }
-      .output { fill: #fff0f0; }
-      .external { fill: #edf2f7; }
-      .line { fill: none; stroke: #334155; stroke-width: 2; marker-end: url(#arrow); }
-      .dash { fill: none; stroke: #64748b; stroke-width: 1.6; stroke-dasharray: 7 5; marker-end: url(#arrow); }
-      .group { fill: none; stroke: #cbd5e1; stroke-width: 1.5; stroke-dasharray: 5 4; rx: 10; }
+      .title{font:700 28px sans-serif;fill:#111827}.subtitle{font:400 14px sans-serif;fill:#64748b}.section{font:700 18px sans-serif;fill:#0f172a}.label{font:700 15px sans-serif;fill:#0f172a}.body{font:400 12.5px sans-serif;fill:#334155}.small{font:400 11.5px sans-serif;fill:#475569}.box{stroke:#334155;stroke-width:2;rx:7}.input{fill:#e8f1ff}.model{fill:#f5edff}.process{fill:#e9f8ef}.storage{fill:#fff7df}.output{fill:#fff0f0}.optional{fill:#edf2f7}.group{fill:none;stroke:#cbd5e1;stroke-width:1.5;stroke-dasharray:5 4;rx:10}.line{fill:none;stroke:#334155;stroke-width:2;marker-end:url(#arrow)}.dash{fill:none;stroke:#64748b;stroke-width:1.6;stroke-dasharray:7 5;marker-end:url(#arrow)}
     </style>
   </defs>
-
-  <rect width="1200" height="1040" fill="#ffffff"/>
+  <rect width="1200" height="1120" fill="#fff"/>
   <text x="48" y="48" class="title">データと処理の流れ</text>
-  <text x="48" y="73" class="subtitle">ブラウザ内の状態管理から、プレビュー、保存、STL / STEP / Fusion連携まで</text>
+  <text x="48" y="73" class="subtitle">入力をversion付きJSONモデルへ集約し、表示・保存・3D出力へ分岐</text>
 
-  <rect x="48" y="104" width="1104" height="190" class="group"/>
-  <text x="70" y="132" class="section">1. 入力とReact state</text>
-  <rect x="76" y="155" width="184" height="104" class="box ui"/>
-  <text x="168" y="184" text-anchor="middle" class="label">スマホ / PC UI</text>
-  <text x="168" y="208" text-anchor="middle" class="body">図形配置・ロック・寸法</text>
-  <text x="168" y="229" text-anchor="middle" class="body">視点・部品配置・出力操作</text>
-  <rect x="328" y="145" width="290" height="124" class="box state"/>
-  <text x="473" y="174" text-anchor="middle" class="label">document</text>
-  <text x="473" y="198" text-anchor="middle" class="body">shapes[] / activeFace / areaLocks</text>
-  <text x="473" y="219" text-anchor="middle" class="body">rotation / 表示設定 / partName</text>
-  <text x="473" y="240" text-anchor="middle" class="small">normalizeDocumentで入力・旧データを正規化</text>
-  <rect x="686" y="145" width="290" height="124" class="box state"/>
-  <text x="831" y="174" text-anchor="middle" class="label">assembly</text>
-  <text x="831" y="198" text-anchor="middle" class="body">instances[] / viewRotation / activeFace</text>
-  <text x="831" y="219" text-anchor="middle" class="body">各instance: JSONスナップショット・色・XYZ</text>
-  <text x="831" y="240" text-anchor="middle" class="small">回転は90度単位、位置は -120〜120</text>
-  <path d="M260 207 H328" class="line"/>
-  <path d="M260 225 C430 300, 640 300, 686 225" class="line"/>
+  <rect x="48" y="100" width="1104" height="164" class="group"/>
+  <text x="70" y="129" class="section">1. 入力</text>
+  <rect x="76" y="151" width="196" height="82" class="box input"/>
+  <text x="174" y="180" text-anchor="middle" class="label">画面操作</text><text x="174" y="204" text-anchor="middle" class="body">図形・寸法・ロック</text><text x="174" y="224" text-anchor="middle" class="small">スマホ / PC</text>
+  <rect x="306" y="151" width="196" height="82" class="box input"/>
+  <text x="404" y="180" text-anchor="middle" class="label">JSONファイル</text><text x="404" y="204" text-anchor="middle" class="body">ローカルから選択</text><text x="404" y="224" text-anchor="middle" class="small">保存データを復元</text>
+  <rect x="536" y="151" width="196" height="82" class="box input"/>
+  <text x="634" y="180" text-anchor="middle" class="label">テキスト貼り付け</text><text x="634" y="204" text-anchor="middle" class="body">JSON / AI生成結果</text><text x="634" y="224" text-anchor="middle" class="small">コードブロック抽出</text>
+  <rect x="766" y="151" width="196" height="82" class="box input"/>
+  <text x="864" y="180" text-anchor="middle" class="label">URLクエリ</text><text x="864" y="204" text-anchor="middle" class="body">json / json64</text><text x="864" y="224" text-anchor="middle" class="small">通常 / automation</text>
+  <rect x="996" y="151" width="130" height="82" class="box storage"/>
+  <text x="1061" y="180" text-anchor="middle" class="label">localStorage</text><text x="1061" y="204" text-anchor="middle" class="body">自動復元</text><text x="1061" y="224" text-anchor="middle" class="small">3種類のKey</text>
 
-  <rect x="48" y="326" width="1104" height="178" class="group"/>
-  <text x="70" y="354" class="section">2. 検証とブラウザ保存</text>
-  <rect x="76" y="378" width="252" height="92" class="box process"/>
-  <text x="202" y="407" text-anchor="middle" class="label">図形更新・制約適用</text>
-  <text x="202" y="431" text-anchor="middle" class="body">applyAreaLocks / constrainShape</text>
-  <text x="202" y="452" text-anchor="middle" class="body">3面の範囲整合性を検証</text>
-  <rect x="382" y="370" width="362" height="108" class="box storage"/>
-  <text x="563" y="399" text-anchor="middle" class="label">localStorage</text>
-  <text x="563" y="423" text-anchor="middle" class="body">oshidasumaho-cad-document-v1</text>
-  <text x="563" y="444" text-anchor="middle" class="body">oshidasumaho-cad-saved-parts-v1</text>
-  <text x="563" y="465" text-anchor="middle" class="body">oshidasumaho-cad-assembly-v1</text>
-  <rect x="798" y="378" width="318" height="92" class="box storage"/>
-  <text x="957" y="407" text-anchor="middle" class="label">web保存部品</text>
-  <text x="957" y="431" text-anchor="middle" class="body">名前 + 保存日時 + documentスナップショット</text>
-  <text x="957" y="452" text-anchor="middle" class="body">呼び出しとアセンブリ配置で再利用</text>
-  <path d="M473 269 V310 H202 V378" class="line"/>
-  <path d="M831 269 V326" class="line"/>
-  <path d="M328 424 H382" class="line"/>
-  <path d="M744 424 H798" class="line"/>
-  <path d="M563 370 V310 H473 V269" class="dash"/>
+  <rect x="48" y="296" width="1104" height="224" class="group"/>
+  <text x="70" y="325" class="section">2. 共通モデル化・検証</text>
+  <rect x="76" y="352" width="244" height="130" class="box process"/>
+  <text x="198" y="381" text-anchor="middle" class="label">JSON正規化・移行</text>
+  <text x="198" y="405" text-anchor="middle" class="body">スマートクォート正規化</text><text x="198" y="426" text-anchor="middle" class="body">schemaVersion 0〜4を移行</text><text x="198" y="447" text-anchor="middle" class="body">型・範囲・必須値を検証</text><text x="198" y="468" text-anchor="middle" class="small">新しい未対応versionは拒否</text>
+  <rect x="362" y="342" width="330" height="150" class="box model"/>
+  <text x="527" y="371" text-anchor="middle" class="label">React document state</text>
+  <text x="527" y="395" text-anchor="middle" class="body">shapes[] / areaLocks / constraints</text><text x="527" y="416" text-anchor="middle" class="body">activeFace / rotation / partName / 表示設定</text><text x="527" y="437" text-anchor="middle" class="body">rect / circle / gear / rack / internalGear</text><text x="527" y="458" text-anchor="middle" class="small">座標・寸法・拘束範囲は最大0.1 mm単位</text><text x="527" y="479" text-anchor="middle" class="small">add / cutはshapes[]の順番で評価</text>
+  <rect x="734" y="352" width="244" height="130" class="box process"/>
+  <text x="856" y="381" text-anchor="middle" class="label">形状・拘束評価</text>
+  <text x="856" y="405" text-anchor="middle" class="body">polygon-clippingで2Dブール</text><text x="856" y="426" text-anchor="middle" class="body">共有3軸の外接範囲を比較</text><text x="856" y="447" text-anchor="middle" class="body">ロック制約とスライダー上限へ反映</text><text x="856" y="468" text-anchor="middle" class="small">幅・奥行・高さの不一致を診断</text>
+  <rect x="1018" y="352" width="108" height="130" class="box storage"/>
+  <text x="1072" y="381" text-anchor="middle" class="label">保存</text><text x="1072" y="405" text-anchor="middle" class="body">document</text><text x="1072" y="426" text-anchor="middle" class="body">saved parts</text><text x="1072" y="447" text-anchor="middle" class="body">assembly</text><text x="1072" y="468" text-anchor="middle" class="small">localStorage</text>
+  <path d="M174 233 V280 H527 V342" class="line"/><path d="M404 233 V280 H198 V352" class="line"/><path d="M634 233 V280 H198 V352" class="line"/><path d="M864 233 V280 H198 V352" class="line"/><path d="M1061 233 V296" class="dash"/><path d="M320 417 H362" class="line"/><path d="M692 417 H734" class="line"/><path d="M978 417 H1018" class="line"/><path d="M1072 352 V320 H527 V342" class="dash"/>
 
-  <rect x="48" y="536" width="1104" height="210" class="group"/>
-  <text x="70" y="564" class="section">3. 画面描画</text>
-  <rect x="76" y="590" width="230" height="116" class="box process"/>
-  <text x="191" y="619" text-anchor="middle" class="label">3面図</text>
-  <text x="191" y="643" text-anchor="middle" class="body">add/cutを面ごとに合成</text>
-  <text x="191" y="664" text-anchor="middle" class="body">グリッド・寸法・禁止領域</text>
-  <text x="191" y="685" text-anchor="middle" class="body">polygon-clippingで輪郭処理</text>
-  <rect x="352" y="590" width="230" height="116" class="box process"/>
-  <text x="467" y="619" text-anchor="middle" class="label">単品3Dプレビュー</text>
-  <text x="467" y="643" text-anchor="middle" class="body">3面から外形寸法を確定</text>
-  <text x="467" y="664" text-anchor="middle" class="body">面断面と押し出し区間を生成</text>
-  <text x="467" y="685" text-anchor="middle" class="body">SVG面を回転・投影して表示</text>
-  <rect x="628" y="590" width="230" height="116" class="box process"/>
-  <text x="743" y="619" text-anchor="middle" class="label">アセンブリ面生成</text>
-  <text x="743" y="643" text-anchor="middle" class="body">保存部品のsurfaceを再利用</text>
-  <text x="743" y="664" text-anchor="middle" class="body">instanceの回転・位置・色を適用</text>
-  <text x="743" y="685" text-anchor="middle" class="body">部品単位の選択領域を生成</text>
-  <rect x="904" y="590" width="212" height="116" class="box process"/>
-  <text x="1010" y="619" text-anchor="middle" class="label">アセンブリ表示</text>
-  <text x="1010" y="643" text-anchor="middle" class="body">3D等角投影</text>
-  <text x="1010" y="664" text-anchor="middle" class="body">上面・正面・右側面投影</text>
-  <text x="1010" y="685" text-anchor="middle" class="body">外形に応じて自動フィット</text>
-  <path d="M202 470 V590" class="line"/>
-  <path d="M328 424 C370 500, 430 520, 467 590" class="line"/>
-  <path d="M957 470 C900 520, 800 520, 743 590" class="line"/>
-  <path d="M858 648 H904" class="line"/>
+  <rect x="48" y="552" width="1104" height="190" class="group"/>
+  <text x="70" y="581" class="section">3. 表示</text>
+  <rect x="76" y="608" width="234" height="102" class="box process"/>
+  <text x="193" y="637" text-anchor="middle" class="label">三面図SVG</text><text x="193" y="661" text-anchor="middle" class="body">最終輪郭・穴・寸法・グリッド</text><text x="193" y="682" text-anchor="middle" class="body">ロック範囲と整合補助矢印</text><text x="193" y="701" text-anchor="middle" class="small">図形タップで編集UIを選択</text>
+  <rect x="350" y="608" width="234" height="102" class="box process"/>
+  <text x="467" y="637" text-anchor="middle" class="label">単品3D SVG</text><text x="467" y="661" text-anchor="middle" class="body">3面から表面区間を生成</text><text x="467" y="682" text-anchor="middle" class="body">回転・6方向・透過・エッジ</text><text x="467" y="701" text-anchor="middle" class="small">全3面ロック後に表示</text>
+  <rect x="624" y="608" width="234" height="102" class="box process"/>
+  <text x="741" y="637" text-anchor="middle" class="label">アセンブリstate</text><text x="741" y="661" text-anchor="middle" class="body">保存部品JSON + 色 + XYZ</text><text x="741" y="682" text-anchor="middle" class="body">回転は90度単位</text><text x="741" y="701" text-anchor="middle" class="small">部品追加・削除・選択</text>
+  <rect x="898" y="608" width="228" height="102" class="box process"/>
+  <text x="1012" y="637" text-anchor="middle" class="label">アセンブリSVG</text><text x="1012" y="661" text-anchor="middle" class="body">3D + 三方向投影</text><text x="1012" y="682" text-anchor="middle" class="body">配置全体へ自動フィット</text><text x="1012" y="701" text-anchor="middle" class="small">部品単位の選択領域</text>
+  <path d="M527 492 V535 H193 V608" class="line"/><path d="M527 492 V608" class="line"/><path d="M1072 482 V535 H741 V608" class="dash"/><path d="M858 659 H898" class="line"/>
 
-  <rect x="48" y="778" width="1104" height="214" class="group"/>
-  <text x="70" y="806" class="section">4. ファイル出力と外部連携</text>
-  <rect x="76" y="834" width="196" height="116" class="box output"/>
-  <text x="174" y="863" text-anchor="middle" class="label">JSON</text>
-  <text x="174" y="887" text-anchor="middle" class="body">documentをそのまま整形</text>
-  <text x="174" y="908" text-anchor="middle" class="body">コピー / ダウンロード</text>
-  <text x="174" y="929" text-anchor="middle" class="small">再編集用の基準データ</text>
-  <rect x="306" y="824" width="240" height="136" class="box output"/>
-  <text x="426" y="853" text-anchor="middle" class="label">STL</text>
-  <text x="426" y="877" text-anchor="middle" class="body">3面形状の符号付き距離場</text>
-  <text x="426" y="898" text-anchor="middle" class="body">Marching Tetrahedraで表面抽出</text>
-  <text x="426" y="919" text-anchor="middle" class="body">三角形の向きを検証して水密化</text>
-  <text x="426" y="940" text-anchor="middle" class="small">解像度は出力時に調整可能</text>
-  <rect x="580" y="824" width="240" height="136" class="box output"/>
-  <text x="700" y="853" text-anchor="middle" class="label">STEP</text>
-  <text x="700" y="877" text-anchor="middle" class="body">面ごとにadd/cutプリズムを構築</text>
-  <text x="700" y="898" text-anchor="middle" class="body">3方向のソリッドをIntersect</text>
-  <text x="700" y="919" text-anchor="middle" class="body">replicad + OpenCascade.js</text>
-  <text x="700" y="940" text-anchor="middle" class="small">ブラウザ内でB-Repを書き出す</text>
-  <rect x="854" y="824" width="262" height="136" class="box external"/>
-  <text x="985" y="853" text-anchor="middle" class="label">Fusion Add-in</text>
-  <text x="985" y="877" text-anchor="middle" class="body">JSONをFusion Python APIで読込</text>
-  <text x="985" y="898" text-anchor="middle" class="body">3面を各軸方向へ押し出し</text>
-  <text x="985" y="919" text-anchor="middle" class="body">add/cut後に3ボディをIntersect</text>
-  <text x="985" y="940" text-anchor="middle" class="small">Fusionネイティブソリッドとして保存</text>
-  <path d="M473 269 C360 520, 240 660, 174 834" class="line"/>
-  <path d="M467 706 C450 750, 435 780, 426 824" class="line"/>
-  <path d="M467 706 C540 760, 630 770, 700 824" class="line"/>
-  <path d="M272 892 C520 1010, 780 1010, 854 914" class="dash"/>
-  <text x="48" y="1020" class="small">実線: アプリ内の処理　破線: 復元または外部ツールへの受け渡し</text>
+  <rect x="48" y="774" width="1104" height="202" class="group"/>
+  <text x="70" y="803" class="section">4. 保存・3D出力</text>
+  <rect x="76" y="832" width="216" height="108" class="box output"/>
+  <text x="184" y="861" text-anchor="middle" class="label">JSON</text><text x="184" y="885" text-anchor="middle" class="body">schemaVersion 4</text><text x="184" y="906" text-anchor="middle" class="body">コピー / ファイル保存</text><text x="184" y="927" text-anchor="middle" class="small">再編集・AI・外部処理の基準</text>
+  <rect x="332" y="822" width="250" height="128" class="box output"/>
+  <text x="457" y="851" text-anchor="middle" class="label">STL</text><text x="457" y="875" text-anchor="middle" class="body">3面形状の符号付き距離場</text><text x="457" y="896" text-anchor="middle" class="body">Marching Tetrahedraで表面抽出</text><text x="457" y="917" text-anchor="middle" class="body">閉じた三角形メッシュを生成</text><text x="457" y="938" text-anchor="middle" class="small">出力時に分割倍率を指定</text>
+  <rect x="622" y="822" width="250" height="128" class="box output"/>
+  <text x="747" y="851" text-anchor="middle" class="label">STEP</text><text x="747" y="875" text-anchor="middle" class="body">面別add / cutプリズム</text><text x="747" y="896" text-anchor="middle" class="body">3方向ソリッドの共通部分</text><text x="747" y="917" text-anchor="middle" class="body">replicad + OpenCascade.js</text><text x="747" y="938" text-anchor="middle" class="small">ブラウザ内でB-Repを生成</text>
+  <rect x="912" y="832" width="214" height="108" class="box output"/>
+  <text x="1019" y="861" text-anchor="middle" class="label">URL自動出力</text><text x="1019" y="885" text-anchor="middle" class="body">format=stl / step</text><text x="1019" y="906" text-anchor="middle" class="body">download=1</text><text x="1019" y="927" text-anchor="middle" class="small">通常UI / automation</text>
+  <path d="M527 492 C430 620 300 720 184 832" class="line"/><path d="M856 482 C740 600 560 710 457 822" class="line"/><path d="M856 482 C830 610 780 710 747 822" class="line"/><path d="M856 482 C980 600 1010 710 1019 832" class="line"/>
+
+  <rect x="48" y="1008" width="1104" height="72" class="group"/>
+  <text x="70" y="1037" class="section">5. 任意の外部連携</text>
+  <rect x="300" y="1024" width="276" height="42" class="box optional"/>
+  <text x="438" y="1050" text-anchor="middle" class="body">Fusion Add-in: JSONを別途読込（四角・円のみ）</text>
+  <rect x="646" y="1024" width="328" height="42" class="box optional"/>
+  <text x="810" y="1050" text-anchor="middle" class="body">ローカルSTL受信機: スライス・LAN印刷（検出時のみ）</text>
+  <path d="M184 940 C220 990 280 1000 350 1024" class="dash"/><path d="M457 950 C540 995 650 995 730 1024" class="dash"/>
+  <text x="48" y="1104" class="small">実線: Webアプリ内の主処理　破線: 復元または任意の外部連携。Fusion Add-inとローカル受信機はGitHub Pages版の動作に不要。</text>
 </svg>
