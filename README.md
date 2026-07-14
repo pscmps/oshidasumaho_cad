@@ -150,7 +150,7 @@ FusionでJSONを読み込み、Fusion上のソリッドとして再構築するP
 
 スマートフォンから自宅のWindows PCへ、Tailscale内で非公開アクセスする用途を想定しています。インターネットへ直接公開したり、ルーターでポート転送したりしないでください。
 
-設定方法は [receiver/README.md](receiver/README.md) を参照してください。
+設定方法は [receiver/README.md](receiver/README.md)（日本語・正本）を参照してください。英語版は [receiver/README.en.md](receiver/README.en.md) に残しています。
 
 次のコマンドで、SSH接続中を含む任意のディレクトリから起動、状態確認、停止ができます。
 

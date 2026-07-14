@@ -1,39 +1,41 @@
-# Oshida Smartphone CAD Receiver
+# オシダスマホキャド ローカルSTL受信機
 
-This is an advanced optional local-server bonus feature. It is not required for normal Oshida Smartphone CAD use. The GitHub Pages app works as a static web app without this receiver.
+**日本語（正本）** | [English](README.en.md)
 
-The receiver cannot run on GitHub Pages. It runs only on a local Windows PC, and no receiver button or receiver dependency is added to the public Pages app.
+これは上級者向けの任意のローカルサーバー機能です。通常のオシダスマホキャド利用には必要ありません。GitHub Pages版は、この受信機がなくても静的Webアプリとして動作します。
 
-Do not expose this receiver directly to the internet. It is intended for private Tailscale access only.
+受信機はGitHub Pages上では動作しません。ローカルのWindows PCで起動した場合だけ動作し、公開中のPagesアプリには受信機ボタンも依存関係も追加されません。
 
-## Purpose
+受信機をインターネットへ直接公開しないでください。非公開のTailscaleアクセス専用です。
 
-The receiver accepts STL files generated on a phone and saves them on a Windows PC. Future print automation should be added behind `src/print-pipeline.js`, not in the upload handler.
+## 目的
 
-Current scope:
+スマートフォンで生成したSTLファイルを受け取り、Windows PCへ保存します。今後印刷処理を拡張する場合は、アップロード処理へ直接追加せず、`src/print-pipeline.js`より後段へ実装します。
+
+現在の対応範囲：
 
 - `POST /upload`
-- raw STL body upload
-- `Content-Type: model/stl` or `application/octet-stream`
-- optional `X-Receiver-Token`
-- local STL save
-- Bambu Studio CLI slicing
-- G-code output
-- `result.json` check
-- console logs
-- optional LAN-mode G-code upload and print start
+- STL本体の直接アップロード
+- `Content-Type: model/stl`または`application/octet-stream`
+- 任意の`X-Receiver-Token`
+- ローカルへのSTL保存
+- Bambu Studio CLIによるスライス
+- G-code出力
+- `result.json`の確認
+- コンソールログ
+- 任意のLANモードG-code転送と印刷開始
 
-Automatic print start is disabled by default. Enable it only after confirming the target printer, material, bed, and model.
+自動印刷開始は初期状態で無効です。対象プリンター、材料、ビルドプレート、モデルを確認してから有効にしてください。
 
-The receiver serializes uploads, checks the printer state before transfer, selects a matching AMS tray, and confirms that the printer actually reached `RUNNING`. A second request is rejected while another upload is being processed, and a new print is not sent while the printer reports a busy state such as `RUNNING` or `PAUSE`.
+受信機はアップロードを直列処理し、転送前にプリンター状態を確認し、条件に合うAMSトレイを選択して、実際に`RUNNING`へ移行したことを確認します。別のアップロードを処理中は2件目を拒否し、プリンターが`RUNNING`や`PAUSE`などの使用中状態を返した場合は新しい印刷を送りません。
 
-## Managed Start And Stop
+## 管理された起動と停止
 
-Keep private settings in `%LOCALAPPDATA%\OshidaSmartphoneCadReceiver\receiver.json`. Copy `config.example.json` there as a starting point, replace the token and printer values, and do not commit that private file.
+非公開設定は`%LOCALAPPDATA%\OshidaSmartphoneCadReceiver\receiver.json`へ保存します。`config.example.json`をひな形としてコピーし、トークンとプリンター情報を書き換えてください。この非公開ファイルはコミットしないでください。
 
-`RECEIVER_TOKEN` is optional. Set it to an empty string to rely only on Tailscale access control; the local print dialog then hides the token field. This PC uses that mode. The HTTPS URL is still reachable by other devices and users admitted to the same Tailnet, so keep Tailnet membership restricted and never enable Funnel.
+`RECEIVER_TOKEN`は任意です。空文字列にするとTailscaleのアクセス制御だけを使用し、ローカル印刷ダイアログではトークン入力欄を非表示にします。HTTPS URLには同じTailnetへ参加している他の端末やユーザーもアクセスできるため、Tailnetの参加者を制限し、Funnelは有効にしないでください。
 
-These commands use absolute paths, so they work over SSH and from any current directory:
+次のコマンドは絶対パスを使うため、SSH接続中を含む任意のカレントディレクトリから実行できます。
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\start-receiver.ps1"
@@ -41,89 +43,93 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumah
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\stop-receiver.ps1"
 ```
 
-The managed launcher always overrides `RECEIVER_HOST` to `127.0.0.1`. Runtime files are stored under `%LOCALAPPDATA%\OshidaSmartphoneCadReceiver`: `receiver.pid`, `receiver.log`, and the private `receiver.json`.
+管理スクリプトは`RECEIVER_HOST`を常に`127.0.0.1`へ上書きします。実行時ファイルの`receiver.pid`、`receiver.log`、非公開の`receiver.json`は`%LOCALAPPDATA%\OshidaSmartphoneCadReceiver`へ保存されます。
 
 ## Tailnet HTTPS
 
-Keep the Node receiver bound to `127.0.0.1` and let Tailscale Serve terminate HTTPS. This exposes the receiver only inside the Tailnet and does not require changes to the GitHub Pages application.
+Node受信機は`127.0.0.1`へバインドしたままにし、Tailscale ServeでHTTPSを終端します。これにより受信機はTailnet内だけへ公開され、GitHub Pagesアプリを変更する必要もありません。
 
-Before the first use, open the Tailscale admin console DNS page, enable MagicDNS if needed, and enable **HTTPS Certificates**. Tailscale requires this one-time Tailnet consent before `tailscale serve` can provision a certificate. The consent notes that machine and Tailnet DNS names are recorded in the public certificate transparency ledger.
+初回利用前にTailscale管理画面のDNSページを開き、必要に応じてMagicDNSを有効化し、**HTTPS Certificates**を有効にしてください。`tailscale serve`が証明書を発行するには、このTailnet単位の同意が一度必要です。同意画面には、端末名とTailnet DNS名が公開Certificate Transparencyログへ記録されることが記載されています。
 
-Start the receiver, then enable the HTTPS proxy once:
+受信機を起動し、HTTPSプロキシを一度有効にします。
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File "D:\projects\oshidasumaho_cad\receiver\scripts\start-receiver.ps1"
 
-# Run in a second PowerShell window.
+# 2つ目のPowerShellウィンドウで実行します。
 .\scripts\enable-tailscale-https.ps1
 ```
 
-`tailscale serve status` prints the Tailnet HTTPS URL. Use that URL with `/upload`. Do not use `tailscale funnel`; Funnel publishes to the internet. To remove the proxy configuration, run `tailscale serve reset`.
+`tailscale serve status`でTailnet HTTPS URLを確認し、そのURLへ`/upload`を付けて使用します。`tailscale funnel`はインターネットへ公開するため使用しないでください。プロキシ設定を削除する場合は`tailscale serve reset`を実行します。
 
-On this PC the expected upload URL is `https://desktop-dmlkcj9.tail3b847d.ts.net/upload`.
+アップロードURLの形式：
 
-## Local CAD And Print UI
+```text
+https://<端末名>.<Tailnet名>.ts.net/upload
+```
 
-Open `https://desktop-dmlkcj9.tail3b847d.ts.net/` from a Tailnet device. The receiver redirects to the locally hosted Oshida Smartphone CAD screen. Its top-right menu includes **ローカル3Dプリント**, which can send either the current CAD model or a selected STL file to `/upload`.
+## ローカルCADと印刷UI
 
-The managed start command runs the Vite production build before launching the receiver. The receiver serves that build from `/oshidasumaho_cad/` on the same HTTPS origin as the upload API, so the browser does not need mixed HTTP/HTTPS access.
+Tailnet内の端末から`https://<端末名>.<Tailnet名>.ts.net/`を開きます。受信機はローカルでホストしたオシダスマホキャド画面へリダイレクトします。右上のメニューには**ローカル3Dプリント**が追加され、現在のCADモデルまたは選択したSTLファイルを`/upload`へ送信できます。
 
-This menu item appears only when the same origin answers `/health` as an Oshida receiver. It is hidden on the public GitHub Pages site, where local printing is unavailable. Sending from the dialog starts the configured slicing and print pipeline; it is a real print command, not a preview.
+管理された起動コマンドは、受信機を起動する前にViteの本番ビルドを実行します。受信機はアップロードAPIと同じHTTPSオリジンの`/oshidasumaho_cad/`からビルド結果を配信するため、ブラウザでHTTPとHTTPSを混在させる必要はありません。
 
-The dialog supports job-specific layer heights of `0.08`, `0.12`, `0.16`, `0.20`, `0.24`, and `0.28` mm for the configured 0.4 mm nozzle profile, plus automatic support generation on/off. API clients can pass the same values with `X-Layer-Height` and `X-Enable-Support` headers. Defaults are `0.20` mm and support off.
+同一オリジンの`/health`がオシダスマホキャド受信機として応答した場合だけ、このメニュー項目が表示されます。ローカル印刷を利用できない公開GitHub Pages版では非表示です。ダイアログからの送信は、設定済みのスライスと印刷処理を実際に開始します。プレビューではありません。
 
-Uploads are saved to `receiver/uploads/` by default. Override with:
+設定済みの0.4 mmノズル用プロファイルに対して、ジョブごとに`0.08`、`0.12`、`0.16`、`0.20`、`0.24`、`0.28` mmのレイヤー高さと、自動サポート生成のオン・オフを選択できます。APIクライアントは`X-Layer-Height`と`X-Enable-Support`ヘッダーで同じ値を指定できます。初期値は`0.20` mm、サポートなしです。
+
+アップロードされたファイルは初期状態で`receiver/uploads/`へ保存されます。変更する場合：
 
 ```powershell
 $env:RECEIVER_UPLOAD_DIR = "D:\oshidasumaho_uploads"
 ```
 
-Sliced output is saved to `receiver/outputs/<upload-id>/` by default. Each job directory should contain Bambu Studio outputs such as:
+スライス結果は初期状態で`receiver/outputs/<upload-id>/`へ保存されます。各ジョブのディレクトリには、次のようなBambu Studio出力が生成されます。
 
 - `plate_1.gcode`
 - `result.json`
 
-Override the output root with:
+出力先のルートを変更する場合：
 
 ```powershell
 $env:RECEIVER_OUTPUT_DIR = "D:\oshidasumaho_outputs"
 ```
 
-The Bambu Studio executable path is read from `BAMBU_STUDIO_PATH`. If unset, the receiver uses:
+Bambu Studioの実行ファイルは`BAMBU_STUDIO_PATH`から読み込みます。未設定の場合：
 
 ```text
 D:\bambu\Bambu Studio\bambu-studio.exe
 ```
 
-## Tailscale
+## Tailscaleの設定手順
 
-1. Install Tailscale on the Windows PC and the phone.
-2. Sign in to the same Tailnet.
-3. On the Windows PC, enable Tailscale Serve as described above.
+1. Windows PCとスマートフォンへTailscaleをインストールします。
+2. 両方を同じTailnetへ参加させます。
+3. 前述の手順でWindows PCのTailscale Serveを有効にします。
 
 ```powershell
 tailscale ip -4
 ```
 
-4. Start this receiver on the Windows PC.
-5. Send uploads to the Tailnet HTTPS URL.
+4. Windows PCで受信機を起動します。
+5. Tailnet HTTPS URLへアップロードします。
 
-Example URL:
+URLの例：
 
 ```text
-https://desktop-dmlkcj9.tail3b847d.ts.net/upload
+https://<端末名>.<Tailnet名>.ts.net/upload
 ```
 
-Example upload:
+アップロード例：
 
 ```powershell
-curl.exe -X POST "https://desktop-dmlkcj9.tail3b847d.ts.net/upload" `
+curl.exe -X POST "https://<端末名>.<Tailnet名>.ts.net/upload" `
   -H "Content-Type: model/stl" `
   -H "X-Receiver-Token: change-this-token" `
   --data-binary "@part.stl"
 ```
 
-The response includes the upload metadata and slicing result. A successful pipeline has:
+レスポンスにはアップロード情報とスライス結果が含まれます。正常にスライスできた場合の例：
 
 ```json
 {
@@ -138,18 +144,18 @@ The response includes the upload metadata and slicing result. A successful pipel
 }
 ```
 
-## Optional Bambu LAN Print Start
+## 任意のBambu LAN印刷開始
 
-This is an advanced option for a trusted home LAN or Tailscale-to-home workflow. Do not expose the receiver directly to the internet.
+信頼できる自宅LAN、またはTailscale経由で自宅へ接続する場合だけ使用する上級者向け機能です。受信機をインターネットへ直接公開しないでください。
 
-Bambu Studio CLI did not expose a confirmed print-start option on this PC. The receiver therefore keeps slicing and print delivery separate:
+この環境のBambu Studio CLIでは、印刷開始に使えることを確認できたオプションがありませんでした。そのため、受信機ではスライスと印刷データ転送を分けて処理します。
 
-1. Bambu Studio CLI slices STL to `receiver/outputs/<upload-id>/plate_1.gcode`.
-2. The receiver packages that G-code into a `.gcode.3mf` file using a known-good template.
-3. If `BAMBU_AUTO_PRINT=1`, the receiver uploads the `.gcode.3mf` file to the printer over FTPS.
-4. The receiver sends a LAN MQTT `project_file` print-start command to the target printer.
+1. Bambu Studio CLIでSTLを`receiver/outputs/<upload-id>/plate_1.gcode`へスライスします。
+2. 動作確認済みのテンプレートを使い、G-codeを`.gcode.3mf`へパッケージします。
+3. `BAMBU_AUTO_PRINT=1`の場合、`.gcode.3mf`をFTPSでプリンターへアップロードします。
+4. LAN MQTTの`project_file`コマンドを対象プリンターへ送り、印刷を開始します。
 
-Required environment variables:
+必要な環境変数：
 
 ```powershell
 $env:BAMBU_AUTO_PRINT = "1"
@@ -160,7 +166,7 @@ $env:BAMBU_ACCESS_CODE = "your-lan-access-code"
 $env:BAMBU_GCODE_3MF_TEMPLATE = "C:\path\to\known-good-template.gcode.3mf"
 ```
 
-Defaults:
+初期値：
 
 ```text
 BAMBU_FTP_USER=bblp
@@ -183,13 +189,13 @@ BAMBU_PRINT_CONFIRM_TIMEOUT_MS=45000
 BAMBU_STATUS_POLL_MS=3000
 ```
 
-With automatic AMS selection enabled, the receiver reads the live AMS report and prefers a matching `PLA Basic` tray. Set `BAMBU_AMS_SLOT` to a global tray number (`ams_id * 4 + slot_id`) to pin a specific slot. If a print pauses with Bambu error `03008004` (decimal `50364420`, filament unavailable), the receiver tries one different matching AMS tray and resumes the same job; it does not submit a second print job.
+AMS自動選択を有効にすると、受信機は現在のAMS情報を読み、条件に合う`PLA Basic`トレイを優先します。特定のスロットへ固定する場合は、`BAMBU_AMS_SLOT`にグローバルトレイ番号（`ams_id * 4 + slot_id`）を設定します。Bambuエラー`03008004`（10進数`50364420`、フィラメント利用不可）で印刷が一時停止した場合は、条件に合う別のAMSトレイを一度だけ試して同じジョブを再開します。2件目の印刷ジョブは送信しません。
 
-The upload response reports `print_started` only after the printer confirms `RUNNING`. `print_paused`, `print_unconfirmed`, or `print_skipped` indicate that no confirmed running print was observed. A busy printer returns `print_skipped` and its current status.
+アップロードレスポンスが`print_started`になるのは、プリンターが`RUNNING`を返したことを確認した後だけです。`print_paused`、`print_unconfirmed`、`print_skipped`は、実行中の印刷を確認できなかったことを示します。プリンターが使用中の場合は、現在の状態とともに`print_skipped`を返します。
 
-`BAMBU_GCODE_3MF_TEMPLATE` is required for the current `project_file` path. During testing, a `.gcode.3mf` file already present on the printer SD card was downloaded and used as the template; the receiver replaces `Metadata/plate_1.gcode` and its MD5 file before upload.
+現在の`project_file`方式では`BAMBU_GCODE_3MF_TEMPLATE`が必要です。動作確認では、プリンターのSDカードに保存されていた`.gcode.3mf`を取得してテンプレートに使用しました。受信機はアップロード前に`Metadata/plate_1.gcode`とそのMD5ファイルを置き換えます。
 
-For X1 Carbon testing, Bambu Studio CLI required both the machine and process profiles:
+X1 Carbonでの確認では、Bambu Studio CLIに機種プロファイルとプロセスプロファイルの両方が必要でした。
 
 ```text
 BAMBU_MACHINE_PROFILE=Bambu Lab X1 Carbon 0.4 nozzle
@@ -197,15 +203,15 @@ BAMBU_PROCESS_PROFILE=0.20mm Standard @BBL X1C
 BAMBU_FILAMENT_PROFILE=Bambu PLA Basic @BBL X1C
 ```
 
-The CLI did not reliably apply the filament profile in this environment, so the receiver currently post-processes generated G-code metadata for PLA and sets nozzle temperature to 220 C before packaging.
+この環境ではCLIがフィラメントプロファイルを安定して適用しなかったため、現在の受信機は生成されたG-codeのPLA用メタデータを後処理し、パッケージ前にノズル温度を220 Cへ設定します。
 
-For X1 Carbon, the receiver resolves the Bambu machine profile includes into a temporary job-local machine profile before slicing. This is required so Bambu's standard start and end G-code are present, including nozzle wipe, bed leveling hooks, purge line, and flow calibration hooks. Automatic print start is skipped if those safety markers are missing from the generated G-code.
+X1 Carbonでは、スライス前にBambu機種プロファイルのincludeを解決し、ジョブ専用の一時機種プロファイルを作ります。ノズル清掃、ベッドレベリング、パージライン、流量校正など、Bambu標準の開始・終了G-codeを含めるために必要です。生成したG-codeにこれらの安全用マーカーがない場合、自動印刷開始を中止します。
 
-The Bambu printer's FTPS server requires TLS session reuse on the data connection. Windows `curl.exe` and Node's standard TLS client failed this requirement during testing, so the receiver uses `src/ftps-upload.py` for the FTPS upload step. The helper uses Python's standard library and reuses the control TLS session for file upload.
+BambuプリンターのFTPSサーバーは、データ接続でTLSセッションを再利用する必要があります。Windowsの`curl.exe`とNode標準TLSクライアントでは、この要件を満たせませんでした。そのため受信機はFTPSアップロードに`src/ftps-upload.py`を使います。この補助スクリプトはPython標準ライブラリだけを使い、ファイル転送時に制御接続のTLSセッションを再利用します。
 
-`BAMBU_PRINT_TEST_ONLY=1` is the default safety guard. With this guard enabled, the receiver only attempts automatic print start when the upload filename looks like a test file, such as `20mm-test-cube.stl`. Set `BAMBU_PRINT_TEST_ONLY=0` only after this experimental path is proven with your printer.
+`BAMBU_PRINT_TEST_ONLY=1`は初期状態の安全制限です。有効な間は、`20mm-test-cube.stl`などテスト用に見えるファイル名の場合だけ自動印刷開始を試みます。この実験的な経路を使用するプリンターで動作確認してから、`BAMBU_PRINT_TEST_ONLY=0`へ変更してください。
 
-20mm test cube upload:
+20 mmテストキューブのアップロード例：
 
 ```powershell
 curl.exe -X POST "http://127.0.0.1:8787/upload" `
@@ -215,21 +221,21 @@ curl.exe -X POST "http://127.0.0.1:8787/upload" `
   --data-binary "@receiver\examples\20mm-test-cube.stl"
 ```
 
-The logs print the target printer name, host, serial, uploaded remote G-code path, and whether the print-start command was sent.
+ログには対象プリンター名、ホスト、シリアル番号、アップロード先のG-codeパス、印刷開始コマンドを送信したかどうかが記録されます。
 
-## Bambu Studio CLI Check
+## Bambu Studio CLIの確認結果
 
-This PC has Bambu Studio installed at:
+この環境で使用したBambu Studioの場所：
 
 ```text
 D:\bambu\Bambu Studio\bambu-studio.exe
 ```
 
-Observed on Bambu Studio `02.07.01.57`:
+Bambu Studio `02.07.01.57`で確認した結果：
 
-- `--help` and `-h` returned exit code 0 but printed no console help.
-- `--slice=0 --outputdir <dir> <stl>` worked when paths did not contain spaces, producing `plate_1.gcode` and `result.json`. The receiver stores uploaded STL files and output directories under paths without spaces by default.
-- `--load-settings <json>` worked with hyphenated option spelling.
-- `--load_settings <json>` failed with exit code `-2`.
-- `--export_3mf=output.3mf` failed with exit code `-2` in the tested form.
-- No Bambu Studio CLI option was confirmed for print start. Official Bambu Studio source shows GUI print start going through `PrintJob` and the networking plugin (`start_local_print`, `start_local_print_with_record`, `start_send_gcode_to_sdcard`), not a public CLI print command.
+- `--help`と`-h`は終了コード0でしたが、コンソールへヘルプを表示しませんでした。
+- パスに空白がない場合、`--slice=0 --outputdir <dir> <stl>`で`plate_1.gcode`と`result.json`を生成できました。受信機は初期状態で、アップロードSTLと出力先を空白のないパスへ保存します。
+- ハイフン区切りの`--load-settings <json>`は動作しました。
+- アンダースコア区切りの`--load_settings <json>`は終了コード`-2`で失敗しました。
+- 確認した形式の`--export_3mf=output.3mf`は終了コード`-2`で失敗しました。
+- 印刷開始に使えるBambu Studio CLIオプションは確認できませんでした。Bambu Studio公式ソースでは、GUIからの印刷開始に`PrintJob`とネットワークプラグイン（`start_local_print`、`start_local_print_with_record`、`start_send_gcode_to_sdcard`）を使用しており、公開CLIコマンドは使用していません。
