@@ -11,7 +11,7 @@
   "areaLockConstraints": {
     "top": {
       "minX": 20,
-      "maxX": 82.83185307179586,
+      "maxX": 82.8,
       "minY": 20,
       "maxY": 30,
       "constrainedX": true,
@@ -19,7 +19,7 @@
     },
     "front": {
       "minX": 20,
-      "maxX": 82.83185307179586,
+      "maxX": 82.8,
       "minY": 30,
       "maxY": 60,
       "constrainedX": true,
@@ -62,7 +62,7 @@
       "type": "rect",
       "x": 20,
       "y": 30,
-      "w": 62.83185307179586,
+      "w": 62.8,
       "h": 30,
       "mode": "add",
       "face": "front",

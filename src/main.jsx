@@ -52,13 +52,20 @@ import {
   getInternalGearRadii,
   pointInInternalGear,
 } from './internal-gear-geometry.js';
+import {
+  ceilToModelPrecision,
+  floorToModelPrecision,
+  normalizeModelPrecision,
+  normalizeShapePrecision,
+  roundToModelPrecision,
+} from './numeric-precision.js';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-16';
+const APP_VERSION = 'proto-2026-06-02-17';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -145,6 +152,7 @@ function normalizeFace(face) {
 }
 
 function normalizeDocument(document) {
+  document = normalizeModelPrecision(document);
   const activeFace = normalizeFace(document?.activeFace);
   const viewMode = document?.viewMode === '3d' ? '3d' : 'faces';
   const rotation = normalizeRotation(document?.rotation);
@@ -198,9 +206,9 @@ function normalizeAssemblyRotation(rotation) {
 
 function normalizeAssemblyPosition(position) {
   return {
-    x: clampValue(Number(position?.x ?? 0), -120, 120),
-    y: clampValue(Number(position?.y ?? 0), -120, 120),
-    z: clampValue(Number(position?.z ?? 0), -120, 120),
+    x: roundToModelPrecision(clampValue(Number(position?.x ?? 0), -120, 120)),
+    y: roundToModelPrecision(clampValue(Number(position?.y ?? 0), -120, 120)),
+    z: roundToModelPrecision(clampValue(Number(position?.z ?? 0), -120, 120)),
   };
 }
 
@@ -295,7 +303,7 @@ function getShapeLabel(shape) {
 }
 
 function clampRangeValue(value) {
-  return Math.min(120, Math.max(0, value));
+  return roundToModelPrecision(Math.min(120, Math.max(0, value)));
 }
 
 function getFaceBounds(shapes, face) {
@@ -590,7 +598,7 @@ function clampValue(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function constrainShape(shape, constraint) {
+function constrainShapeToConstraint(shape, constraint) {
   if (!constraint) {
     return shape;
   }
@@ -654,8 +662,8 @@ function constrainShape(shape, constraint) {
     const internalGear = { ...shape, module: moduleValue, teeth };
     const outerDiameter = clampValue(
       shape.outerDiameter,
-      getInternalGearMinimumOuterDiameter(internalGear),
-      maximumOuterDiameter,
+      ceilToModelPrecision(getInternalGearMinimumOuterDiameter(internalGear)),
+      floorToModelPrecision(maximumOuterDiameter),
     );
     const outerRadius = outerDiameter / 2;
     return {
@@ -683,9 +691,10 @@ function constrainShape(shape, constraint) {
     );
     const constrainedRack = { ...shape, teeth, module: moduleValue, height };
     const { width } = getRackGearDimensions(constrainedRack);
+    const constrainedWidth = roundToModelPrecision(width);
     return {
       ...constrainedRack,
-      x: clampValue(shape.x, constraint.minX, constraint.maxX - width),
+      x: clampValue(shape.x, constraint.minX, constraint.maxX - constrainedWidth),
       y: clampValue(shape.y, constraint.minY, constraint.maxY - height),
     };
   }
@@ -699,6 +708,12 @@ function constrainShape(shape, constraint) {
     x: clampValue(shape.x, constraint.minX, constraint.maxX - w),
     y: clampValue(shape.y, constraint.minY, constraint.maxY - h),
   };
+}
+
+function constrainShape(shape, constraint) {
+  return normalizeShapePrecision(
+    constrainShapeToConstraint(normalizeShapePrecision(shape), constraint),
+  );
 }
 
 function applyAreaLocks(document) {
@@ -797,16 +812,19 @@ function getShapeControlLimits(shape, constraint, locked) {
   }
   if (shape.type === 'rack') {
     const dimensions = getRackGearDimensions(shape);
+    const constrainedWidth = roundToModelPrecision(dimensions.width);
     const availableWidth = Math.max(0, fullConstraint.maxX - shape.x);
     const availableHeight = Math.max(0, fullConstraint.maxY - shape.y);
     return {
-      x: { min: fullConstraint.minX, max: Math.max(fullConstraint.minX, fullConstraint.maxX - dimensions.width) },
+      x: { min: fullConstraint.minX, max: Math.max(fullConstraint.minX, fullConstraint.maxX - constrainedWidth) },
       y: { min: fullConstraint.minY, max: Math.max(fullConstraint.minY, fullConstraint.maxY - dimensions.height) },
       module: {
         min: GEAR_MODULE_MIN,
         max: Math.max(
           GEAR_MODULE_MIN,
-          Math.min(GEAR_MODULE_MAX, availableWidth / (Math.PI * shape.teeth), shape.height / 2.25),
+          roundToModelPrecision(
+            Math.min(GEAR_MODULE_MAX, availableWidth / (Math.PI * shape.teeth), shape.height / 2.25),
+          ),
         ),
       },
       teeth: {
@@ -2416,7 +2434,7 @@ function App() {
             );
           }
           if (nextShape.mode === 'cut' || !hasAreaConstraint(constraint)) {
-            return nextShape;
+            return normalizeShapePrecision(nextShape);
           }
           return constrainShape(nextShape, constraint);
         }),
@@ -5633,11 +5651,16 @@ function RotationControls({
 }
 
 function ControlField({ axis, label, value, min, max, step = 1, invert = false, onChange }) {
-  const sliderValue = invert ? max - value + min : value;
+  const controlMin = ceilToModelPrecision(min);
+  const controlMax = Math.max(controlMin, floorToModelPrecision(max));
+  const controlValue = roundToModelPrecision(clampValue(value, controlMin, controlMax));
+  const sliderValue = invert ? controlMax - controlValue + controlMin : controlValue;
 
   function handleSliderChange(event) {
     const nextValue = Number(event.target.value);
-    onChange(invert ? max - nextValue + min : nextValue);
+    onChange(roundToModelPrecision(
+      invert ? controlMax - nextValue + controlMin : nextValue,
+    ));
   }
 
   return (
@@ -5645,17 +5668,17 @@ function ControlField({ axis, label, value, min, max, step = 1, invert = false, 
       <span>{label}</span>
       <input
         type="range"
-        min={min}
-        max={max}
+        min={controlMin}
+        max={controlMax}
         step={step}
         value={sliderValue}
         onChange={handleSliderChange}
       />
       <NumberField
         label={`${label} value`}
-        value={value}
-        min={min}
-        max={max}
+        value={controlValue}
+        min={controlMin}
+        max={controlMax}
         step={step}
         compact
         onChange={onChange}
@@ -5665,16 +5688,19 @@ function ControlField({ axis, label, value, min, max, step = 1, invert = false, 
 }
 
 function NumberField({ label, value, min, max, step = 1, compact = false, onChange }) {
+  const normalizedMin = ceilToModelPrecision(min);
+  const normalizedMax = Math.max(normalizedMin, floorToModelPrecision(max));
+  const normalizedValue = roundToModelPrecision(clampValue(value, normalizedMin, normalizedMax));
   return (
     <label className={compact ? 'number-field compact' : 'number-field'}>
       <span>{label}</span>
       <input
         type="number"
-        min={min}
-        max={max}
+        min={normalizedMin}
+        max={normalizedMax}
         step={step}
-        value={value}
-        onChange={(event) => onChange(Number(event.target.value) || 0)}
+        value={normalizedValue}
+        onChange={(event) => onChange(roundToModelPrecision(Number(event.target.value) || 0))}
       />
     </label>
   );

@@ -45,11 +45,13 @@ React state、localStorage、3D描画、ファイル出力、Fusion Add-inまで
 
 エリアロックできない状態のボタンもタップできます。タップすると、幅・奥行・高さのどの範囲が不一致か、現在範囲と許容範囲を下部UIへ表示します。ロックは面積や詳細輪郭ではなく、add/cut後の外接範囲を共有軸ごとに比較します。
 
+座標・寸法・ロック範囲は最大でも小数第1位までに統一しています。ラックギヤなど円周率を含む輪郭も、ロック判定では0.1 mm単位の外接範囲を使うため、別の面で同じ表示寸法へ合わせられます。
+
 現在のschemaは `schemaVersion: 4` です。version 2では `gear`、version 3では `rack`、version 4では `internalGear` 図形を追加しています。version指定のない従来JSONはversion 0として読み込み、既存versionも現在形式へ移行します。対応versionより新しいJSON、構文エラー、未対応図形、不正な数値は画面上にエラーを表示して読み込みません。
 
 平歯車のJSON形式は `{"type":"gear","x":60,"y":60,"module":1,"teeth":24,"bore":6,"mode":"add"}` です。`x`,`y`は中心、`bore`は中央穴の直径です。平歯車はadd専用で、中央穴は同じ図形の内部cutとして評価されます。
 
-ラックギヤのJSON形式は `{"type":"rack","x":20,"y":45,"module":1,"teeth":20,"height":10,"mode":"add"}` です。`x`,`y`は外接範囲の左上、`height`は歯先から底面までの全高です。幅は `module × π × teeth` で決まり、左右端は歯底位置で終わります。
+ラックギヤのJSON形式は `{"type":"rack","x":20,"y":45,"module":1,"teeth":20,"height":10,"mode":"add"}` です。`x`,`y`は外接範囲の左上、`height`は歯先から底面までの全高です。幅は `module × π × teeth` を0.1 mmへ丸めた値で、標準ピッチを保ったまま最後の歯底ランドで全幅を合わせます。
 
 内歯車のJSON形式は `{"type":"internalGear","x":60,"y":60,"module":1,"teeth":50,"outerDiameter":68,"mode":"add"}` です。`x`,`y`は中心、`outerDiameter`は外径です。歯数はインボリュート歯形が成立する34以上とし、外径は歯底円の外側に最低リム厚を残す範囲へ制限されます。
 

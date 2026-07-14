@@ -1,4 +1,5 @@
 import { GEAR_MODULE_MAX, GEAR_MODULE_MIN, GEAR_PRESSURE_ANGLE_DEG } from './gear-geometry.js';
+import { roundToModelPrecision } from './numeric-precision.js';
 
 export const RACK_TEETH_MIN = 1;
 export const RACK_TEETH_MAX = 80;
@@ -13,6 +14,7 @@ export function getRackGearDimensions(shape) {
   const moduleValue = clamp(Number(shape.module) || 1, GEAR_MODULE_MIN, GEAR_MODULE_MAX);
   const teeth = clamp(Math.round(Number(shape.teeth) || 20), RACK_TEETH_MIN, RACK_TEETH_MAX);
   const pitch = Math.PI * moduleValue;
+  const nominalWidth = pitch * teeth;
   const addendum = moduleValue;
   const dedendum = 1.25 * moduleValue;
   const toothDepth = addendum + dedendum;
@@ -32,7 +34,8 @@ export function getRackGearDimensions(shape) {
     height,
     minimumHeight,
     pitch,
-    width: pitch * teeth,
+    nominalWidth,
+    width: roundToModelPrecision(nominalWidth),
     toothDepth,
     tipHalfWidth,
     rootHalfWidth,
@@ -56,7 +59,7 @@ export function getRackGearOutlineRing(shape) {
       [center - dimensions.tipHalfWidth, top],
       [center + dimensions.tipHalfWidth, top],
       [center + dimensions.rootHalfWidth, rootY],
-      [start + dimensions.pitch, rootY],
+      [Math.min(start + dimensions.pitch, left + dimensions.width), rootY],
     ];
     profile.push(...(index === 0 ? points : points.slice(1)));
   }

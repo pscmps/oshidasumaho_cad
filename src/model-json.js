@@ -16,6 +16,7 @@ import {
   INTERNAL_GEAR_TEETH_MIN,
   getInternalGearMinimumOuterDiameter,
 } from './internal-gear-geometry.js';
+import { ceilToModelPrecision, normalizeModelPrecision } from './numeric-precision.js';
 
 export const MODEL_SCHEMA_VERSION = 4;
 
@@ -65,10 +66,11 @@ export const AI_MODEL_JSON_PROMPT = [
   '- gearのmoduleは0.5〜5、teethは8〜80の整数、boreは0以上で歯底径より小さくしてください。',
   '- rackは通常の20度圧力角のラックギヤで、modeはaddだけを指定してください。',
   '- rackのmoduleは0.5〜5、teethは1〜80の整数、heightは整数でmodule×2.25以上にしてください。',
-  '- rackの幅はmodule×π×teethです。左右端は歯底位置で終わります。',
+  '- rackの幅はmodule×π×teethを小数第1位へ丸めた値です。左右端は歯底位置で終わります。',
   '- internalGearは通常の20度圧力角の内歯車で、modeはaddだけを指定してください。',
   '- internalGearのmoduleは0.5〜5、teethは34〜120の整数にしてください。',
   '- internalGearのouterDiameterは歯底円の外側に最低リム厚を確保し、0〜120の範囲内に収めてください。',
+  '- 座標と寸法は小数第1位までにしてください。小数第2位以下は読み込み時に丸められます。',
   '- shapesは上から順番に評価され、後のaddは前のcutを上書きできます。',
   '- idはJSON内で重複しない0以上の整数にしてください。',
   '- 各面に外形を決めるadd図形を最低1個置いてください。',
@@ -252,7 +254,7 @@ function validateShape(shape, index, ids) {
         `${path}.teeth は${INTERNAL_GEAR_TEETH_MIN}〜${INTERNAL_GEAR_TEETH_MAX}の整数である必要があります。`,
       );
     }
-    const minimumOuterDiameter = getInternalGearMinimumOuterDiameter(shape);
+    const minimumOuterDiameter = ceilToModelPrecision(getInternalGearMinimumOuterDiameter(shape));
     if (shape.outerDiameter < minimumOuterDiameter - 0.001 || shape.outerDiameter > 120) {
       throw new ModelJsonError(
         `${path}.outerDiameter は${minimumOuterDiameter}〜120である必要があります。`,
@@ -339,7 +341,7 @@ export function validateAndMigrateModelDocument(value) {
     );
   }
 
-  const document = migrateModelDocument(value, sourceVersion);
+  const document = normalizeModelPrecision(migrateModelDocument(value, sourceVersion));
   if (!Array.isArray(document.shapes)) {
     throw new ModelJsonError('shapes は配列である必要があります。');
   }
@@ -408,10 +410,10 @@ export function normalizeModelJsonText(text) {
 }
 
 export function serializeModelJson(document, space = 2) {
-  const versionedDocument = {
+  const versionedDocument = normalizeModelPrecision({
     ...document,
     schemaVersion: MODEL_SCHEMA_VERSION,
-  };
+  });
   return JSON.stringify(versionedDocument, null, space);
 }
 

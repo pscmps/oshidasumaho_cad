@@ -39,6 +39,23 @@ test('saved JSON can be parsed without losing model fields', () => {
   assert.deepEqual(parseModelJson(serializeModelJson(model)), model);
 });
 
+test('loaded and saved dimensions are normalized to one decimal place', () => {
+  const preciseModel = {
+    ...model,
+    shapes: [
+      { ...model.shapes[0], x: 10.044, w: 70.056 },
+      { ...model.shapes[4], outerDiameter: 68.049 },
+    ],
+  };
+  const parsed = parseModelJson(JSON.stringify(preciseModel));
+  assert.equal(parsed.shapes[0].x, 10);
+  assert.equal(parsed.shapes[0].w, 70.1);
+  assert.equal(parsed.shapes[1].outerDiameter, 68);
+  const saved = JSON.parse(serializeModelJson(preciseModel));
+  assert.equal(saved.shapes[0].w, 70.1);
+  assert.equal(saved.shapes[1].outerDiameter, 68);
+});
+
 test('legacy JSON without schemaVersion migrates to the current version', () => {
   const { schemaVersion, ...legacy } = model;
   const parsed = parseModelJson(JSON.stringify(legacy));
