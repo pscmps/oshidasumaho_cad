@@ -1,6 +1,6 @@
 # Oshida Smartphone CAD
 
-スマートフォンのブラウザで、上面・正面・右側面に四角形、円、平歯車を配置して機械部品を作る軽量CADです。単品部品の3面編集、3Dプレビュー、JSON/STL/STEP出力と、保存した部品を配置するアセンブリ機能を開発しています。
+スマートフォンのブラウザで、上面・正面・右側面に四角形、円、平歯車、ラックギヤを配置して機械部品を作る軽量CADです。単品部品の3面編集、3Dプレビュー、JSON/STL/STEP出力と、保存した部品を配置するアセンブリ機能を開発しています。
 
 ## Architecture
 
@@ -22,6 +22,7 @@ React state、localStorage、3D描画、ファイル出力、Fusion Add-inまで
 - 上部は固定プレビュー、下部は選択対象に応じて切り替わる編集UI
 - 単品部品モードは上面・正面・右側面と3Dプレビューを表示
 - 平歯車は20度圧力角のインボリュート歯形で、モジュール、歯数、中央穴径を編集可能
+- ラックギヤは20度圧力角で、モジュール、整数歯数、歯先から底面までの整数全高を編集可能
 - アセンブリモードは保存部品のXYZ配置、90度回転、色変更と3面投影に対応
 - 図形の2Dブーリアンには `polygon-clipping`、三角形分割には `earcut` を使用
 
@@ -43,11 +44,13 @@ React state、localStorage、3D描画、ファイル出力、Fusion Add-inまで
 
 エリアロックできない状態のボタンもタップできます。タップすると、幅・奥行・高さのどの範囲が不一致か、現在範囲と許容範囲を下部UIへ表示します。ロックは面積や詳細輪郭ではなく、add/cut後の外接範囲を共有軸ごとに比較します。
 
-現在のschemaは `schemaVersion: 2` です。version 2では `gear` 図形を追加しています。version指定のない従来JSONはversion 0、既存JSONはversion 1として読み込み、現在形式へ移行します。対応versionより新しいJSON、構文エラー、未対応図形、不正な数値は画面上にエラーを表示して読み込みません。
+現在のschemaは `schemaVersion: 3` です。version 2では `gear`、version 3では `rack` 図形を追加しています。version指定のない従来JSONはversion 0として読み込み、既存versionも現在形式へ移行します。対応versionより新しいJSON、構文エラー、未対応図形、不正な数値は画面上にエラーを表示して読み込みません。
 
 平歯車のJSON形式は `{"type":"gear","x":60,"y":60,"module":1,"teeth":24,"bore":6,"mode":"add"}` です。`x`,`y`は中心、`bore`は中央穴の直径です。平歯車はadd専用で、中央穴は同じ図形の内部cutとして評価されます。
 
-サンプルは [examples/three-face-bracket.json](examples/three-face-bracket.json) と [examples/spur-gear.json](examples/spur-gear.json) にあります。
+ラックギヤのJSON形式は `{"type":"rack","x":20,"y":45,"module":1,"teeth":20,"height":10,"mode":"add"}` です。`x`,`y`は外接範囲の左上、`height`は歯先から底面までの全高です。幅は `module × π × teeth` で決まり、左右端は歯底位置で終わります。
+
+サンプルは [examples/three-face-bracket.json](examples/three-face-bracket.json)、[examples/spur-gear.json](examples/spur-gear.json)、[examples/rack-gear.json](examples/rack-gear.json) にあります。
 
 保存対象外の一時的なUI状態:
 
@@ -120,7 +123,7 @@ npm test
 
 FusionでJSONを読み込み、Fusion上のソリッドとして再構築するPython Add-inを `fusion_addin/` に追加しています。
 
-現時点のFusion Add-inは四角形と円に対応しています。`gear` はWeb版の2D/3D表示、JSON、STL、STEP出力に対応していますが、Fusion Add-inでの再構築は未対応です。
+現時点のFusion Add-inは四角形と円に対応しています。`gear` と `rack` はWeb版の2D/3D表示、JSON、STL、STEP出力に対応していますが、Fusion Add-inでの再構築は未対応です。
 
 詳しくは [fusion_addin/README.md](fusion_addin/README.md) を参照してください。
 

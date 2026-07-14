@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 3,
+  "partName": "rack-gear-m1-z20-h10",
+  "extrude": 12,
+  "activeFace": "top",
+  "areaLocks": {
+    "top": true,
+    "front": true,
+    "right": true
+  },
+  "areaLockConstraints": {
+    "top": {
+      "minX": 20,
+      "maxX": 82.83185307179586,
+      "minY": 20,
+      "maxY": 30,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "front": {
+      "minX": 20,
+      "maxX": 82.83185307179586,
+      "minY": 30,
+      "maxY": 60,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "right": {
+      "minX": 20,
+      "maxX": 30,
+      "minY": 30,
+      "maxY": 60,
+      "constrainedX": true,
+      "constrainedY": true
+    }
+  },
+  "viewMode": "faces",
+  "rotation": {
+    "x": 24,
+    "y": -34,
+    "z": 0
+  },
+  "transparent3D": true,
+  "show3DGrid": false,
+  "show3DEdges": true,
+  "showAllDimensions": false,
+  "shapes": [
+    {
+      "id": 1,
+      "type": "rack",
+      "x": 20,
+      "y": 20,
+      "module": 1,
+      "teeth": 20,
+      "height": 10,
+      "mode": "add",
+      "face": "top",
+      "showDimensions": false
+    },
+    {
+      "id": 2,
+      "type": "rect",
+      "x": 20,
+      "y": 30,
+      "w": 62.83185307179586,
+      "h": 30,
+      "mode": "add",
+      "face": "front",
+      "showDimensions": false
+    },
+    {
+      "id": 3,
+      "type": "rect",
+      "x": 20,
+      "y": 30,
+      "w": 10,
+      "h": 30,
+      "mode": "add",
+      "face": "right",
+      "showDimensions": false
+    }
+  ]
+}

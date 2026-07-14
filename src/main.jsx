@@ -30,13 +30,22 @@ import {
   getGearRadii,
   pointInGearOuter,
 } from './gear-geometry.js';
+import {
+  RACK_HEIGHT_MAX,
+  RACK_TEETH_MAX,
+  RACK_TEETH_MIN,
+  getRackGearDimensions,
+  getRackGearOutlineRing,
+  getRackGearSignedDistance,
+  pointInRackGear,
+} from './rack-gear-geometry.js';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-14';
+const APP_VERSION = 'proto-2026-06-02-15';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -260,7 +269,13 @@ function getNextId(shapes) {
 }
 
 function getShapeLabel(shape) {
-  const typeLabel = shape.type === 'rect' ? 'Rect' : shape.type === 'circle' ? 'Circle' : 'Gear';
+  const typeLabel = shape.type === 'rect'
+    ? 'Rect'
+    : shape.type === 'circle'
+      ? 'Circle'
+      : shape.type === 'gear'
+        ? 'Gear'
+        : 'Rack';
   return `${typeLabel} ${shape.id}`;
 }
 
@@ -600,6 +615,30 @@ function constrainShape(shape, constraint) {
       y: clampValue(shape.y, constraint.minY + outerRadius, constraint.maxY - outerRadius),
     };
   }
+  if (shape.type === 'rack') {
+    const teeth = clampValue(Math.round(shape.teeth), RACK_TEETH_MIN, RACK_TEETH_MAX);
+    const availableWidth = constraint.maxX - constraint.minX;
+    const availableHeight = constraint.maxY - constraint.minY;
+    const maximumModule = Math.min(
+      GEAR_MODULE_MAX,
+      availableWidth / (Math.PI * teeth),
+      availableHeight / 2.25,
+    );
+    const moduleValue = clampValue(shape.module, GEAR_MODULE_MIN, Math.max(GEAR_MODULE_MIN, maximumModule));
+    const provisional = getRackGearDimensions({ ...shape, teeth, module: moduleValue });
+    const height = clampValue(
+      Math.round(shape.height),
+      provisional.minimumHeight,
+      Math.max(provisional.minimumHeight, Math.floor(availableHeight)),
+    );
+    const constrainedRack = { ...shape, teeth, module: moduleValue, height };
+    const { width } = getRackGearDimensions(constrainedRack);
+    return {
+      ...constrainedRack,
+      x: clampValue(shape.x, constraint.minX, constraint.maxX - width),
+      y: clampValue(shape.y, constraint.minY, constraint.maxY - height),
+    };
+  }
 
   const w = clampValue(shape.w, 1, Math.max(1, constraint.maxX - constraint.minX));
   const h = clampValue(shape.h, 1, Math.max(1, constraint.maxY - constraint.minY));
@@ -676,6 +715,33 @@ function getShapeControlLimits(shape, constraint, locked) {
         ),
       },
       bore: { min: 0, max: getGearBoreMax(shape) },
+    };
+  }
+  if (shape.type === 'rack') {
+    const dimensions = getRackGearDimensions(shape);
+    const availableWidth = Math.max(0, fullConstraint.maxX - shape.x);
+    const availableHeight = Math.max(0, fullConstraint.maxY - shape.y);
+    return {
+      x: { min: fullConstraint.minX, max: Math.max(fullConstraint.minX, fullConstraint.maxX - dimensions.width) },
+      y: { min: fullConstraint.minY, max: Math.max(fullConstraint.minY, fullConstraint.maxY - dimensions.height) },
+      module: {
+        min: GEAR_MODULE_MIN,
+        max: Math.max(
+          GEAR_MODULE_MIN,
+          Math.min(GEAR_MODULE_MAX, availableWidth / (Math.PI * shape.teeth), shape.height / 2.25),
+        ),
+      },
+      teeth: {
+        min: RACK_TEETH_MIN,
+        max: Math.max(
+          RACK_TEETH_MIN,
+          Math.min(RACK_TEETH_MAX, Math.floor(availableWidth / (Math.PI * shape.module))),
+        ),
+      },
+      height: {
+        min: dimensions.minimumHeight,
+        max: Math.max(dimensions.minimumHeight, Math.min(RACK_HEIGHT_MAX, Math.floor(availableHeight))),
+      },
     };
   }
 
@@ -818,6 +884,9 @@ function pointInShape(shape, x, y) {
   if (shape.type === 'gear') {
     return pointInGearOuter(shape, x, y) && getGearBoreSignedDistance(shape, x, y) >= 0;
   }
+  if (shape.type === 'rack') {
+    return pointInRackGear(shape, x, y);
+  }
 
   return x >= shape.x && x <= shape.x + shape.w && y >= shape.y && y <= shape.y + shape.h;
 }
@@ -847,6 +916,9 @@ function getShapeSignedDistance(shape, x, y) {
       getGearOuterSignedDistance(shape, x, y),
       getGearBoreSignedDistance(shape, x, y),
     );
+  }
+  if (shape.type === 'rack') {
+    return getRackGearSignedDistance(shape, x, y);
   }
 
   const left = shape.x;
@@ -985,6 +1057,9 @@ function getShapePlanRing(shape, circleSegments = CIRCLE_MESH_SEGMENTS) {
   }
   if (shape.type === 'gear') {
     return getGearOutlineRing(shape, Math.max(3, Math.round(circleSegments / 16)));
+  }
+  if (shape.type === 'rack') {
+    return getRackGearOutlineRing(shape);
   }
 
   return [
@@ -1609,8 +1684,17 @@ async function ensureReplicadReady() {
 }
 
 function getReplicadPlaneConfig(shape, face, dimensions) {
-  const centerU = shape.type === 'rect' ? shape.x + shape.w / 2 : shape.x;
-  const centerV = shape.type === 'rect' ? shape.y + shape.h / 2 : shape.y;
+  const rackDimensions = shape.type === 'rack' ? getRackGearDimensions(shape) : null;
+  const centerU = shape.type === 'rect'
+    ? shape.x + shape.w / 2
+    : shape.type === 'rack'
+      ? shape.x + rackDimensions.width / 2
+      : shape.x;
+  const centerV = shape.type === 'rect'
+    ? shape.y + shape.h / 2
+    : shape.type === 'rack'
+      ? shape.y + rackDimensions.height / 2
+      : shape.y;
 
   if (face === 'top') {
     return {
@@ -1658,6 +1742,20 @@ function createReplicadPrism(replicad, shape, face, dimensions) {
       drawing = drawing.cut(replicad.drawCircle(boreRadius));
     }
     return drawing
+      .sketchOnPlane(planeConfig.plane, planeConfig.origin)
+      .extrude(planeConfig.distance);
+  }
+  if (shape.type === 'rack') {
+    const rackDimensions = getRackGearDimensions(shape);
+    const localRack = {
+      ...shape,
+      x: -rackDimensions.width / 2,
+      y: -rackDimensions.height / 2,
+    };
+    const ring = getRackGearOutlineRing(localRack);
+    const pen = replicad.draw(ring[0]);
+    ring.slice(1).forEach((point) => pen.lineTo(point));
+    return pen.close()
       .sketchOnPlane(planeConfig.plane, planeConfig.origin)
       .extrude(planeConfig.distance);
   }
@@ -2194,7 +2292,7 @@ function App() {
           const nextShape = { ...shape, ...patch };
           const face = normalizeFace(nextShape.face);
           const constraint = getLockedFaceConstraint(current, face);
-          if (nextShape.type === 'gear') {
+          if (nextShape.type === 'gear' || nextShape.type === 'rack') {
             return constrainShape(
               nextShape,
               hasAreaConstraint(constraint)
@@ -2231,7 +2329,9 @@ function App() {
           ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add', face }
           : type === 'circle'
             ? { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face }
-            : { id, type: 'gear', x: 45, y: 45, module: 1, teeth: 24, bore: 6, mode: 'add', face };
+            : type === 'gear'
+              ? { id, type: 'gear', x: 45, y: 45, module: 1, teeth: 24, bore: 6, mode: 'add', face }
+              : { id, type: 'rack', x: 20, y: 45, module: 1, teeth: 20, height: 10, mode: 'add', face };
       const constraint = getLockedFaceConstraint(current, face);
       const shape = shapeBase.mode !== 'cut' && hasAreaConstraint(constraint)
         ? constrainShape(shapeBase, constraint)
@@ -2964,6 +3064,7 @@ function App() {
               <button type="button" onClick={() => addShape('rect')}>+四角</button>
               <button type="button" onClick={() => addShape('circle')}>+円</button>
               <button type="button" onClick={() => addShape('gear')}>+ギヤ</button>
+              <button type="button" onClick={() => addShape('rack')}>+ラック</button>
             </div>
           </header>
         ) : null}
@@ -4198,7 +4299,7 @@ function OutputPanel({
                 value={pastedJson}
                 rows="10"
                 spellCheck="false"
-                placeholder='{"schemaVersion": 2, ...}'
+                placeholder='{"schemaVersion": 3, ...}'
                 onChange={(event) => setPastedJson(event.target.value)}
               />
             </label>
@@ -4322,6 +4423,7 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       <h2>操作</h2>
       <ul>
         <li>「+ギヤ」では20度圧力角の平歯車を追加し、モジュール・歯数・中央穴径を調整できます。</li>
+        <li>「+ラック」では20度圧力角のラックギヤを追加し、モジュール・歯数・歯先からの全高を調整できます。</li>
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
         <li>面をダブルタップすると、その面だけを拡大表示します。もう一度ダブルタップすると3面図へ戻ります。</li>
@@ -4606,6 +4708,19 @@ function getShapeBounds2D(shape) {
       height: outerRadius * 2,
       centerX: shape.x,
       centerY: shape.y,
+    };
+  }
+  if (shape.type === 'rack') {
+    const dimensions = getRackGearDimensions(shape);
+    return {
+      minX: shape.x,
+      maxX: shape.x + dimensions.width,
+      minY: shape.y,
+      maxY: shape.y + dimensions.height,
+      width: dimensions.width,
+      height: dimensions.height,
+      centerX: shape.x + dimensions.width / 2,
+      centerY: shape.y + dimensions.height / 2,
     };
   }
 
@@ -4963,6 +5078,9 @@ function MaskShape({ shape }) {
       </>
     );
   }
+  if (shape.type === 'rack') {
+    return <path d={ringToSvgPath(getRackGearOutlineRing(shape))} fill={fill} />;
+  }
 
   return (
     <rect
@@ -4998,6 +5116,9 @@ function FinalOutline({ shape }) {
         ) : null}
       </>
     );
+  }
+  if (shape.type === 'rack') {
+    return <path className={className} d={ringToSvgPath(getRackGearOutlineRing(shape))} />;
   }
 
   return (
@@ -5046,6 +5167,16 @@ function ShapePreview({ shape, selected, onSelect }) {
       />
     );
   }
+  if (shape.type === 'rack') {
+    return (
+      <path
+        className={className}
+        d={ringToSvgPath(getRackGearOutlineRing(shape))}
+        onClick={handleSelect}
+        onDoubleClick={handleDoubleClick}
+      />
+    );
+  }
 
   return (
     <rect
@@ -5087,8 +5218,8 @@ function ShapeEditor({
           value={shape.mode}
           onChange={(event) => onChange({ mode: event.target.value })}
           aria-label={`${getShapeLabel(shape)} operation`}
-          disabled={shape.type === 'gear'}
-          title={shape.type === 'gear' ? 'ギヤはadd専用です' : undefined}
+          disabled={shape.type === 'gear' || shape.type === 'rack'}
+          title={shape.type === 'gear' || shape.type === 'rack' ? 'ギヤ形状はadd専用です' : undefined}
         >
           <option value="add">add</option>
           <option value="cut">cut</option>
@@ -5114,7 +5245,7 @@ function ShapeEditor({
         </div>
       </header>
 
-      <div className={`shape-control-grid ${shape.type === 'gear' ? 'gear-controls' : ''}`}>
+      <div className={`shape-control-grid ${shape.type === 'gear' || shape.type === 'rack' ? 'gear-controls' : ''}`}>
         <ControlField
           axis="x"
           label="X"
@@ -5163,7 +5294,7 @@ function ShapeEditor({
             />
             <div className="control-field empty" aria-hidden="true" />
           </>
-        ) : (
+        ) : shape.type === 'gear' ? (
           <>
             <ControlField
               axis="x"
@@ -5189,6 +5320,36 @@ function ShapeEditor({
               min={limits.bore.min}
               max={limits.bore.max}
               onChange={(bore) => onChange({ bore })}
+            />
+          </>
+        ) : (
+          <>
+            <ControlField
+              axis="x"
+              label="M"
+              value={shape.module}
+              min={limits.module.min}
+              max={limits.module.max}
+              step={0.5}
+              onChange={(moduleValue) => onChange({ module: moduleValue })}
+            />
+            <ControlField
+              axis="x"
+              label="歯数"
+              value={shape.teeth}
+              min={limits.teeth.min}
+              max={limits.teeth.max}
+              step={1}
+              onChange={(teeth) => onChange({ teeth: Math.round(teeth) })}
+            />
+            <ControlField
+              axis="y"
+              label="歯先高"
+              value={shape.height}
+              min={limits.height.min}
+              max={limits.height.max}
+              step={1}
+              onChange={(height) => onChange({ height: Math.round(height) })}
             />
           </>
         )}
