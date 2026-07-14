@@ -66,8 +66,8 @@ export const AI_MODEL_JSON_PROMPT = [
   '- gearは通常の20度圧力角の平歯車で、modeはaddだけを指定してください。',
   '- gearのmoduleは0.5〜5、teethは8〜80の整数、boreは0以上で歯底径より小さくしてください。',
   '- rackは通常の20度圧力角のラックギヤで、modeはaddだけを指定してください。',
-  '- rackのmoduleは0.5〜5、teethは1〜80の整数、heightは整数でmodule×2.25以上にしてください。',
-  '- rackの最小幅はmodule×π×teethを小数第1位へ丸めた値です。widthは最小幅以上120以下で指定でき、余長は終端側の歯底ランドとして追加されます。',
+  '- rackのmoduleは0.5〜5、teethは1〜80の整数、heightは小数第1位まででmodule×2.25以上にしてください。',
+  '- rackの最小幅はmodule×π×teethを小数第1位へ丸めた値です。widthの余長は1歯分の円ピッチ未満だけ許可され、終端側の歯底ランドとして追加されます。それ以上広げる場合はteethを増やすかrectを追加してください。',
   '- rackのrotationは0、90、180、270のいずれかにしてください。',
   '- internalGearは通常の20度圧力角の内歯車で、modeはaddだけを指定してください。',
   '- internalGearのmoduleは0.5〜5、teethは34〜120の整数にしてください。',
@@ -235,12 +235,12 @@ function validateShape(shape, index, ids) {
     if (!Number.isInteger(shape.teeth) || shape.teeth < RACK_TEETH_MIN || shape.teeth > RACK_TEETH_MAX) {
       throw new ModelJsonError(`${path}.teeth は${RACK_TEETH_MIN}〜${RACK_TEETH_MAX}の整数である必要があります。`);
     }
-    const { minimumHeight, profileWidth } = getRackGearDimensions(shape);
-    if (shape.width < profileWidth - 0.001 || shape.width > 120) {
-      throw new ModelJsonError(`${path}.width は${profileWidth}〜120である必要があります。`);
+    const { minimumHeight, profileWidth, maximumWidth } = getRackGearDimensions(shape);
+    if (shape.width < profileWidth - 0.001 || shape.width > maximumWidth + 0.001) {
+      throw new ModelJsonError(`${path}.width は${profileWidth}〜${maximumWidth}（余長1歯未満）である必要があります。`);
     }
-    if (!Number.isInteger(shape.height) || shape.height < minimumHeight || shape.height > RACK_HEIGHT_MAX) {
-      throw new ModelJsonError(`${path}.height は${minimumHeight}〜${RACK_HEIGHT_MAX}の整数である必要があります。`);
+    if (shape.height < minimumHeight || shape.height > RACK_HEIGHT_MAX) {
+      throw new ModelJsonError(`${path}.height は${minimumHeight}〜${RACK_HEIGHT_MAX}である必要があります。`);
     }
     if (normalizeRackRotation(shape.rotation) !== shape.rotation) {
       throw new ModelJsonError(`${path}.rotation は0、90、180、270のいずれかである必要があります。`);

@@ -67,7 +67,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-19';
+const APP_VERSION = 'proto-2026-06-02-20';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -706,14 +706,14 @@ function constrainShapeToConstraint(shape, constraint) {
     const moduleValue = clampValue(shape.module, GEAR_MODULE_MIN, Math.max(GEAR_MODULE_MIN, maximumModule));
     const provisional = getRackGearDimensions({ ...shape, teeth, module: moduleValue, rotation });
     const height = clampValue(
-      Math.round(shape.height),
+      roundToModelPrecision(shape.height),
       provisional.minimumHeight,
-      Math.max(provisional.minimumHeight, Math.floor(availableRackHeight)),
+      Math.max(provisional.minimumHeight, floorToModelPrecision(availableRackHeight)),
     );
     const width = clampValue(
       roundToModelPrecision(shape.width ?? provisional.profileWidth),
       provisional.profileWidth,
-      floorToModelPrecision(availableRackWidth),
+      Math.min(provisional.maximumWidth, floorToModelPrecision(availableRackWidth)),
     );
     const constrainedRack = { ...shape, teeth, module: moduleValue, height, width, rotation };
     const dimensions = getRackGearDimensions(constrainedRack);
@@ -847,7 +847,10 @@ function getShapeControlLimits(shape, constraint, locked) {
       y: { min: fullConstraint.minY, max: Math.max(fullConstraint.minY, fullConstraint.maxY - dimensions.boundsHeight) },
       width: {
         min: dimensions.profileWidth,
-        max: Math.max(dimensions.profileWidth, floorToModelPrecision(availableRackWidth)),
+        max: Math.max(
+          dimensions.profileWidth,
+          Math.min(dimensions.maximumWidth, floorToModelPrecision(availableRackWidth)),
+        ),
       },
       module: {
         min: GEAR_MODULE_MIN,
@@ -867,7 +870,10 @@ function getShapeControlLimits(shape, constraint, locked) {
       },
       height: {
         min: dimensions.minimumHeight,
-        max: Math.max(dimensions.minimumHeight, Math.min(RACK_HEIGHT_MAX, Math.floor(availableRackHeight))),
+        max: Math.max(
+          dimensions.minimumHeight,
+          Math.min(RACK_HEIGHT_MAX, floorToModelPrecision(availableRackHeight)),
+        ),
       },
     };
   }
@@ -1235,7 +1241,15 @@ function normalizePlanRing(ring) {
   return normalized;
 }
 
+const FACE_BOOLEAN_POLYGON_CACHE_MAX = 48;
+const FACE_BOOLEAN_POLYGON_CACHE = new Map();
+
 function getFaceBooleanPolygons(faceShapes, circleSegments = CIRCLE_MESH_SEGMENTS) {
+  const cacheKey = `${circleSegments}:${JSON.stringify(faceShapes)}`;
+  const cached = FACE_BOOLEAN_POLYGON_CACHE.get(cacheKey);
+  if (cached) {
+    return cached;
+  }
   const solid = faceShapes.reduce((result, shape) => {
     const shapePolygon = getShapeMultiPolygon(shape, circleSegments);
     if (shape.mode === 'add') {
@@ -1258,7 +1272,12 @@ function getFaceBooleanPolygons(faceShapes, circleSegments = CIRCLE_MESH_SEGMENT
     return normalizeMultiPolygon(polygonClipping.difference(result, shapePolygon));
   }, []);
 
-  return normalizeMultiPolygon(solid);
+  const normalized = normalizeMultiPolygon(solid);
+  if (FACE_BOOLEAN_POLYGON_CACHE.size >= FACE_BOOLEAN_POLYGON_CACHE_MAX) {
+    FACE_BOOLEAN_POLYGON_CACHE.delete(FACE_BOOLEAN_POLYGON_CACHE.keys().next().value);
+  }
+  FACE_BOOLEAN_POLYGON_CACHE.set(cacheKey, normalized);
+  return normalized;
 }
 
 function getBooleanPolygonBounds(polygons) {
@@ -5571,7 +5590,7 @@ function ShapeEditor({
               min={limits.height.min}
               max={limits.height.max}
               step={1}
-              onChange={(height) => onChange({ height: Math.round(height) })}
+              onChange={(height) => onChange({ height })}
             />
             <div className="rack-rotation-controls" aria-label={`ラック回転 ${rackRotation}度`}>
               <span>回転</span>

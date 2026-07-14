@@ -45,6 +45,22 @@ test('extra rack width extends only the terminal tooth-root land', () => {
   assert.equal(Math.max(...ring.map(([x]) => x)), 84.3);
 });
 
+test('rack width extension is limited to less than one tooth pitch', () => {
+  const widened = getRackGearDimensions({ ...rack, teeth: 5, width: 100 });
+
+  assert.equal(widened.profileWidth, 15.7);
+  assert.equal(widened.maximumExtension, 3.1);
+  assert.equal(widened.maximumWidth, 18.8);
+  assert.equal(widened.width, 18.8);
+  assert.ok(widened.width - widened.profileWidth < widened.pitch);
+});
+
+test('rack height retains a decimal lock boundary', () => {
+  const dimensions = getRackGearDimensions({ ...rack, height: 10.3 });
+  assert.equal(dimensions.height, 10.3);
+  assert.equal(dimensions.boundsHeight, 10.3);
+});
+
 test('rack rotation keeps x and y as the rotated bounding-box origin', () => {
   const rotated = { ...rack, width: 64.3, rotation: 90 };
   const dimensions = getRackGearDimensions(rotated);

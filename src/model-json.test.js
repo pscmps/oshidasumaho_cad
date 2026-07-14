@@ -128,7 +128,7 @@ test('invalid gear parameters are rejected', () => {
   );
 });
 
-test('rack requires integer teeth, integer total height, and add mode', () => {
+test('rack requires integer teeth, bounded dimensions, and add mode', () => {
   const rack = model.shapes.find((shape) => shape.type === 'rack');
   assert.throws(
     () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...rack, teeth: 20.5 }] })),
@@ -143,6 +143,10 @@ test('rack requires integer teeth, integer total height, and add mode', () => {
     ModelJsonError,
   );
   assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...rack, width: 100 }] })),
+    ModelJsonError,
+  );
+  assert.throws(
     () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...rack, rotation: 45 }] })),
     ModelJsonError,
   );
@@ -150,6 +154,11 @@ test('rack requires integer teeth, integer total height, and add mode', () => {
     () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...rack, mode: 'cut' }] })),
     ModelJsonError,
   );
+  const decimalHeight = parseModelJson(JSON.stringify({
+    ...model,
+    shapes: [{ ...rack, height: 10.3 }],
+  }));
+  assert.equal(decimalHeight.shapes[0].height, 10.3);
 });
 
 test('version 4 racks gain nominal width and zero rotation', () => {

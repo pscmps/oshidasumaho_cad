@@ -1,5 +1,5 @@
 import { GEAR_MODULE_MAX, GEAR_MODULE_MIN, GEAR_PRESSURE_ANGLE_DEG } from './gear-geometry.js';
-import { roundToModelPrecision } from './numeric-precision.js';
+import { floorToModelPrecision, roundToModelPrecision } from './numeric-precision.js';
 
 export const RACK_TEETH_MIN = 1;
 export const RACK_TEETH_MAX = 80;
@@ -22,19 +22,21 @@ export function getRackGearDimensions(shape) {
   const pitch = Math.PI * moduleValue;
   const nominalWidth = pitch * teeth;
   const profileWidth = roundToModelPrecision(nominalWidth);
+  const maximumExtension = floorToModelPrecision(pitch);
+  const maximumWidth = Math.min(120, roundToModelPrecision(profileWidth + maximumExtension));
   const addendum = moduleValue;
   const dedendum = 1.25 * moduleValue;
   const toothDepth = addendum + dedendum;
   const minimumHeight = Math.ceil(toothDepth);
   const height = clamp(
-    Math.round(Number(shape.height) || Math.max(10, minimumHeight)),
+    roundToModelPrecision(Number(shape.height) || Math.max(10, minimumHeight)),
     minimumHeight,
     RACK_HEIGHT_MAX,
   );
   const width = clamp(
     roundToModelPrecision(Number(shape.width) || profileWidth),
     profileWidth,
-    120,
+    maximumWidth,
   );
   const rotation = normalizeRackRotation(shape.rotation);
   const vertical = rotation === 90 || rotation === 270;
@@ -50,6 +52,8 @@ export function getRackGearDimensions(shape) {
     pitch,
     nominalWidth,
     profileWidth,
+    maximumExtension,
+    maximumWidth,
     width,
     rotation,
     boundsWidth: vertical ? height : width,
