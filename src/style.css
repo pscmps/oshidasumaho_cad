@@ -413,6 +413,50 @@ input[type="range"] {
   font-weight: 900;
 }
 
+.projection-readiness {
+  pointer-events: none;
+  color: #94a3b8;
+}
+
+.projection-readiness.pass {
+  color: #15803d;
+}
+
+.projection-readiness.fail {
+  color: #dc2626;
+}
+
+.projection-readiness line,
+.projection-readiness polyline {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.25;
+  vector-effect: non-scaling-stroke;
+}
+
+.projection-readiness.waiting line,
+.projection-readiness.waiting polyline {
+  stroke-dasharray: 2.4 2.4;
+}
+
+.projection-readiness-pass {
+  fill: #ffffff;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+
+.projection-readiness-fail line {
+  stroke-width: 1.8;
+}
+
+.projection-readiness-waiting {
+  fill: currentColor;
+  stroke: none;
+}
+
 .area-lock-button {
   cursor: pointer;
   outline: none;

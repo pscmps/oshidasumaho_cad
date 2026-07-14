@@ -25,6 +25,110 @@ function getAxisRange(bounds, axis) {
     : { min: bounds.minY, max: bounds.maxY };
 }
 
+function isRangeWithin(actual, expected, tolerance) {
+  return actual.min >= expected.min - tolerance
+    && actual.max <= expected.max + tolerance;
+}
+
+function getFaceAxisReadiness(
+  pair,
+  target,
+  counterpart,
+  faceBounds,
+  areaLocks,
+  areaLockConstraints,
+  tolerance,
+) {
+  const targetBounds = faceBounds?.[target.face];
+  const counterpartBounds = faceBounds?.[counterpart.face];
+  const targetConstraint = areaLocks?.[target.face]
+    ? areaLockConstraints?.[target.face]
+    : null;
+  const counterpartConstraint = areaLocks?.[counterpart.face]
+    ? areaLockConstraints?.[counterpart.face]
+    : null;
+
+  if (!targetBounds) {
+    return {
+      dimension: pair.dimension,
+      counterpartFace: counterpart.face,
+      status: 'fail',
+      reason: 'missing-shape',
+      actualRange: null,
+      expectedRange: counterpartConstraint
+        ? getAxisRange(counterpartConstraint, counterpart.axis)
+        : null,
+    };
+  }
+
+  if (counterpartConstraint) {
+    const actualRange = getAxisRange(targetBounds, target.axis);
+    const expectedRange = getAxisRange(counterpartConstraint, counterpart.axis);
+    return {
+      dimension: pair.dimension,
+      counterpartFace: counterpart.face,
+      status: isRangeWithin(actualRange, expectedRange, tolerance) ? 'pass' : 'fail',
+      reason: 'locked-range',
+      actualRange,
+      expectedRange,
+    };
+  }
+
+  if (!counterpartBounds) {
+    return {
+      dimension: pair.dimension,
+      counterpartFace: counterpart.face,
+      status: 'waiting',
+      reason: 'counterpart-missing',
+      actualRange: getAxisRange(targetConstraint ?? targetBounds, target.axis),
+      expectedRange: null,
+    };
+  }
+
+  const actualRange = getAxisRange(counterpartBounds, counterpart.axis);
+  const expectedRange = getAxisRange(targetConstraint ?? targetBounds, target.axis);
+  return {
+    dimension: pair.dimension,
+    counterpartFace: counterpart.face,
+    status: isRangeWithin(actualRange, expectedRange, tolerance) ? 'pass' : 'fail',
+    reason: 'prospective-lock',
+    actualRange,
+    expectedRange,
+  };
+}
+
+export function getProjectionReadiness(
+  faceBounds,
+  areaLocks = {},
+  areaLockConstraints = {},
+  tolerance = 0.001,
+) {
+  const readiness = { top: {}, front: {}, right: {} };
+
+  PROJECTION_RANGE_PAIRS.forEach((pair) => {
+    readiness[pair.first.face][pair.first.axis] = getFaceAxisReadiness(
+      pair,
+      pair.first,
+      pair.second,
+      faceBounds,
+      areaLocks,
+      areaLockConstraints,
+      tolerance,
+    );
+    readiness[pair.second.face][pair.second.axis] = getFaceAxisReadiness(
+      pair,
+      pair.second,
+      pair.first,
+      faceBounds,
+      areaLocks,
+      areaLockConstraints,
+      tolerance,
+    );
+  });
+
+  return readiness;
+}
+
 export function diagnoseProjectionConsistency(faceBounds, tolerance = 0.001) {
   const missingFaces = ['top', 'front', 'right'].filter((face) => !faceBounds?.[face]);
   const mismatches = PROJECTION_RANGE_PAIRS.flatMap((pair) => {

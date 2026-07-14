@@ -14,6 +14,7 @@ import { parseUrlAutomationRequest } from './url-automation.js';
 import {
   createLockedDocumentFromBounds,
   diagnoseProjectionConsistency,
+  getProjectionReadiness,
 } from './projection-consistency.js';
 import './style.css';
 
@@ -21,7 +22,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-10';
+const APP_VERSION = 'proto-2026-06-02-11';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -2991,6 +2992,10 @@ function Viewer({
     () => getAllDisplayConstraints({ ...document, areaLocks, areaLockConstraints }, faceBounds),
     [document, areaLocks, areaLockConstraints, faceBounds],
   );
+  const projectionReadiness = useMemo(
+    () => getProjectionReadiness(faceBounds, areaLocks, areaLockConstraints),
+    [faceBounds, areaLocks, areaLockConstraints],
+  );
   return (
     <div className="viewer-frame">
       <div className="viewer-toolbar">
@@ -3022,7 +3027,7 @@ function Viewer({
           ) : null}
         </div>
       </div>
-      <svg className="tri-view" viewBox="0 0 378 268" role="img" aria-label="3面配置図">
+      <svg className="tri-view" viewBox="0 0 386 272" role="img" aria-label="3面配置図">
         <defs>
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
@@ -3062,6 +3067,7 @@ function Viewer({
                 full={Boolean(previewFace)}
                 shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
                 constraint={faceConstraints[face]}
+                axisReadiness={projectionReadiness[face]}
                 showAllDimensions={document.showAllDimensions}
                 selectedId={selectedId}
                 onSelect={onSelect}
@@ -4188,6 +4194,7 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       <ul>
         <li>ロックは、その面の外形範囲を他の面へ反映して、3Dとして矛盾しない配置範囲を固定する機能です。</li>
         <li>薄く表示されたロックボタンもタップできます。ロックできない場合は、幅・奥行・高さの不一致範囲を下に表示します。</li>
+        <li>各面の下辺と右辺の矢印は共有寸法の状態です。緑の○は許容範囲内、赤の×は範囲外、灰色の点は比較する面の図形待ちを示します。</li>
         <li>ロックできない時は、他の面の図形が灰色の禁止エリアにはみ出していないか確認してください。</li>
         <li>共有範囲は、上面X＝正面X、上面Y＝右側面X、正面Y＝右側面Yです。サイズだけでなく開始・終了位置も合わせてください。</li>
         <li>JSONのextrude値は互換用で、奥行の指定には使われません。奥行は上面Yと右側面Xで決まります。</li>
@@ -4204,7 +4211,7 @@ function getAreaLockTransform(face, full) {
     return 'translate(48 22)';
   }
   if (face === 'right') {
-    return 'translate(326 190)';
+    return 'translate(332 190)';
   }
   if (face === 'front') {
     return 'translate(6 190)';
@@ -4565,6 +4572,7 @@ function FacePlan({
   full,
   shapes,
   constraint,
+  axisReadiness,
   showAllDimensions,
   selectedId,
   onSelect,
@@ -4622,6 +4630,69 @@ function FacePlan({
         <ShapeDimensions key={`dimensions-${shape.id}`} shape={shape} outerBounds={outerBounds} />
       ))}
       <text className="face-plan-label" x="60" y="112">{FACE_LABELS[face]}</text>
+      <ProjectionReadinessIndicator axis="x" readiness={axisReadiness?.x} />
+      <ProjectionReadinessIndicator axis="y" readiness={axisReadiness?.y} />
+    </g>
+  );
+}
+
+function getProjectionReadinessLabel(readiness) {
+  const dimension = DIMENSION_LABELS[readiness.dimension];
+  const counterpart = FACE_LABELS[readiness.counterpartFace];
+  if (readiness.status === 'pass') {
+    return `${dimension}: ${counterpart}との許容範囲内です`;
+  }
+  if (readiness.reason === 'missing-shape') {
+    return `${dimension}: この面にadd外形がありません`;
+  }
+  if (readiness.status === 'fail') {
+    return `${dimension}: ${counterpart}の許容範囲外です`;
+  }
+  return `${dimension}: ${counterpart}の図形待ちです`;
+}
+
+function ProjectionReadinessIndicator({ axis, readiness }) {
+  if (!readiness) {
+    return null;
+  }
+
+  const horizontal = axis === 'x';
+  const statusX = horizontal ? 108 : 124;
+  const statusY = horizontal ? 124 : 108;
+  const label = getProjectionReadinessLabel(readiness);
+
+  return (
+    <g
+      className={`projection-readiness ${horizontal ? 'horizontal' : 'vertical'} ${readiness.status}`}
+      role="img"
+      aria-label={label}
+    >
+      <title>{label}</title>
+      {horizontal ? (
+        <>
+          <line x1="10" y1="124" x2="96" y2="124" />
+          <polyline points="14,121 10,124 14,127" />
+          <polyline points="92,121 96,124 92,127" />
+        </>
+      ) : (
+        <>
+          <line x1="124" y1="10" x2="124" y2="96" />
+          <polyline points="121,14 124,10 127,14" />
+          <polyline points="121,92 124,96 127,92" />
+        </>
+      )}
+      {readiness.status === 'pass' ? (
+        <circle className="projection-readiness-pass" cx={statusX} cy={statusY} r="4.2" />
+      ) : null}
+      {readiness.status === 'fail' ? (
+        <g className="projection-readiness-fail">
+          <line x1={statusX - 3.2} y1={statusY - 3.2} x2={statusX + 3.2} y2={statusY + 3.2} />
+          <line x1={statusX + 3.2} y1={statusY - 3.2} x2={statusX - 3.2} y2={statusY + 3.2} />
+        </g>
+      ) : null}
+      {readiness.status === 'waiting' ? (
+        <circle className="projection-readiness-waiting" cx={statusX} cy={statusY} r="2.3" />
+      ) : null}
     </g>
   );
 }
