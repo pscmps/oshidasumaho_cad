@@ -23,7 +23,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-12';
+const APP_VERSION = 'proto-2026-06-02-13';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -3068,7 +3068,7 @@ function Viewer({
           ) : null}
         </div>
       </div>
-      <svg className="tri-view" viewBox="0 0 386 272" role="img" aria-label="3面配置図">
+      <svg className="tri-view" viewBox="0 0 386 280" role="img" aria-label="3面配置図">
         <defs>
           <pattern id="grid" width="10" height="10" patternUnits="userSpaceOnUse">
             <path d="M 10 0 L 0 0 0 10" fill="none" stroke="#d8dee9" strokeWidth="0.35" />
@@ -4235,7 +4235,7 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       <ul>
         <li>ロックは、その面の外形範囲を他の面へ反映して、3Dとして矛盾しない配置範囲を固定する機能です。</li>
         <li>薄く表示されたロックボタンもタップできます。ロックできない場合は、幅・奥行・高さの不一致範囲を下に表示します。</li>
-        <li>未ロック面に出る下辺と右辺の矢印は、ロック済み面と共有する寸法です。両端が一致すると緑の○、一致していない間は赤の×になります。ロック後は消えます。</li>
+        <li>未ロック面の薄い灰色矢印は、ロック済み面が決めた固定範囲です。現在の図形範囲は赤矢印で重なり、両端が一致すると緑の矢印と○になります。図形がない時は灰色矢印だけ表示し、ロック後は消えます。</li>
         <li>ロックできない時は、他の面の図形が灰色の禁止エリアにはみ出していないか確認してください。</li>
         <li>共有範囲は、上面X＝正面X、上面Y＝右側面X、正面Y＝右側面Yです。サイズだけでなく開始・終了位置も合わせてください。</li>
         <li>JSONのextrude値は互換用で、奥行の指定には使われません。奥行は上面Yと右側面Xで決まります。</li>
@@ -4702,9 +4702,15 @@ function ProjectionReadinessIndicator({ axis, readiness }) {
   }
 
   const horizontal = axis === 'x';
-  const statusX = horizontal ? 108 : 124;
-  const statusY = horizontal ? 124 : 108;
+  const markerValue = clampValue(
+    readiness.actualRange?.max ?? readiness.expectedRange?.max ?? 60,
+    4,
+    116,
+  );
+  const statusX = horizontal ? markerValue : 129;
+  const statusY = horizontal ? 129 : markerValue;
   const label = getProjectionReadinessLabel(readiness);
+  const showActual = Boolean(readiness.actualRange);
 
   return (
     <g
@@ -4713,28 +4719,46 @@ function ProjectionReadinessIndicator({ axis, readiness }) {
       aria-label={label}
     >
       <title>{label}</title>
-      {horizontal ? (
-        <>
-          <line x1="10" y1="124" x2="96" y2="124" />
-          <polyline points="14,121 10,124 14,127" />
-          <polyline points="92,121 96,124 92,127" />
-        </>
-      ) : (
-        <>
-          <line x1="124" y1="10" x2="124" y2="96" />
-          <polyline points="121,14 124,10 127,14" />
-          <polyline points="121,92 124,96 127,92" />
-        </>
-      )}
-      {readiness.status === 'pass' ? (
+      <ProjectionRangeArrow axis={axis} range={readiness.expectedRange} kind="expected" />
+      {showActual ? (
+        <ProjectionRangeArrow axis={axis} range={readiness.actualRange} kind={`actual ${readiness.status}`} />
+      ) : null}
+      {showActual && readiness.status === 'pass' ? (
         <circle className="projection-readiness-pass" cx={statusX} cy={statusY} r="4.2" />
       ) : null}
-      {readiness.status === 'fail' ? (
+      {showActual && readiness.status === 'fail' ? (
         <g className="projection-readiness-fail">
           <line x1={statusX - 3.2} y1={statusY - 3.2} x2={statusX + 3.2} y2={statusY + 3.2} />
           <line x1={statusX + 3.2} y1={statusY - 3.2} x2={statusX - 3.2} y2={statusY + 3.2} />
         </g>
       ) : null}
+    </g>
+  );
+}
+
+function ProjectionRangeArrow({ axis, range, kind }) {
+  if (!range) {
+    return null;
+  }
+
+  const min = clampValue(range.min, 0, 120);
+  const max = clampValue(range.max, 0, 120);
+  const headSize = Math.min(3, Math.max(1, (max - min) / 3));
+  if (axis === 'x') {
+    return (
+      <g className={`projection-range-arrow ${kind}`}>
+        <line x1={min} y1="124" x2={max} y2="124" />
+        <polyline points={`${min + headSize},${124 - headSize} ${min},124 ${min + headSize},${124 + headSize}`} />
+        <polyline points={`${max - headSize},${124 - headSize} ${max},124 ${max - headSize},${124 + headSize}`} />
+      </g>
+    );
+  }
+
+  return (
+    <g className={`projection-range-arrow ${kind}`}>
+      <line x1="124" y1={min} x2="124" y2={max} />
+      <polyline points={`${124 - headSize},${min + headSize} 124,${min} ${124 + headSize},${min + headSize}`} />
+      <polyline points={`${124 - headSize},${max - headSize} 124,${max} ${124 + headSize},${max - headSize}`} />
     </g>
   );
 }

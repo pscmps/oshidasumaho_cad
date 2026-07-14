@@ -415,19 +415,22 @@ input[type="range"] {
 
 .projection-readiness {
   pointer-events: none;
-  color: #94a3b8;
 }
 
-.projection-readiness.pass {
+.projection-range-arrow {
+  color: #cbd5e1;
+}
+
+.projection-range-arrow.actual.pass {
   color: #15803d;
 }
 
-.projection-readiness.fail {
+.projection-range-arrow.actual.fail {
   color: #dc2626;
 }
 
-.projection-readiness line,
-.projection-readiness polyline {
+.projection-range-arrow line,
+.projection-range-arrow polyline {
   fill: none;
   stroke: currentColor;
   stroke-linecap: round;
@@ -436,14 +439,25 @@ input[type="range"] {
   vector-effect: non-scaling-stroke;
 }
 
+.projection-range-arrow.expected line,
+.projection-range-arrow.expected polyline {
+  stroke-width: 3.2;
+}
+
+.projection-range-arrow.actual line,
+.projection-range-arrow.actual polyline {
+  stroke-width: 1.7;
+}
+
 .projection-readiness-pass {
   fill: #ffffff;
-  stroke: currentColor;
+  stroke: #15803d;
   stroke-width: 1.8;
   vector-effect: non-scaling-stroke;
 }
 
 .projection-readiness-fail line {
+  stroke: #dc2626;
   stroke-width: 1.8;
 }
 
