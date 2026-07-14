@@ -17,13 +17,26 @@ import {
   getProjectionReadiness,
   projectionRangesMatch,
 } from './projection-consistency.js';
+import {
+  GEAR_MODULE_MAX,
+  GEAR_MODULE_MIN,
+  GEAR_TEETH_MAX,
+  GEAR_TEETH_MIN,
+  getGearBoreMax,
+  getGearBoreRing,
+  getGearBoreSignedDistance,
+  getGearOuterSignedDistance,
+  getGearOutlineRing,
+  getGearRadii,
+  pointInGearOuter,
+} from './gear-geometry.js';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-13';
+const APP_VERSION = 'proto-2026-06-02-14';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -247,7 +260,8 @@ function getNextId(shapes) {
 }
 
 function getShapeLabel(shape) {
-  return `${shape.type === 'rect' ? 'Rect' : 'Circle'} ${shape.id}`;
+  const typeLabel = shape.type === 'rect' ? 'Rect' : shape.type === 'circle' ? 'Circle' : 'Gear';
+  return `${typeLabel} ${shape.id}`;
 }
 
 function clampRangeValue(value) {
@@ -569,6 +583,24 @@ function constrainShape(shape, constraint) {
     };
   }
 
+  if (shape.type === 'gear') {
+    const teeth = clampValue(Math.round(shape.teeth), GEAR_TEETH_MIN, GEAR_TEETH_MAX);
+    const maximumModule = Math.min(
+      GEAR_MODULE_MAX,
+      (constraint.maxX - constraint.minX) / (teeth + 2),
+      (constraint.maxY - constraint.minY) / (teeth + 2),
+    );
+    const moduleValue = clampValue(shape.module, GEAR_MODULE_MIN, Math.max(GEAR_MODULE_MIN, maximumModule));
+    const constrainedGear = { ...shape, teeth, module: moduleValue };
+    const { outerRadius } = getGearRadii(constrainedGear);
+    return {
+      ...constrainedGear,
+      bore: clampValue(shape.bore, 0, getGearBoreMax(constrainedGear)),
+      x: clampValue(shape.x, constraint.minX + outerRadius, constraint.maxX - outerRadius),
+      y: clampValue(shape.y, constraint.minY + outerRadius, constraint.maxY - outerRadius),
+    };
+  }
+
   const w = clampValue(shape.w, 1, Math.max(1, constraint.maxX - constraint.minX));
   const h = clampValue(shape.h, 1, Math.max(1, constraint.maxY - constraint.minY));
   return {
@@ -615,6 +647,35 @@ function getShapeControlLimits(shape, constraint, locked) {
       x: { min: fullConstraint.minX + shape.r, max: fullConstraint.maxX - shape.r },
       y: { min: fullConstraint.minY + shape.r, max: fullConstraint.maxY - shape.r },
       r: { min: 1, max: rMax },
+    };
+  }
+
+  if (shape.type === 'gear') {
+    const { outerRadius } = getGearRadii(shape);
+    const availableRadius = Math.max(
+      GEAR_MODULE_MIN * (GEAR_TEETH_MIN + 2) / 2,
+      Math.min(
+        shape.x - fullConstraint.minX,
+        fullConstraint.maxX - shape.x,
+        shape.y - fullConstraint.minY,
+        fullConstraint.maxY - shape.y,
+      ),
+    );
+    return {
+      x: { min: fullConstraint.minX + outerRadius, max: fullConstraint.maxX - outerRadius },
+      y: { min: fullConstraint.minY + outerRadius, max: fullConstraint.maxY - outerRadius },
+      module: {
+        min: GEAR_MODULE_MIN,
+        max: Math.max(GEAR_MODULE_MIN, Math.min(GEAR_MODULE_MAX, (availableRadius * 2) / (shape.teeth + 2))),
+      },
+      teeth: {
+        min: GEAR_TEETH_MIN,
+        max: Math.max(
+          GEAR_TEETH_MIN,
+          Math.min(GEAR_TEETH_MAX, Math.floor((availableRadius * 2) / shape.module - 2)),
+        ),
+      },
+      bore: { min: 0, max: getGearBoreMax(shape) },
     };
   }
 
@@ -754,6 +815,9 @@ function pointInShape(shape, x, y) {
   if (shape.type === 'circle') {
     return ((x - shape.x) ** 2) + ((y - shape.y) ** 2) <= shape.r ** 2;
   }
+  if (shape.type === 'gear') {
+    return pointInGearOuter(shape, x, y) && getGearBoreSignedDistance(shape, x, y) >= 0;
+  }
 
   return x >= shape.x && x <= shape.x + shape.w && y >= shape.y && y <= shape.y + shape.h;
 }
@@ -761,6 +825,12 @@ function pointInShape(shape, x, y) {
 function pointInFaceSolid(shapes, face, x, y) {
   const faceShapes = shapes.filter((shape) => normalizeFace(shape.face) === face);
   return faceShapes.reduce((solid, shape) => {
+    if (shape.type === 'gear' && shape.mode === 'add') {
+      if (getGearBoreSignedDistance(shape, x, y) < 0) {
+        return false;
+      }
+      return pointInGearOuter(shape, x, y) ? true : solid;
+    }
     if (!pointInShape(shape, x, y)) {
       return solid;
     }
@@ -771,6 +841,12 @@ function pointInFaceSolid(shapes, face, x, y) {
 function getShapeSignedDistance(shape, x, y) {
   if (shape.type === 'circle') {
     return shape.r - Math.hypot(x - shape.x, y - shape.y);
+  }
+  if (shape.type === 'gear') {
+    return Math.min(
+      getGearOuterSignedDistance(shape, x, y),
+      getGearBoreSignedDistance(shape, x, y),
+    );
   }
 
   const left = shape.x;
@@ -788,6 +864,10 @@ function getShapeSignedDistance(shape, x, y) {
 
 function getFaceSignedDistance(faceShapes, x, y) {
   return faceShapes.reduce((distance, shape) => {
+    if (shape.type === 'gear' && shape.mode === 'add') {
+      const withGear = Math.max(distance, getGearOuterSignedDistance(shape, x, y));
+      return Math.min(withGear, getGearBoreSignedDistance(shape, x, y));
+    }
     const shapeDistance = getShapeSignedDistance(shape, x, y);
     if (shape.mode === 'add') {
       return Math.max(distance, shapeDistance);
@@ -903,6 +983,9 @@ function getShapePlanRing(shape, circleSegments = CIRCLE_MESH_SEGMENTS) {
       ];
     });
   }
+  if (shape.type === 'gear') {
+    return getGearOutlineRing(shape, Math.max(3, Math.round(circleSegments / 16)));
+  }
 
   return [
     [shape.x, shape.y],
@@ -932,9 +1015,14 @@ function getFaceBooleanPolygons(faceShapes, circleSegments = CIRCLE_MESH_SEGMENT
   const solid = faceShapes.reduce((result, shape) => {
     const shapePolygon = getShapeMultiPolygon(shape, circleSegments);
     if (shape.mode === 'add') {
-      return normalizeMultiPolygon(
+      const added = normalizeMultiPolygon(
         result.length ? polygonClipping.union(result, shapePolygon) : shapePolygon,
       );
+      if (shape.type === 'gear' && shape.bore > 0) {
+        const borePolygon = [[getGearBoreRing(shape, circleSegments)]];
+        return normalizeMultiPolygon(polygonClipping.difference(added, borePolygon));
+      }
+      return added;
     }
     if (!result.length) {
       return [];
@@ -1521,8 +1609,8 @@ async function ensureReplicadReady() {
 }
 
 function getReplicadPlaneConfig(shape, face, dimensions) {
-  const centerU = shape.type === 'circle' ? shape.x : shape.x + shape.w / 2;
-  const centerV = shape.type === 'circle' ? shape.y : shape.y + shape.h / 2;
+  const centerU = shape.type === 'rect' ? shape.x + shape.w / 2 : shape.x;
+  const centerV = shape.type === 'rect' ? shape.y + shape.h / 2 : shape.y;
 
   if (face === 'top') {
     return {
@@ -1559,6 +1647,20 @@ function getReplicadPlaneConfig(shape, face, dimensions) {
 
 function createReplicadPrism(replicad, shape, face, dimensions) {
   const planeConfig = getReplicadPlaneConfig(shape, face, dimensions);
+  if (shape.type === 'gear') {
+    const localGear = { ...shape, x: 0, y: 0 };
+    const ring = getGearOutlineRing(localGear);
+    const pen = replicad.draw(ring[0]);
+    ring.slice(1).forEach((point) => pen.lineTo(point));
+    let drawing = pen.close();
+    const { boreRadius } = getGearRadii(localGear);
+    if (boreRadius > 0) {
+      drawing = drawing.cut(replicad.drawCircle(boreRadius));
+    }
+    return drawing
+      .sketchOnPlane(planeConfig.plane, planeConfig.origin)
+      .extrude(planeConfig.distance);
+  }
   const sketch = shape.type === 'circle'
     ? replicad.sketchCircle(shape.r, planeConfig)
     : replicad.sketchRectangle(shape.w, shape.h, planeConfig);
@@ -2092,6 +2194,14 @@ function App() {
           const nextShape = { ...shape, ...patch };
           const face = normalizeFace(nextShape.face);
           const constraint = getLockedFaceConstraint(current, face);
+          if (nextShape.type === 'gear') {
+            return constrainShape(
+              nextShape,
+              hasAreaConstraint(constraint)
+                ? constraint
+                : { minX: 0, maxX: 120, minY: 0, maxY: 120 },
+            );
+          }
           if (nextShape.mode === 'cut' || !hasAreaConstraint(constraint)) {
             return nextShape;
           }
@@ -2119,7 +2229,9 @@ function App() {
       const shapeBase =
         type === 'rect'
           ? { id, type: 'rect', x: 18, y: 16, w: 42, h: 28, mode: 'add', face }
-          : { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face };
+          : type === 'circle'
+            ? { id, type: 'circle', x: 44, y: 32, r: 3, mode: 'cut', face }
+            : { id, type: 'gear', x: 45, y: 45, module: 1, teeth: 24, bore: 6, mode: 'add', face };
       const constraint = getLockedFaceConstraint(current, face);
       const shape = shapeBase.mode !== 'cut' && hasAreaConstraint(constraint)
         ? constrainShape(shapeBase, constraint)
@@ -2851,6 +2963,7 @@ function App() {
               </button>
               <button type="button" onClick={() => addShape('rect')}>+四角</button>
               <button type="button" onClick={() => addShape('circle')}>+円</button>
+              <button type="button" onClick={() => addShape('gear')}>+ギヤ</button>
             </div>
           </header>
         ) : null}
@@ -4085,7 +4198,7 @@ function OutputPanel({
                 value={pastedJson}
                 rows="10"
                 spellCheck="false"
-                placeholder='{"schemaVersion": 1, ...}'
+                placeholder='{"schemaVersion": 2, ...}'
                 onChange={(event) => setPastedJson(event.target.value)}
               />
             </label>
@@ -4208,6 +4321,7 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
       </ol>
       <h2>操作</h2>
       <ul>
+        <li>「+ギヤ」では20度圧力角の平歯車を追加し、モジュール・歯数・中央穴径を調整できます。</li>
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
         <li>面をダブルタップすると、その面だけを拡大表示します。もう一度ダブルタップすると3面図へ戻ります。</li>
@@ -4477,6 +4591,19 @@ function getShapeBounds2D(shape) {
       maxY: shape.y + shape.r,
       width: shape.r * 2,
       height: shape.r * 2,
+      centerX: shape.x,
+      centerY: shape.y,
+    };
+  }
+  if (shape.type === 'gear') {
+    const { outerRadius } = getGearRadii(shape);
+    return {
+      minX: shape.x - outerRadius,
+      maxX: shape.x + outerRadius,
+      minY: shape.y - outerRadius,
+      maxY: shape.y + outerRadius,
+      width: outerRadius * 2,
+      height: outerRadius * 2,
       centerX: shape.x,
       centerY: shape.y,
     };
@@ -4798,10 +4925,43 @@ function getOutsideYRects(bounds) {
   ].filter((rect) => rect.height > 0.01);
 }
 
+function ringToSvgPath(ring) {
+  if (!ring.length) {
+    return '';
+  }
+  return `M ${ring.map(([x, y]) => `${x} ${y}`).join(' L ')} Z`;
+}
+
+function getGearBoreSvgPath(shape) {
+  const { boreRadius } = getGearRadii(shape);
+  if (boreRadius <= 0) {
+    return '';
+  }
+  return [
+    `M ${shape.x - boreRadius} ${shape.y}`,
+    `A ${boreRadius} ${boreRadius} 0 1 0 ${shape.x + boreRadius} ${shape.y}`,
+    `A ${boreRadius} ${boreRadius} 0 1 0 ${shape.x - boreRadius} ${shape.y}`,
+    'Z',
+  ].join(' ');
+}
+
+function getGearBodySvgPath(shape) {
+  return `${ringToSvgPath(getGearOutlineRing(shape))} ${getGearBoreSvgPath(shape)}`.trim();
+}
+
 function MaskShape({ shape }) {
   const fill = shape.mode === 'cut' ? 'black' : 'white';
   if (shape.type === 'circle') {
     return <circle cx={shape.x} cy={shape.y} r={shape.r} fill={fill} />;
+  }
+  if (shape.type === 'gear') {
+    const { boreRadius } = getGearRadii(shape);
+    return (
+      <>
+        <path d={ringToSvgPath(getGearOutlineRing(shape))} fill={fill} />
+        {boreRadius > 0 ? <circle cx={shape.x} cy={shape.y} r={boreRadius} fill="black" /> : null}
+      </>
+    );
   }
 
   return (
@@ -4826,6 +4986,17 @@ function FinalOutline({ shape }) {
         cy={shape.y}
         r={shape.r}
       />
+    );
+  }
+  if (shape.type === 'gear') {
+    const { boreRadius } = getGearRadii(shape);
+    return (
+      <>
+        <path className={className} d={ringToSvgPath(getGearOutlineRing(shape))} />
+        {boreRadius > 0 ? (
+          <circle className={className} cx={shape.x} cy={shape.y} r={boreRadius} />
+        ) : null}
+      </>
     );
   }
 
@@ -4859,6 +5030,17 @@ function ShapePreview({ shape, selected, onSelect }) {
         cx={shape.x}
         cy={shape.y}
         r={shape.r}
+        onClick={handleSelect}
+        onDoubleClick={handleDoubleClick}
+      />
+    );
+  }
+  if (shape.type === 'gear') {
+    return (
+      <path
+        className={className}
+        d={getGearBodySvgPath(shape)}
+        fillRule="evenodd"
         onClick={handleSelect}
         onDoubleClick={handleDoubleClick}
       />
@@ -4905,6 +5087,8 @@ function ShapeEditor({
           value={shape.mode}
           onChange={(event) => onChange({ mode: event.target.value })}
           aria-label={`${getShapeLabel(shape)} operation`}
+          disabled={shape.type === 'gear'}
+          title={shape.type === 'gear' ? 'ギヤはadd専用です' : undefined}
         >
           <option value="add">add</option>
           <option value="cut">cut</option>
@@ -4930,7 +5114,7 @@ function ShapeEditor({
         </div>
       </header>
 
-      <div className="shape-control-grid">
+      <div className={`shape-control-grid ${shape.type === 'gear' ? 'gear-controls' : ''}`}>
         <ControlField
           axis="x"
           label="X"
@@ -4967,7 +5151,7 @@ function ShapeEditor({
               onChange={(h) => onChange({ h })}
             />
           </>
-        ) : (
+        ) : shape.type === 'circle' ? (
           <>
             <ControlField
               axis="x"
@@ -4978,6 +5162,34 @@ function ShapeEditor({
               onChange={(r) => onChange({ r })}
             />
             <div className="control-field empty" aria-hidden="true" />
+          </>
+        ) : (
+          <>
+            <ControlField
+              axis="x"
+              label="M"
+              value={shape.module}
+              min={limits.module.min}
+              max={limits.module.max}
+              step={0.5}
+              onChange={(moduleValue) => onChange({ module: moduleValue })}
+            />
+            <ControlField
+              axis="x"
+              label="歯数"
+              value={shape.teeth}
+              min={limits.teeth.min}
+              max={limits.teeth.max}
+              onChange={(teeth) => onChange({ teeth: Math.round(teeth) })}
+            />
+            <ControlField
+              axis="x"
+              label="穴径"
+              value={shape.bore}
+              min={limits.bore.min}
+              max={limits.bore.max}
+              onChange={(bore) => onChange({ bore })}
+            />
           </>
         )}
       </div>
@@ -5066,7 +5278,7 @@ function RotationControls({
   );
 }
 
-function ControlField({ axis, label, value, min, max, invert = false, onChange }) {
+function ControlField({ axis, label, value, min, max, step = 1, invert = false, onChange }) {
   const sliderValue = invert ? max - value + min : value;
 
   function handleSliderChange(event) {
@@ -5081,7 +5293,7 @@ function ControlField({ axis, label, value, min, max, invert = false, onChange }
         type="range"
         min={min}
         max={max}
-        step="1"
+        step={step}
         value={sliderValue}
         onChange={handleSliderChange}
       />
@@ -5090,6 +5302,7 @@ function ControlField({ axis, label, value, min, max, invert = false, onChange }
         value={value}
         min={min}
         max={max}
+        step={step}
         compact
         onChange={onChange}
       />
@@ -5097,7 +5310,7 @@ function ControlField({ axis, label, value, min, max, invert = false, onChange }
   );
 }
 
-function NumberField({ label, value, min, max, compact = false, onChange }) {
+function NumberField({ label, value, min, max, step = 1, compact = false, onChange }) {
   return (
     <label className={compact ? 'number-field compact' : 'number-field'}>
       <span>{label}</span>
@@ -5105,7 +5318,7 @@ function NumberField({ label, value, min, max, compact = false, onChange }) {
         type="number"
         min={min}
         max={max}
-        step="1"
+        step={step}
         value={value}
         onChange={(event) => onChange(Number(event.target.value) || 0)}
       />

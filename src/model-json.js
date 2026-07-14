@@ -1,7 +1,15 @@
-export const MODEL_SCHEMA_VERSION = 1;
+import {
+  GEAR_MODULE_MAX,
+  GEAR_MODULE_MIN,
+  GEAR_TEETH_MAX,
+  GEAR_TEETH_MIN,
+  getGearBoreMax,
+} from './gear-geometry.js';
+
+export const MODEL_SCHEMA_VERSION = 2;
 
 const SUPPORTED_FACES = new Set(['top', 'front', 'right']);
-const SUPPORTED_SHAPE_TYPES = new Set(['rect', 'circle']);
+const SUPPORTED_SHAPE_TYPES = new Set(['rect', 'circle', 'gear']);
 const SUPPORTED_SHAPE_MODES = new Set(['add', 'cut']);
 const SUPPORTED_VIEW_MODES = new Set(['faces', '3d']);
 
@@ -35,10 +43,13 @@ export const AI_MODEL_JSON_PROMPT = [
   '- right（右側面）: x=奥行き、y=高さ',
   '- rectのx,yは左上、w,hは幅と高さです。',
   '- circleのx,yは中心、rは半径です。',
+  '- gearのx,yは中心、moduleはモジュール、teethは歯数、boreは中央穴径です。',
   '',
   '図形ルール:',
-  '- typeはrectまたはcircleです。',
+  '- typeはrect、circle、gearです。',
   '- modeはaddまたはcutです。',
+  '- gearは通常の20度圧力角の平歯車で、modeはaddだけを指定してください。',
+  '- gearのmoduleは0.5〜5、teethは8〜80の整数、boreは0以上で歯底径より小さくしてください。',
   '- shapesは上から順番に評価され、後のaddは前のcutを上書きできます。',
   '- idはJSON内で重複しない0以上の整数にしてください。',
   '- 各面に外形を決めるadd図形を最低1個置いてください。',
@@ -52,6 +63,7 @@ export const AI_MODEL_JSON_PROMPT = [
   '- 奥行はtopのy範囲とrightのx範囲で表現してください。',
   '- rectはx〜x+w、y〜y+hが0〜120に収まるようにしてください。',
   '- circleはx-r〜x+r、y-r〜y+rが0〜120に収まるようにしてください。',
+  '- gearの外径はmodule×(teeth+2)です。外径全体が0〜120に収まるようにしてください。',
   '- showDimensionsは各図形にfalseを指定してください。',
   '',
   'ロックルール:',
@@ -61,8 +73,8 @@ export const AI_MODEL_JSON_PROMPT = [
   '',
   '必須の基本構造:',
   '{',
-  '  "schemaVersion": 1,',
-  '  "partName": "部品名",',
+  '  "schemaVersion": 2,',
+  '  "partName": "spur-gear-part",',
   '  "extrude": 12,',
   '  "activeFace": "top",',
   '  "areaLocks": { "top": false, "front": false, "right": false },',
@@ -76,8 +88,9 @@ export const AI_MODEL_JSON_PROMPT = [
   '  "shapes": [',
   '    { "id": 1, "type": "rect", "x": 20, "y": 20, "w": 60, "h": 40, "mode": "add", "face": "top", "showDimensions": false },',
   '    { "id": 2, "type": "circle", "x": 50, "y": 40, "r": 5, "mode": "cut", "face": "top", "showDimensions": false },',
-  '    { "id": 3, "type": "rect", "x": 20, "y": 30, "w": 60, "h": 30, "mode": "add", "face": "front", "showDimensions": false },',
-  '    { "id": 4, "type": "rect", "x": 20, "y": 30, "w": 40, "h": 30, "mode": "add", "face": "right", "showDimensions": false }',
+  '    { "id": 3, "type": "gear", "x": 50, "y": 50, "module": 1, "teeth": 24, "bore": 6, "mode": "add", "face": "top", "showDimensions": false },',
+  '    { "id": 4, "type": "rect", "x": 20, "y": 30, "w": 60, "h": 30, "mode": "add", "face": "front", "showDimensions": false },',
+  '    { "id": 5, "type": "rect", "x": 20, "y": 30, "w": 40, "h": 30, "mode": "add", "face": "right", "showDimensions": false }',
   '  ]',
   '}',
   '',
@@ -156,7 +169,7 @@ function validateShape(shape, index, ids) {
   ids.add(shape.id);
 
   if (!SUPPORTED_SHAPE_TYPES.has(shape.type)) {
-    throw new ModelJsonError(`${path}.type はrectまたはcircleである必要があります。`);
+    throw new ModelJsonError(`${path}.type はrect、circle、gearのいずれかである必要があります。`);
   }
   if (!SUPPORTED_SHAPE_MODES.has(shape.mode)) {
     throw new ModelJsonError(`${path}.mode はaddまたはcutである必要があります。`);
@@ -169,8 +182,24 @@ function validateShape(shape, index, ids) {
   if (shape.type === 'rect') {
     assertFiniteNumber(shape.w, `${path}.w`, { positive: true });
     assertFiniteNumber(shape.h, `${path}.h`, { positive: true });
-  } else {
+  } else if (shape.type === 'circle') {
     assertFiniteNumber(shape.r, `${path}.r`, { positive: true });
+  } else {
+    assertFiniteNumber(shape.module, `${path}.module`, { positive: true });
+    assertFiniteNumber(shape.teeth, `${path}.teeth`, { positive: true });
+    assertFiniteNumber(shape.bore, `${path}.bore`);
+    if (shape.module < GEAR_MODULE_MIN || shape.module > GEAR_MODULE_MAX) {
+      throw new ModelJsonError(`${path}.module は${GEAR_MODULE_MIN}〜${GEAR_MODULE_MAX}である必要があります。`);
+    }
+    if (!Number.isInteger(shape.teeth) || shape.teeth < GEAR_TEETH_MIN || shape.teeth > GEAR_TEETH_MAX) {
+      throw new ModelJsonError(`${path}.teeth は${GEAR_TEETH_MIN}〜${GEAR_TEETH_MAX}の整数である必要があります。`);
+    }
+    if (shape.bore < 0 || shape.bore > getGearBoreMax(shape) + 0.001) {
+      throw new ModelJsonError(`${path}.bore は0以上かつ歯底内に収まる直径である必要があります。`);
+    }
+    if (shape.mode !== 'add') {
+      throw new ModelJsonError(`${path}.mode はgearの場合addである必要があります。`);
+    }
   }
   assertOptionalBoolean(shape.showDimensions, `${path}.showDimensions`);
 }
@@ -199,8 +228,13 @@ function migrateV0ToV1(document) {
   return migrated;
 }
 
+function migrateV1ToV2(document) {
+  return { ...document, schemaVersion: 2 };
+}
+
 const MODEL_MIGRATIONS = new Map([
   [0, migrateV0ToV1],
+  [1, migrateV1ToV2],
 ]);
 
 function migrateModelDocument(document, sourceVersion) {

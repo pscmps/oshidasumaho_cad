@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 2,
+  "partName": "spur-gear-m1-z24-bore6",
+  "extrude": 12,
+  "activeFace": "top",
+  "areaLocks": {
+    "top": true,
+    "front": true,
+    "right": true
+  },
+  "areaLockConstraints": {
+    "top": {
+      "minX": 47,
+      "maxX": 73,
+      "minY": 47,
+      "maxY": 73,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "front": {
+      "minX": 47,
+      "maxX": 73,
+      "minY": 54,
+      "maxY": 66,
+      "constrainedX": true,
+      "constrainedY": true
+    },
+    "right": {
+      "minX": 47,
+      "maxX": 73,
+      "minY": 54,
+      "maxY": 66,
+      "constrainedX": true,
+      "constrainedY": true
+    }
+  },
+  "viewMode": "faces",
+  "rotation": {
+    "x": 24,
+    "y": -34,
+    "z": 0
+  },
+  "transparent3D": true,
+  "show3DGrid": false,
+  "show3DEdges": true,
+  "showAllDimensions": false,
+  "shapes": [
+    {
+      "id": 1,
+      "type": "gear",
+      "x": 60,
+      "y": 60,
+      "module": 1,
+      "teeth": 24,
+      "bore": 6,
+      "mode": "add",
+      "face": "top",
+      "showDimensions": false
+    },
+    {
+      "id": 2,
+      "type": "rect",
+      "x": 47,
+      "y": 54,
+      "w": 26,
+      "h": 12,
+      "mode": "add",
+      "face": "front",
+      "showDimensions": false
+    },
+    {
+      "id": 3,
+      "type": "rect",
+      "x": 47,
+      "y": 54,
+      "w": 26,
+      "h": 12,
+      "mode": "add",
+      "face": "right",
+      "showDimensions": false
+    }
+  ]
+}

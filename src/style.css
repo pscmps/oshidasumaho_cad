@@ -1116,6 +1116,20 @@ h1 {
   gap: 8px;
 }
 
+.shape-control-grid.gear-controls {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.shape-control-grid.gear-controls .control-field {
+  font-size: 0.72rem;
+}
+
+.mode-select:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
 .control-field {
   display: grid;
   grid-template-rows: auto 76px auto;
@@ -1634,6 +1648,10 @@ h1 {
 
   .shape-control-grid {
     gap: 6px;
+  }
+
+  .shape-control-grid.gear-controls {
+    gap: 4px;
   }
 
   .control-field {

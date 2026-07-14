@@ -29,6 +29,7 @@ const model = {
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top', showDimensions: true },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top', showDimensions: false },
+    { id: 3, type: 'gear', x: 60, y: 60, module: 1, teeth: 24, bore: 6, mode: 'add', face: 'top', showDimensions: false },
   ],
 };
 
@@ -73,7 +74,7 @@ test('JSON can be extracted from an AI markdown code block', () => {
 
 test('smart double quotes are normalized before parsing', () => {
   const parsed = parseModelJson('{“schemaVersion”: 1, “shapes”: []}');
-  assert.equal(parsed.schemaVersion, 1);
+  assert.equal(parsed.schemaVersion, MODEL_SCHEMA_VERSION);
   assert.deepEqual(parsed.shapes, []);
 });
 
@@ -96,6 +97,18 @@ test('invalid shape data is rejected', () => {
   assert.throws(() => parseModelJson(JSON.stringify(invalid)), ModelJsonError);
 });
 
+test('invalid gear parameters are rejected', () => {
+  const gear = model.shapes.find((shape) => shape.type === 'gear');
+  assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...gear, teeth: 7 }] })),
+    ModelJsonError,
+  );
+  assert.throws(
+    () => parseModelJson(JSON.stringify({ ...model, shapes: [{ ...gear, mode: 'cut' }] })),
+    ModelJsonError,
+  );
+});
+
 test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, new RegExp(`"schemaVersion": ${MODEL_SCHEMA_VERSION}`));
   assert.match(AI_MODEL_JSON_PROMPT, /```json/);
@@ -105,4 +118,5 @@ test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, /areaLocks/);
   assert.match(AI_MODEL_JSON_PROMPT, /topのy最小\/最大とrightのx最小\/最大/);
   assert.match(AI_MODEL_JSON_PROMPT, /extrudeは互換用フィールド/);
+  assert.match(AI_MODEL_JSON_PROMPT, /gearのmodule/);
 });
