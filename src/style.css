@@ -937,6 +937,25 @@ h1 {
   padding: 0 10px;
 }
 
+.assist-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px 0 12px;
+}
+
+.assist-controls > span {
+  margin-right: 2px;
+  color: #506174;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.assist-controls button {
+  min-height: 32px;
+  padding: 0 12px;
+}
+
 .active-toggle {
   border-color: #17212b;
   background: #17212b;
@@ -1704,6 +1723,10 @@ h1 {
 
   .header-actions {
     justify-content: flex-start;
+  }
+
+  .assist-controls {
+    flex-wrap: wrap;
   }
 
   .document-controls button {

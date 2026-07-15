@@ -26,6 +26,7 @@ const model = {
   show3DGrid: true,
   show3DEdges: true,
   showAllDimensions: true,
+  fitAssist: true,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top', showDimensions: true },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top', showDimensions: false },
@@ -61,6 +62,13 @@ test('legacy JSON without schemaVersion migrates to the current version', () => 
   const parsed = parseModelJson(JSON.stringify(legacy));
   assert.equal(parsed.schemaVersion, MODEL_SCHEMA_VERSION);
   assert.deepEqual(parsed.shapes, model.shapes);
+});
+
+test('fit assist is preserved when present and defaults in the application when omitted', () => {
+  const disabled = parseModelJson(JSON.stringify({ ...model, fitAssist: false }));
+  assert.equal(disabled.fitAssist, false);
+  const { fitAssist, ...withoutFitAssist } = model;
+  assert.equal(parseModelJson(JSON.stringify(withoutFitAssist)).fitAssist, undefined);
 });
 
 test('explicit version 0 JSON follows the same migration path', () => {
@@ -204,4 +212,5 @@ test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, /rackの最小幅/);
   assert.match(AI_MODEL_JSON_PROMPT, /rackのrotation/);
   assert.match(AI_MODEL_JSON_PROMPT, /internalGearのouterDiameter/);
+  assert.match(AI_MODEL_JSON_PROMPT, /"fitAssist": true/);
 });

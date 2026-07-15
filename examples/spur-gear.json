@@ -44,6 +44,7 @@
   "show3DGrid": false,
   "show3DEdges": true,
   "showAllDimensions": false,
+  "fitAssist": true,
   "shapes": [
     {
       "id": 1,

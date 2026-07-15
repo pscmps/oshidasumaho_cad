@@ -110,6 +110,7 @@ export const AI_MODEL_JSON_PROMPT = [
   '  "show3DGrid": false,',
   '  "show3DEdges": true,',
   '  "showAllDimensions": false,',
+  '  "fitAssist": true,',
   '  "shapes": [',
   '    { "id": 1, "type": "internalGear", "x": 60, "y": 60, "module": 1, "teeth": 50, "outerDiameter": 68, "mode": "add", "face": "top", "showDimensions": false },',
   '    { "id": 2, "type": "rect", "x": 26, "y": 45, "w": 68, "h": 30, "mode": "add", "face": "front", "showDimensions": false },',
@@ -392,7 +393,7 @@ export function validateAndMigrateModelDocument(value) {
     assertFiniteNumber(document.extrude, 'extrude', { positive: true });
   }
   validateRotation(document.rotation, 'rotation');
-  ['transparent3D', 'show3DGrid', 'show3DEdges', 'showAllDimensions'].forEach((key) => {
+  ['transparent3D', 'show3DGrid', 'show3DEdges', 'showAllDimensions', 'fitAssist'].forEach((key) => {
     assertOptionalBoolean(document[key], key);
   });
 

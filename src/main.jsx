@@ -61,13 +61,19 @@ import {
   normalizeShapePrecision,
   roundToModelPrecision,
 } from './numeric-precision.js';
+import {
+  extractAxisFitTargets,
+  findFitValue,
+  getShapeBounds2D,
+  isFitBypassActive,
+} from './fit-assist.js';
 import './style.css';
 
 const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-21';
+const APP_VERSION = 'proto-2026-06-02-22';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -123,6 +129,7 @@ const initialDocument = {
   show3DGrid: false,
   show3DEdges: true,
   showAllDimensions: false,
+  fitAssist: true,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -162,6 +169,7 @@ function normalizeDocument(document) {
   const show3DGrid = Boolean(document?.show3DGrid);
   const show3DEdges = document?.show3DEdges !== false;
   const showAllDimensions = Boolean(document?.showAllDimensions);
+  const fitAssist = document?.fitAssist !== false;
   const areaLocks = FACE_ORDER.reduce((locks, face) => ({
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
@@ -201,6 +209,7 @@ function normalizeDocument(document) {
     show3DGrid,
     show3DEdges,
     showAllDimensions,
+    fitAssist,
     shapes,
   };
 }
@@ -326,6 +335,26 @@ function getFaceBounds(shapes, face) {
 
 function getAllFaceBounds(shapes) {
   return Object.fromEntries(FACE_ORDER.map((face) => [face, getFaceBounds(shapes, face)]));
+}
+
+function getFitTargetsForFace(document, targetFace) {
+  const normalizedTargetFace = normalizeFace(targetFace);
+  return Object.fromEntries(['x', 'y'].map((targetAxis) => {
+    const dimension = FACE_AXES[normalizedTargetFace][targetAxis];
+    const sourceFace = FACE_ORDER.find((face) => (
+      face !== normalizedTargetFace
+      && document.areaLocks?.[face]
+      && Object.values(FACE_AXES[face]).includes(dimension)
+    ));
+    if (!sourceFace) {
+      return [targetAxis, null];
+    }
+    const sourceAxis = Object.entries(FACE_AXES[sourceFace])
+      .find(([, sourceDimension]) => sourceDimension === dimension)?.[0];
+    const sourceShapes = document.shapes.filter((shape) => normalizeFace(shape.face) === sourceFace);
+    const polygons = getFaceBooleanPolygons(sourceShapes);
+    return [targetAxis, extractAxisFitTargets(polygons, sourceAxis)];
+  }));
 }
 
 function getFaceConstraint(face, faceBounds) {
@@ -739,6 +768,23 @@ function constrainShape(shape, constraint) {
   return normalizeShapePrecision(
     constrainShapeToConstraint(normalizeShapePrecision(shape), constraint),
   );
+}
+
+function constrainEditedShape(document, shape) {
+  const face = normalizeFace(shape.face);
+  const constraint = getLockedFaceConstraint(document, face);
+  if (shape.type === 'gear' || shape.type === 'rack' || shape.type === 'internalGear') {
+    return constrainShape(
+      shape,
+      hasAreaConstraint(constraint)
+        ? constraint
+        : { minX: 0, maxX: 120, minY: 0, maxY: 120 },
+    );
+  }
+  if (shape.mode === 'cut' || !hasAreaConstraint(constraint)) {
+    return normalizeShapePrecision(shape);
+  }
+  return constrainShape(shape, constraint);
 }
 
 function applyAreaLocks(document) {
@@ -2323,6 +2369,7 @@ function App() {
   });
   const [urlDownloadArtifact, setUrlDownloadArtifact] = useState(null);
   const urlAutomationStartedRef = useRef(false);
+  const fitAssistBypassRef = useRef(new Map());
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
   const assemblyRefs = useRef(new Map());
@@ -2460,7 +2507,54 @@ function App() {
     }));
   }
 
-  function updateShape(id, patch) {
+  function applyFitAssistToPatch(current, shape, patch, interaction) {
+    const field = interaction?.field;
+    const rawValue = Number(field ? patch[field] : NaN);
+    if (!field || !Number.isFinite(rawValue)) {
+      return patch;
+    }
+
+    const bypassKey = `${shape.id}:${field}`;
+    const bypass = fitAssistBypassRef.current.get(bypassKey);
+    if (bypass) {
+      if (!isFitBypassActive(rawValue, bypass.snappedValue)) {
+        fitAssistBypassRef.current.delete(bypassKey);
+      }
+      return patch;
+    }
+    if (!current.fitAssist || interaction.source !== 'slider') {
+      return patch;
+    }
+
+    const targetsByAxis = getFitTargetsForFace(current, shape.face);
+    const constraint = getLockedFaceConstraint(current, normalizeFace(shape.face));
+    const limits = getShapeControlLimits(
+      shape,
+      constraint,
+      shape.mode !== 'cut' && hasAreaConstraint(constraint),
+    );
+    const fieldLimits = limits[field];
+    const fit = findFitValue({
+      shape,
+      field,
+      rawValue,
+      targetsByAxis,
+      evaluateShape: (value) => constrainEditedShape(current, {
+        ...shape,
+        ...patch,
+        [field]: value,
+      }),
+      minValue: fieldLimits?.min,
+      maxValue: fieldLimits?.max,
+    });
+    if (!fit) {
+      return patch;
+    }
+    fitAssistBypassRef.current.set(bypassKey, { snappedValue: fit.value });
+    return { ...patch, [field]: fit.value };
+  }
+
+  function updateShape(id, patch, interaction) {
     setPreview3DSelected(false);
     setOutputOpen(false);
     setAreaLockFeedback(null);
@@ -2472,21 +2566,8 @@ function App() {
           if (shape.id !== id) {
             return shape;
           }
-          const nextShape = { ...shape, ...patch };
-          const face = normalizeFace(nextShape.face);
-          const constraint = getLockedFaceConstraint(current, face);
-          if (nextShape.type === 'gear' || nextShape.type === 'rack' || nextShape.type === 'internalGear') {
-            return constrainShape(
-              nextShape,
-              hasAreaConstraint(constraint)
-                ? constraint
-                : { minX: 0, maxX: 120, minY: 0, maxY: 120 },
-            );
-          }
-          if (nextShape.mode === 'cut' || !hasAreaConstraint(constraint)) {
-            return normalizeShapePrecision(nextShape);
-          }
-          return constrainShape(nextShape, constraint);
+          const assistedPatch = applyFitAssistToPatch(current, shape, patch, interaction);
+          return constrainEditedShape(current, { ...shape, ...assistedPatch });
         }),
       });
       return areLockedFaceBoundsValid(nextDocument) ? nextDocument : current;
@@ -2497,6 +2578,14 @@ function App() {
     setDocument((current) => ({
       ...current,
       showAllDimensions: !current.showAllDimensions,
+    }));
+  }
+
+  function toggleFitAssist() {
+    fitAssistBypassRef.current.clear();
+    setDocument((current) => ({
+      ...current,
+      fitAssist: !current.fitAssist,
     }));
   }
 
@@ -2531,6 +2620,9 @@ function App() {
     setPreview3DSelected(false);
     setOutputOpen(false);
     setAreaLockFeedback(null);
+    [...fitAssistBypassRef.current.keys()]
+      .filter((key) => key.startsWith(`${id}:`))
+      .forEach((key) => fitAssistBypassRef.current.delete(key));
     setDocument((current) => {
       const nextShapes = current.shapes.filter((shape) => shape.id !== id);
       if (selectedId === id) {
@@ -2615,6 +2707,7 @@ function App() {
   }
 
   function resetDocument() {
+    fitAssistBypassRef.current.clear();
     setDocument(initialDocument);
     setSelectedId(initialDocument.shapes[0].id);
     setPreview3DSelected(false);
@@ -2682,6 +2775,7 @@ function App() {
     if (!part) {
       return;
     }
+    fitAssistBypassRef.current.clear();
     const nextDocument = normalizeDocument(part.document);
     setDocument(nextDocument);
     setSelectedId(nextDocument.shapes[0]?.id ?? null);
@@ -2691,6 +2785,7 @@ function App() {
   }
 
   function restoreImportedDocument(importedDocument, sourceLabel) {
+    fitAssistBypassRef.current.clear();
     const nextDocument = normalizeDocument(importedDocument);
     setDocument(nextDocument);
     setSelectedId(null);
@@ -2944,6 +3039,7 @@ function App() {
         return;
       }
       setUrlAutomationMode(request.automationMode);
+      fitAssistBypassRef.current.clear();
       const importedDocument = normalizeDocument(request.document);
       setDocument(importedDocument);
       setSelectedId(null);
@@ -3238,14 +3334,6 @@ function App() {
               <h1>図形配置</h1>
             </div>
             <div className="header-actions">
-              <button
-                type="button"
-                className={document.showAllDimensions ? 'active-toggle' : ''}
-                aria-pressed={document.showAllDimensions}
-                onClick={toggleAllDimensions}
-              >
-                全寸法
-              </button>
               <button type="button" onClick={() => addShape('rect')}>+四角</button>
               <button type="button" onClick={() => addShape('circle')}>+円</button>
               <button type="button" onClick={() => addShape('gear')}>+ギヤ</button>
@@ -3253,6 +3341,28 @@ function App() {
               <button type="button" onClick={() => addShape('internalGear')}>+内歯</button>
             </div>
           </header>
+        ) : null}
+
+        {appMode === 'part' && showingFaceControls ? (
+          <section className="assist-controls" aria-label="配置アシスト">
+            <span>アシスト</span>
+            <button
+              type="button"
+              className={document.showAllDimensions ? 'active-toggle' : ''}
+              aria-pressed={document.showAllDimensions}
+              onClick={toggleAllDimensions}
+            >
+              全寸法
+            </button>
+            <button
+              type="button"
+              className={document.fitAssist ? 'active-toggle' : ''}
+              aria-pressed={document.fitAssist}
+              onClick={toggleFitAssist}
+            >
+              フィット
+            </button>
+          </section>
         ) : null}
 
         {appMode === 'part' && showingFaceControls ? (
@@ -3289,7 +3399,7 @@ function App() {
                 locked={shape.mode !== 'cut' && hasAreaConstraint(lockedConstraints[normalizeFace(shape.face)])}
                 constraint={lockedConstraints[normalizeFace(shape.face)]}
                 onSelect={() => selectShape(shape.id)}
-                onChange={(patch) => updateShape(shape.id, patch)}
+                onChange={(patch, interaction) => updateShape(shape.id, patch, interaction)}
                 onMove={moveShape}
                 onRemove={removeShape}
               />
@@ -4639,6 +4749,8 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
         <li>「+内歯」では20度圧力角の内歯車を追加し、モジュール・歯数・外径を成立範囲内で調整できます。</li>
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
+        <li>アシストの「フィット」をオンにすると、スライダー操作中の図形がロック済みの隣接面の外形端・段差・中央へ近づいた時に吸着します。</li>
+        <li>吸着後は同じスライダーをそのまま動かして微調整できます。数値入力欄はフィットせず、入力値をそのまま使用します。</li>
         <li>各面の「拡大」を押すか面をダブルタップすると、その面だけを表示します。「縮小」または再度のダブルタップで3面図へ戻ります。</li>
         <li>3Dプレビューをタップすると、回転・透過・グリッド・エッジの表示を調整できます。</li>
         <li>3Dプレビューの「拡大」を押すかダブルタップすると3D表示を拡大し、「縮小」または再度のダブルタップで戻ります。</li>
@@ -4936,71 +5048,6 @@ function getFaceTransform(face, full) {
     return 'translate(198 142)';
   }
   return 'translate(62 142)';
-}
-
-function getShapeBounds2D(shape) {
-  if (shape.type === 'circle') {
-    return {
-      minX: shape.x - shape.r,
-      maxX: shape.x + shape.r,
-      minY: shape.y - shape.r,
-      maxY: shape.y + shape.r,
-      width: shape.r * 2,
-      height: shape.r * 2,
-      centerX: shape.x,
-      centerY: shape.y,
-    };
-  }
-  if (shape.type === 'internalGear') {
-    const { outerRadius } = getInternalGearRadii(shape);
-    return {
-      minX: shape.x - outerRadius,
-      maxX: shape.x + outerRadius,
-      minY: shape.y - outerRadius,
-      maxY: shape.y + outerRadius,
-      width: outerRadius * 2,
-      height: outerRadius * 2,
-      centerX: shape.x,
-      centerY: shape.y,
-    };
-  }
-  if (shape.type === 'gear') {
-    const { outerRadius } = getGearRadii(shape);
-    return {
-      minX: shape.x - outerRadius,
-      maxX: shape.x + outerRadius,
-      minY: shape.y - outerRadius,
-      maxY: shape.y + outerRadius,
-      width: outerRadius * 2,
-      height: outerRadius * 2,
-      centerX: shape.x,
-      centerY: shape.y,
-    };
-  }
-  if (shape.type === 'rack') {
-    const dimensions = getRackGearDimensions(shape);
-    return {
-      minX: shape.x,
-      maxX: shape.x + dimensions.boundsWidth,
-      minY: shape.y,
-      maxY: shape.y + dimensions.boundsHeight,
-      width: dimensions.boundsWidth,
-      height: dimensions.boundsHeight,
-      centerX: shape.x + dimensions.boundsWidth / 2,
-      centerY: shape.y + dimensions.boundsHeight / 2,
-    };
-  }
-
-  return {
-    minX: shape.x,
-    maxX: shape.x + shape.w,
-    minY: shape.y,
-    maxY: shape.y + shape.h,
-    width: shape.w,
-    height: shape.h,
-    centerX: shape.x + shape.w / 2,
-    centerY: shape.y + shape.h / 2,
-  };
 }
 
 function formatDimensionValue(value) {
@@ -5551,7 +5598,7 @@ function ShapeEditor({
           value={shape.x}
           min={limits.x.min}
           max={limits.x.max}
-          onChange={(x) => onChange({ x })}
+          onChange={(x, input) => onChange({ x }, { ...input, field: 'x' })}
         />
         <ControlField
           axis="y"
@@ -5560,7 +5607,7 @@ function ShapeEditor({
           min={limits.y.min}
           max={limits.y.max}
           invert
-          onChange={(y) => onChange({ y })}
+          onChange={(y, input) => onChange({ y }, { ...input, field: 'y' })}
         />
         {shape.type === 'rect' ? (
           <>
@@ -5570,7 +5617,7 @@ function ShapeEditor({
               value={shape.w}
               min={limits.w.min}
               max={limits.w.max}
-              onChange={(w) => onChange({ w })}
+              onChange={(w, input) => onChange({ w }, { ...input, field: 'w' })}
             />
             <ControlField
               axis="y"
@@ -5578,7 +5625,7 @@ function ShapeEditor({
               value={shape.h}
               min={limits.h.min}
               max={limits.h.max}
-              onChange={(h) => onChange({ h })}
+              onChange={(h, input) => onChange({ h }, { ...input, field: 'h' })}
             />
           </>
         ) : shape.type === 'circle' ? (
@@ -5589,7 +5636,7 @@ function ShapeEditor({
               value={shape.r}
               min={limits.r.min}
               max={limits.r.max}
-              onChange={(r) => onChange({ r })}
+              onChange={(r, input) => onChange({ r }, { ...input, field: 'r' })}
             />
             <div className="control-field empty" aria-hidden="true" />
           </>
@@ -5602,7 +5649,7 @@ function ShapeEditor({
               min={limits.module.min}
               max={limits.module.max}
               step={0.5}
-              onChange={(moduleValue) => onChange({ module: moduleValue })}
+              onChange={(moduleValue, input) => onChange({ module: moduleValue }, { ...input, field: 'module' })}
             />
             <ControlField
               axis="x"
@@ -5610,7 +5657,7 @@ function ShapeEditor({
               value={shape.teeth}
               min={limits.teeth.min}
               max={limits.teeth.max}
-              onChange={(teeth) => onChange({ teeth: Math.round(teeth) })}
+              onChange={(teeth, input) => onChange({ teeth: Math.round(teeth) }, { ...input, field: 'teeth' })}
             />
             <ControlField
               axis="x"
@@ -5618,7 +5665,7 @@ function ShapeEditor({
               value={shape.bore}
               min={limits.bore.min}
               max={limits.bore.max}
-              onChange={(bore) => onChange({ bore })}
+              onChange={(bore, input) => onChange({ bore }, { ...input, field: 'bore' })}
             />
           </>
         ) : shape.type === 'rack' ? (
@@ -5630,7 +5677,7 @@ function ShapeEditor({
               min={limits.width.min}
               max={limits.width.max}
               step={1}
-              onChange={(width) => onChange({ width })}
+              onChange={(width, input) => onChange({ width }, { ...input, field: 'width' })}
             />
             <ControlField
               axis="x"
@@ -5639,7 +5686,7 @@ function ShapeEditor({
               min={limits.module.min}
               max={limits.module.max}
               step={0.5}
-              onChange={(moduleValue) => onChange({ module: moduleValue })}
+              onChange={(moduleValue, input) => onChange({ module: moduleValue }, { ...input, field: 'module' })}
             />
             <ControlField
               axis="x"
@@ -5648,7 +5695,7 @@ function ShapeEditor({
               min={limits.teeth.min}
               max={limits.teeth.max}
               step={1}
-              onChange={(teeth) => onChange({ teeth: Math.round(teeth) })}
+              onChange={(teeth, input) => onChange({ teeth: Math.round(teeth) }, { ...input, field: 'teeth' })}
             />
             <ControlField
               axis="y"
@@ -5657,7 +5704,7 @@ function ShapeEditor({
               min={limits.height.min}
               max={limits.height.max}
               step={1}
-              onChange={(height) => onChange({ height })}
+              onChange={(height, input) => onChange({ height }, { ...input, field: 'height' })}
             />
             <div className="rack-rotation-controls" aria-label={`ラック回転 ${rackRotation}度`}>
               <span>回転</span>
@@ -5686,7 +5733,7 @@ function ShapeEditor({
               min={limits.module.min}
               max={limits.module.max}
               step={0.5}
-              onChange={(moduleValue) => onChange({ module: moduleValue })}
+              onChange={(moduleValue, input) => onChange({ module: moduleValue }, { ...input, field: 'module' })}
             />
             <ControlField
               axis="x"
@@ -5695,7 +5742,7 @@ function ShapeEditor({
               min={limits.teeth.min}
               max={limits.teeth.max}
               step={1}
-              onChange={(teeth) => onChange({ teeth: Math.round(teeth) })}
+              onChange={(teeth, input) => onChange({ teeth: Math.round(teeth) }, { ...input, field: 'teeth' })}
             />
             <ControlField
               axis="x"
@@ -5704,7 +5751,7 @@ function ShapeEditor({
               min={limits.outerDiameter.min}
               max={limits.outerDiameter.max}
               step={0.5}
-              onChange={(outerDiameter) => onChange({ outerDiameter })}
+              onChange={(outerDiameter, input) => onChange({ outerDiameter }, { ...input, field: 'outerDiameter' })}
             />
           </>
         )}
@@ -5807,7 +5854,7 @@ function ControlField({ axis, label, value, min, max, step = 1, invert = false, 
     const controlNextPosition = invert
       ? sliderScale.maxPosition - nextPosition
       : nextPosition;
-    onChange(sliderScale.valueAt(controlNextPosition));
+    onChange(sliderScale.valueAt(controlNextPosition), { source: 'slider' });
   }
 
   return (
@@ -5828,7 +5875,7 @@ function ControlField({ axis, label, value, min, max, step = 1, invert = false, 
         max={controlMax}
         step={step}
         compact
-        onChange={onChange}
+        onChange={(nextValue) => onChange(nextValue, { source: 'number' })}
       />
     </label>
   );
