@@ -136,7 +136,7 @@ FusionでJSONを読み込み、Fusion上のソリッドとして再構築するP
 
 これはWebアプリやSTL/STEP出力が内部で使用するものではありません。オシダスマホキャドのJSONをFusion側で再構築したい場合だけ、利用者が別途Fusionへインストールして使用する補助ツールです。
 
-現時点のFusion Add-inは四角形と円に対応しています。`gear`、`rack`、`internalGear` はWeb版の2D/3D表示、JSON、STL、STEP出力に対応していますが、Fusion Add-inでの再構築は未対応です。
+Fusion Add-inは四角形、円、平歯車、ラックギヤ、内歯車のJSONを読み込み、各面の押し出しとブーリアン演算をFusion上で再構築します。スケッチとフィーチャーは編集できますが、寸法や歯数をFusionのユーザーパラメータから自動再生成する機能は未対応です。
 
 詳しくは [fusion_addin/README.md](fusion_addin/README.md) を参照してください。
 

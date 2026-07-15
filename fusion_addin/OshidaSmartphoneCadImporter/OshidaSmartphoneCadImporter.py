@@ -1,9 +1,23 @@
 import json
-import math
 import traceback
 
 import adsk.core
 import adsk.fusion
+
+try:
+    from .oshida_model import (
+        FACE_ORDER,
+        get_document_dimensions,
+        get_shape_profiles,
+        normalize_document,
+    )
+except ImportError:
+    from oshida_model import (
+        FACE_ORDER,
+        get_document_dimensions,
+        get_shape_profiles,
+        normalize_document,
+    )
 
 
 APP_NAME = 'Oshida Smartphone CAD Importer'
@@ -12,14 +26,6 @@ COMMAND_NAME = 'Import Oshida CAD JSON'
 COMMAND_DESCRIPTION = 'Import Oshida Smartphone CAD JSON as Fusion solid geometry.'
 WORKSPACE_ID = 'FusionSolidEnvironment'
 PANEL_ID = 'SolidScriptsAddinsPanel'
-FACE_ORDER = ('top', 'front', 'right')
-FACE_AXES = {
-    'top': {'x': 'width', 'y': 'depth'},
-    'front': {'x': 'width', 'y': 'height'},
-    'right': {'x': 'depth', 'y': 'height'},
-}
-EPSILON_MM = 0.001
-
 app = None
 ui = None
 handlers = []
@@ -121,135 +127,6 @@ def pick_json_file():
     return dialog.filename
 
 
-def normalize_face(face):
-    if face == 'left':
-        return 'front'
-    return face if face in FACE_ORDER else 'top'
-
-
-def normalize_document(document_data):
-    shapes = []
-    for shape in document_data.get('shapes', []):
-        normalized = dict(shape)
-        normalized['face'] = normalize_face(shape.get('face', document_data.get('activeFace', 'top')))
-        normalized['mode'] = 'cut' if shape.get('mode') == 'cut' else 'add'
-        if normalized.get('type') not in ('rect', 'circle'):
-            continue
-        shapes.append(normalized)
-
-    if not shapes:
-        raise ValueError('JSONに有効な図形がありません。')
-
-    normalized_document = dict(document_data)
-    normalized_document['shapes'] = shapes
-    normalized_document['areaLocks'] = {
-        face: bool(document_data.get('areaLocks', {}).get(face))
-        for face in FACE_ORDER
-    }
-    normalized_document['areaLockConstraints'] = {
-        face: normalize_constraint(document_data.get('areaLockConstraints', {}).get(face))
-        for face in FACE_ORDER
-    }
-    normalized_document['partName'] = document_data.get('partName') or 'oshidasumaho-cad-part'
-    return normalized_document
-
-
-def normalize_constraint(constraint):
-    if not constraint:
-        return None
-    return {
-        'minX': float(constraint.get('minX', 0)),
-        'maxX': float(constraint.get('maxX', 120)),
-        'minY': float(constraint.get('minY', 0)),
-        'maxY': float(constraint.get('maxY', 120)),
-        'constrainedX': bool(constraint.get('constrainedX')),
-        'constrainedY': bool(constraint.get('constrainedY')),
-    }
-
-
-def get_shape_bounds(shape):
-    if shape.get('type') == 'circle':
-        x = float(shape.get('x', 0))
-        y = float(shape.get('y', 0))
-        r = float(shape.get('r', 0))
-        return {'minX': x - r, 'maxX': x + r, 'minY': y - r, 'maxY': y + r}
-
-    x = float(shape.get('x', 0))
-    y = float(shape.get('y', 0))
-    return {
-        'minX': x,
-        'maxX': x + float(shape.get('w', 0)),
-        'minY': y,
-        'maxY': y + float(shape.get('h', 0)),
-    }
-
-
-def merge_bounds(bounds_list):
-    valid = [bounds for bounds in bounds_list if bounds]
-    if not valid:
-        return None
-    return {
-        'minX': min(bounds['minX'] for bounds in valid),
-        'maxX': max(bounds['maxX'] for bounds in valid),
-        'minY': min(bounds['minY'] for bounds in valid),
-        'maxY': max(bounds['maxY'] for bounds in valid),
-    }
-
-
-def get_add_shape_bounds(document_data, face):
-    return merge_bounds([
-        get_shape_bounds(shape)
-        for shape in document_data['shapes']
-        if normalize_face(shape.get('face')) == face and shape.get('mode') != 'cut'
-    ])
-
-
-def intersect_ranges(ranges):
-    valid = [range_data for range_data in ranges if range_data]
-    if not valid:
-        return None
-    min_value = max(range_data['min'] for range_data in valid)
-    max_value = min(range_data['max'] for range_data in valid)
-    if max_value - min_value > EPSILON_MM:
-        return {'min': min_value, 'max': max_value, 'size': max_value - min_value}
-    min_value = min(range_data['min'] for range_data in valid)
-    max_value = max(range_data['max'] for range_data in valid)
-    if max_value - min_value <= EPSILON_MM:
-        raise ValueError('3面の範囲から有効な寸法を作れません。')
-    return {'min': min_value, 'max': max_value, 'size': max_value - min_value}
-
-
-def get_dimension_range_from_face(face, axis, bounds):
-    if not bounds:
-        return None
-    return {
-        'dimension': FACE_AXES[face][axis],
-        'min': bounds['minX'] if axis == 'x' else bounds['minY'],
-        'max': bounds['maxX'] if axis == 'x' else bounds['maxY'],
-    }
-
-
-def get_document_dimensions(document_data):
-    ranges_by_dimension = {'width': [], 'depth': [], 'height': []}
-
-    for face in FACE_ORDER:
-        constraint = document_data.get('areaLockConstraints', {}).get(face)
-        bounds = constraint if document_data.get('areaLocks', {}).get(face) and constraint else get_add_shape_bounds(document_data, face)
-        for axis in ('x', 'y'):
-            range_data = get_dimension_range_from_face(face, axis, bounds)
-            if range_data:
-                ranges_by_dimension[range_data['dimension']].append(range_data)
-
-    dimensions = {
-        name: intersect_ranges(ranges)
-        for name, ranges in ranges_by_dimension.items()
-    }
-    missing = [name for name, value in dimensions.items() if not value]
-    if missing:
-        raise ValueError('寸法を決めるため、上面・正面・右側面にadd図形が必要です: {}'.format(', '.join(missing)))
-    return dimensions
-
-
 def mm_to_cm(value):
     return float(value) / 10.0
 
@@ -282,6 +159,7 @@ class FusionImporter:
         self.dimensions = get_document_dimensions(document_data)
         self.created_planes = []
         self.created_sketches = []
+        self.face_planes = {}
 
     def import_part(self):
         face_bodies = []
@@ -305,7 +183,7 @@ class FusionImporter:
         face_shapes = [
             shape
             for shape in self.document['shapes']
-            if normalize_face(shape.get('face')) == face
+            if shape['face'] == face
         ]
         for shape in face_shapes:
             prism = self.create_shape_prism(face, shape)
@@ -336,10 +214,24 @@ class FusionImporter:
         return result.bodies.item(0)
 
     def create_shape_prism(self, face, shape):
-        sketch = self.create_face_sketch(face)
-        self.draw_shape(sketch, face, shape)
+        shape_id = shape.get('id', 'shape')
+        profiles = get_shape_profiles(shape)
+        body = self.create_profile_prism(face, profiles['outer'], '{}_outer'.format(shape_id))
+        for hole_index, hole_profile in enumerate(profiles['holes']):
+            hole_body = self.create_profile_prism(
+                face,
+                hole_profile,
+                '{}_hole_{}'.format(shape_id, hole_index + 1),
+            )
+            body = self.combine(body, [hole_body], adsk.fusion.FeatureOperations.CutFeatureOperation)
+        body.name = '{}_{}_{}'.format(face, shape.get('mode', 'add'), shape_id)
+        return body
+
+    def create_profile_prism(self, face, profile_data, label):
+        sketch = self.create_face_sketch(face, label)
+        self.draw_profile(sketch, face, profile_data)
         if sketch.profiles.count < 1:
-            raise ValueError('図形からプロファイルを作成できません: {}'.format(shape))
+            raise ValueError('図形からプロファイルを作成できません: {}'.format(label))
         profile = sketch.profiles.item(0)
         extrudes = self.root.features.extrudeFeatures
         extrude_input = extrudes.createInput(profile, adsk.fusion.FeatureOperations.NewBodyFeatureOperation)
@@ -349,18 +241,18 @@ class FusionImporter:
         feature = extrudes.add(extrude_input)
         if feature.bodies.count < 1:
             raise ValueError('押し出しボディを作成できません。')
-        body = feature.bodies.item(0)
-        body.name = '{}_{}_{}'.format(face, shape.get('mode', 'add'), shape.get('id', 'shape'))
-        return body
+        return feature.bodies.item(0)
 
-    def create_face_sketch(self, face):
+    def create_face_sketch(self, face, label):
         plane = self.create_face_plane(face)
         sketch = self.root.sketches.add(plane)
-        sketch.name = 'OSC_{}_profile'.format(face)
+        sketch.name = 'OSC_{}_{}'.format(face, label)
         self.created_sketches.append(sketch)
         return sketch
 
     def create_face_plane(self, face):
+        if face in self.face_planes:
+            return self.face_planes[face]
         planes = self.root.constructionPlanes
         plane_input = planes.createInput()
         if face == 'top':
@@ -376,6 +268,7 @@ class FusionImporter:
         plane = planes.add(plane_input)
         plane.name = 'OSC_{}_start'.format(face)
         self.created_planes.append(plane)
+        self.face_planes[face] = plane
         return plane
 
     def get_extrude_distance_and_direction(self, face):
@@ -385,25 +278,21 @@ class FusionImporter:
             return self.dimensions['depth']['size'], adsk.fusion.ExtentDirections.NegativeExtentDirection
         return self.dimensions['width']['size'], adsk.fusion.ExtentDirections.PositiveExtentDirection
 
-    def draw_shape(self, sketch, face, shape):
-        if shape.get('type') == 'circle':
-            center = self.get_sketch_point(face, float(shape.get('x', 0)), float(shape.get('y', 0)))
-            sketch.sketchCurves.sketchCircles.addByCenterRadius(center, mm_to_cm(shape.get('r', 0)))
+    def draw_profile(self, sketch, face, profile_data):
+        if profile_data['kind'] == 'circle':
+            center = self.get_sketch_point(face, *profile_data['center'])
+            sketch.sketchCurves.sketchCircles.addByCenterRadius(
+                center,
+                mm_to_cm(profile_data['radius']),
+            )
             return
-
-        x = float(shape.get('x', 0))
-        y = float(shape.get('y', 0))
-        w = float(shape.get('w', 0))
-        h = float(shape.get('h', 0))
-        p1 = self.get_sketch_point(face, x, y)
-        p2 = self.get_sketch_point(face, x + w, y)
-        p3 = self.get_sketch_point(face, x + w, y + h)
-        p4 = self.get_sketch_point(face, x, y + h)
+        points = profile_data['points']
+        if len(points) < 3:
+            raise ValueError('閉じた輪郭には3点以上必要です。')
         lines = sketch.sketchCurves.sketchLines
-        lines.addByTwoPoints(p1, p2)
-        lines.addByTwoPoints(p2, p3)
-        lines.addByTwoPoints(p3, p4)
-        lines.addByTwoPoints(p4, p1)
+        sketch_points = [self.get_sketch_point(face, *point) for point in points]
+        for index, start in enumerate(sketch_points):
+            lines.addByTwoPoints(start, sketch_points[(index + 1) % len(sketch_points)])
 
     def get_sketch_point(self, face, first, second):
         if face == 'top':
