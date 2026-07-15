@@ -45,6 +45,7 @@
   "show3DEdges": true,
   "showAllDimensions": false,
   "fitAssist": true,
+  "showQuickHelp": true,
   "shapes": [
     {
       "id": 1,

@@ -27,6 +27,7 @@ const model = {
   show3DEdges: true,
   showAllDimensions: true,
   fitAssist: true,
+  showQuickHelp: false,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top', showDimensions: true },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top', showDimensions: false },
@@ -213,4 +214,5 @@ test('AI prompt targets the current schema and safe JSON output rules', () => {
   assert.match(AI_MODEL_JSON_PROMPT, /rackのrotation/);
   assert.match(AI_MODEL_JSON_PROMPT, /internalGearのouterDiameter/);
   assert.match(AI_MODEL_JSON_PROMPT, /"fitAssist": true/);
+  assert.match(AI_MODEL_JSON_PROMPT, /"showQuickHelp": true/);
 });

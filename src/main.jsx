@@ -73,7 +73,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-22';
+const APP_VERSION = 'proto-2026-06-02-23';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -130,6 +130,7 @@ const initialDocument = {
   show3DEdges: true,
   showAllDimensions: false,
   fitAssist: true,
+  showQuickHelp: true,
   shapes: [
     { id: 1, type: 'rect', x: 10, y: 10, w: 70, h: 42, mode: 'add', face: 'top' },
     { id: 2, type: 'circle', x: 42, y: 31, r: 9, mode: 'cut', face: 'top' },
@@ -170,6 +171,7 @@ function normalizeDocument(document) {
   const show3DEdges = document?.show3DEdges !== false;
   const showAllDimensions = Boolean(document?.showAllDimensions);
   const fitAssist = document?.fitAssist !== false;
+  const showQuickHelp = document?.showQuickHelp !== false;
   const areaLocks = FACE_ORDER.reduce((locks, face) => ({
     ...locks,
     [face]: Boolean(document?.areaLocks?.[face]),
@@ -210,6 +212,7 @@ function normalizeDocument(document) {
     show3DEdges,
     showAllDimensions,
     fitAssist,
+    showQuickHelp,
     shapes,
   };
 }
@@ -2370,6 +2373,7 @@ function App() {
   const [urlDownloadArtifact, setUrlDownloadArtifact] = useState(null);
   const urlAutomationStartedRef = useRef(false);
   const fitAssistBypassRef = useRef(new Map());
+  const fitAssistFeedbackRef = useRef(null);
   const controlPanelRef = useRef(null);
   const editorRefs = useRef(new Map());
   const assemblyRefs = useRef(new Map());
@@ -2508,6 +2512,7 @@ function App() {
   }
 
   function applyFitAssistToPatch(current, shape, patch, interaction) {
+    fitAssistFeedbackRef.current = null;
     const field = interaction?.field;
     const rawValue = Number(field ? patch[field] : NaN);
     if (!field || !Number.isFinite(rawValue)) {
@@ -2551,6 +2556,13 @@ function App() {
       return patch;
     }
     fitAssistBypassRef.current.set(bypassKey, { snappedValue: fit.value });
+    fitAssistFeedbackRef.current = {
+      shapeId: shape.id,
+      face: normalizeFace(shape.face),
+      axis: fit.axis,
+      kind: fit.kind,
+      target: fit.target,
+    };
     return { ...patch, [field]: fit.value };
   }
 
@@ -2583,9 +2595,17 @@ function App() {
 
   function toggleFitAssist() {
     fitAssistBypassRef.current.clear();
+    fitAssistFeedbackRef.current = null;
     setDocument((current) => ({
       ...current,
       fitAssist: !current.fitAssist,
+    }));
+  }
+
+  function toggleQuickHelp() {
+    setDocument((current) => ({
+      ...current,
+      showQuickHelp: !current.showQuickHelp,
     }));
   }
 
@@ -2593,6 +2613,7 @@ function App() {
     setPreview3DSelected(false);
     setOutputOpen(false);
     setAreaLockFeedback(null);
+    fitAssistFeedbackRef.current = null;
     setDocument((current) => {
       const id = getNextId(current.shapes);
       const face = normalizeFace(current.activeFace);
@@ -2620,6 +2641,7 @@ function App() {
     setPreview3DSelected(false);
     setOutputOpen(false);
     setAreaLockFeedback(null);
+    fitAssistFeedbackRef.current = null;
     [...fitAssistBypassRef.current.keys()]
       .filter((key) => key.startsWith(`${id}:`))
       .forEach((key) => fitAssistBypassRef.current.delete(key));
@@ -2675,6 +2697,8 @@ function App() {
   function toggleAreaLock(face) {
     setPreview3DSelected(false);
     setOutputOpen(false);
+    fitAssistBypassRef.current.clear();
+    fitAssistFeedbackRef.current = null;
     const normalizedFace = normalizeFace(face);
     setDocument((current) => {
       const currentLocks = { ...DEFAULT_AREA_LOCKS, ...current.areaLocks };
@@ -2708,6 +2732,7 @@ function App() {
 
   function resetDocument() {
     fitAssistBypassRef.current.clear();
+    fitAssistFeedbackRef.current = null;
     setDocument(initialDocument);
     setSelectedId(initialDocument.shapes[0].id);
     setPreview3DSelected(false);
@@ -2776,6 +2801,7 @@ function App() {
       return;
     }
     fitAssistBypassRef.current.clear();
+    fitAssistFeedbackRef.current = null;
     const nextDocument = normalizeDocument(part.document);
     setDocument(nextDocument);
     setSelectedId(nextDocument.shapes[0]?.id ?? null);
@@ -2786,6 +2812,7 @@ function App() {
 
   function restoreImportedDocument(importedDocument, sourceLabel) {
     fitAssistBypassRef.current.clear();
+    fitAssistFeedbackRef.current = null;
     const nextDocument = normalizeDocument(importedDocument);
     setDocument(nextDocument);
     setSelectedId(null);
@@ -3040,6 +3067,7 @@ function App() {
       }
       setUrlAutomationMode(request.automationMode);
       fitAssistBypassRef.current.clear();
+      fitAssistFeedbackRef.current = null;
       const importedDocument = normalizeDocument(request.document);
       setDocument(importedDocument);
       setSelectedId(null);
@@ -3274,6 +3302,7 @@ function App() {
             show3DEdges={document.show3DEdges}
             viewMode={document.viewMode}
             preview3DSelected={preview3DSelected}
+            fitAssistFeedback={fitAssistFeedbackRef.current}
             menuOpen={previewMenuOpen}
             onSelect={selectShape}
             onFaceSelect={setActiveFace}
@@ -3361,6 +3390,14 @@ function App() {
               onClick={toggleFitAssist}
             >
               フィット
+            </button>
+            <button
+              type="button"
+              className={document.showQuickHelp ? 'active-toggle' : ''}
+              aria-pressed={document.showQuickHelp}
+              onClick={toggleQuickHelp}
+            >
+              簡易ヘルプ
             </button>
           </section>
         ) : null}
@@ -3515,6 +3552,7 @@ function Viewer({
   show3DEdges,
   viewMode,
   preview3DSelected,
+  fitAssistFeedback,
   menuOpen,
   onSelect,
   onFaceSelect,
@@ -3546,6 +3584,13 @@ function Viewer({
   const projectionReadiness = useMemo(
     () => getProjectionReadiness(faceBounds, areaLocks, areaLockConstraints),
     [faceBounds, areaLocks, areaLockConstraints],
+  );
+  const fitTargetsByFace = useMemo(
+    () => Object.fromEntries(FACE_ORDER.map((face) => [
+      face,
+      document.fitAssist ? getFitTargetsForFace(document, face) : { x: null, y: null },
+    ])),
+    [document],
   );
   return (
     <div className="viewer-frame">
@@ -3619,6 +3664,8 @@ function Viewer({
                 shapes={document.shapes.filter((shape) => normalizeFace(shape.face) === face)}
                 constraint={faceConstraints[face]}
                 axisReadiness={projectionReadiness[face]}
+                fitTargets={fitTargetsByFace[face]}
+                fitFeedback={fitAssistFeedback?.face === face ? fitAssistFeedback : null}
                 showAllDimensions={document.showAllDimensions}
                 selectedId={selectedId}
                 onSelect={onSelect}
@@ -3662,6 +3709,9 @@ function Viewer({
                 <PreviewScaleButton is3D onToggle={on3DDoubleSelect} />
               </>
             ) : null}
+            {!previewFace && !previewDimensions && document.showQuickHelp ? (
+              <QuickHelpCard />
+            ) : null}
           </>
         )}
         {is3DMode ? (
@@ -3669,6 +3719,19 @@ function Viewer({
         ) : null}
       </svg>
     </div>
+  );
+}
+
+function QuickHelpCard() {
+  return (
+    <g className="quick-help-card" role="img" aria-label="3D表示までの簡易手順">
+      <rect x="198" y="6" width="120" height="120" rx="4" />
+      <text className="quick-help-title" x="258" y="27">かんたん手順</text>
+      <text x="211" y="49">1  図形を配置</text>
+      <text x="211" y="68">2  面をロック</text>
+      <text x="211" y="87">3  次の面を合わせる</text>
+      <text className="quick-help-finish" x="258" y="110">3面ロックで3D表示</text>
+    </g>
   );
 }
 
@@ -4750,7 +4813,9 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
         <li>アシストの「フィット」をオンにすると、スライダー操作中の図形がロック済みの隣接面の外形端・段差・中央へ近づいた時に吸着します。</li>
+        <li>ロック面の外形中央は隣接面に破線で表示されます。各図形の薄い「＋」は中心位置で、フィットした図形は黒く表示されます。</li>
         <li>吸着後は同じスライダーをそのまま動かして微調整できます。数値入力欄はフィットせず、入力値をそのまま使用します。</li>
+        <li>3D成立前の右上には簡単な手順を表示します。アシストの「簡易ヘルプ」で表示を切り替えられます。</li>
         <li>各面の「拡大」を押すか面をダブルタップすると、その面だけを表示します。「縮小」または再度のダブルタップで3面図へ戻ります。</li>
         <li>3Dプレビューをタップすると、回転・透過・グリッド・エッジの表示を調整できます。</li>
         <li>3Dプレビューの「拡大」を押すかダブルタップすると3D表示を拡大し、「縮小」または再度のダブルタップで戻ります。</li>
@@ -5167,6 +5232,41 @@ function ShapeDimensions({ shape, outerBounds }) {
   );
 }
 
+function FitCenterGuides({ targets, feedback }) {
+  return (
+    <g className="fit-center-guides" aria-hidden="true">
+      {targets?.x ? (
+        <line
+          className={feedback?.kind === 'center' && feedback.axis === 'x' ? 'active' : ''}
+          x1={targets.x.center}
+          y1="0"
+          x2={targets.x.center}
+          y2="120"
+        />
+      ) : null}
+      {targets?.y ? (
+        <line
+          className={feedback?.kind === 'center' && feedback.axis === 'y' ? 'active' : ''}
+          x1="0"
+          y1={targets.y.center}
+          x2="120"
+          y2={targets.y.center}
+        />
+      ) : null}
+    </g>
+  );
+}
+
+function ShapeCenterMarker({ shape, active }) {
+  const bounds = getShapeBounds2D(shape);
+  return (
+    <g className={`shape-center-marker ${active ? 'active' : ''}`} aria-hidden="true">
+      <line x1={bounds.centerX - 3} y1={bounds.centerY} x2={bounds.centerX + 3} y2={bounds.centerY} />
+      <line x1={bounds.centerX} y1={bounds.centerY - 3} x2={bounds.centerX} y2={bounds.centerY + 3} />
+    </g>
+  );
+}
+
 function FacePlan({
   face,
   active,
@@ -5174,6 +5274,8 @@ function FacePlan({
   shapes,
   constraint,
   axisReadiness,
+  fitTargets,
+  fitFeedback,
   showAllDimensions,
   selectedId,
   onSelect,
@@ -5225,6 +5327,14 @@ function FacePlan({
           shape={shape}
           selected={shape.id === selectedId}
           onSelect={() => onSelect(shape.id)}
+        />
+      ))}
+      <FitCenterGuides targets={fitTargets} feedback={fitFeedback} />
+      {shapes.map((shape) => (
+        <ShapeCenterMarker
+          key={`center-${shape.id}`}
+          shape={shape}
+          active={fitFeedback?.shapeId === shape.id}
         />
       ))}
       {dimensionShapes.map((shape) => (

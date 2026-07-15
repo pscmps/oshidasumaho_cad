@@ -461,6 +461,38 @@ input[type="range"] {
   stroke-width: 1.8;
 }
 
+.fit-center-guides {
+  pointer-events: none;
+}
+
+.fit-center-guides line {
+  stroke: rgba(71, 85, 105, 0.5);
+  stroke-width: 0.75;
+  stroke-dasharray: 3 2;
+  vector-effect: non-scaling-stroke;
+}
+
+.fit-center-guides line.active {
+  stroke: #17212b;
+  stroke-width: 1.25;
+}
+
+.shape-center-marker {
+  pointer-events: none;
+}
+
+.shape-center-marker line {
+  stroke: rgba(100, 116, 139, 0.45);
+  stroke-width: 0.8;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.shape-center-marker.active line {
+  stroke: #111827;
+  stroke-width: 1.7;
+}
+
 .area-lock-button {
   cursor: pointer;
   outline: none;
@@ -517,6 +549,36 @@ input[type="range"] {
 
 .iso-preview {
   cursor: pointer;
+}
+
+.quick-help-card {
+  pointer-events: none;
+}
+
+.quick-help-card rect {
+  fill: #f8fafc;
+  stroke: #c8d3df;
+  stroke-width: 1;
+}
+
+.quick-help-card text {
+  fill: #526477;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+.quick-help-card .quick-help-title {
+  fill: #17212b;
+  font-size: 10px;
+  font-weight: 900;
+  text-anchor: middle;
+}
+
+.quick-help-card .quick-help-finish {
+  fill: #334155;
+  font-size: 8.5px;
+  font-weight: 900;
+  text-anchor: middle;
 }
 
 .iso-preview-frame {
