@@ -111,6 +111,8 @@ export function extractAxisFitTargets(polygons, axis) {
     edges: uniqueSorted(edges),
     center: roundToModelPrecision((min + max) / 2),
     centers: [roundToModelPrecision((min + max) / 2)],
+    size: roundToModelPrecision(max - min),
+    sizes: [roundToModelPrecision(max - min)],
   };
 }
 
@@ -119,41 +121,29 @@ export function includeShapeFitTargets(targets, shapes, axis) {
     return null;
   }
   const edges = [...(targets?.edges ?? [])];
-  const outerMin = targets?.edges?.length ? Math.min(...targets.edges) : null;
-  const outerMax = targets?.edges?.length ? Math.max(...targets.edges) : null;
-  const guideEdges = [
-    ...(targets?.guideEdges ?? (targets?.edges ?? []).filter((edge) => (
-      Math.abs(edge - outerMin) > ALIGNMENT_TOLERANCE
-      && Math.abs(edge - outerMax) > ALIGNMENT_TOLERANCE
-    ))),
-  ];
   const centers = [...(targets?.centers ?? (Number.isFinite(targets?.center) ? [targets.center] : []))];
+  const sizes = [...(targets?.sizes ?? (Number.isFinite(targets?.size) ? [targets.size] : []))];
   shapes.forEach((shape) => {
     const bounds = getShapeBounds2D(shape);
     if (axis === 'x') {
       edges.push(bounds.minX, bounds.maxX);
-      guideEdges.push(bounds.minX, bounds.maxX);
       centers.push(bounds.centerX);
+      sizes.push(bounds.width);
     } else {
       edges.push(bounds.minY, bounds.maxY);
-      guideEdges.push(bounds.minY, bounds.maxY);
       centers.push(bounds.centerY);
+      sizes.push(bounds.height);
     }
   });
   const normalizedCenters = uniqueSorted(centers);
-  const normalizedGuideEdges = uniqueSorted(guideEdges).filter((edge) => (
-    outerMin === null
-    || (
-      Math.abs(edge - outerMin) > ALIGNMENT_TOLERANCE
-      && Math.abs(edge - outerMax) > ALIGNMENT_TOLERANCE
-    )
-  ));
+  const normalizedSizes = uniqueSorted(sizes);
   return {
     ...(targets ?? {}),
     edges: uniqueSorted(edges),
     center: targets?.center ?? normalizedCenters[0],
     centers: normalizedCenters,
-    guideEdges: normalizedGuideEdges,
+    size: targets?.size ?? normalizedSizes[0],
+    sizes: normalizedSizes,
   };
 }
 
@@ -186,6 +176,7 @@ function getAlignmentChecks(bounds, axis, targets, positionField) {
   const min = axis === 'x' ? bounds.minX : bounds.minY;
   const max = axis === 'x' ? bounds.maxX : bounds.maxY;
   const center = axis === 'x' ? bounds.centerX : bounds.centerY;
+  const size = axis === 'x' ? bounds.width : bounds.height;
   const checks = targets.edges.flatMap((target) => [
     { error: Math.abs(min - target), kind: 'min', target },
     { error: Math.abs(max - target), kind: 'max', target },
@@ -193,6 +184,10 @@ function getAlignmentChecks(bounds, axis, targets, positionField) {
   if (positionField) {
     (targets.centers ?? [targets.center]).filter(Number.isFinite).forEach((target) => {
       checks.push({ error: Math.abs(center - target), kind: 'center', target });
+    });
+  } else {
+    (targets.sizes ?? [targets.size]).filter(Number.isFinite).forEach((target) => {
+      checks.push({ error: Math.abs(size - target), kind: 'size', target });
     });
   }
   return checks;
@@ -217,8 +212,7 @@ export function findFitValue({
   for (let offsetStep = -6; offsetStep <= 6; offsetStep += 1) {
     const requestedValue = roundToModelPrecision(rawValue + offsetStep / 10);
     if (
-      Math.abs(requestedValue - rawValue) < 0.05
-      || requestedValue < minValue - 0.001
+      requestedValue < minValue - 0.001
       || requestedValue > maxValue + 0.001
     ) {
       continue;
@@ -228,7 +222,7 @@ export function findFitValue({
     const adjustment = Math.abs(candidateValue - rawValue);
     if (
       !Number.isFinite(candidateValue)
-      || adjustment < 0.05
+      || (adjustment < 0.05 && offsetStep !== 0)
       || adjustment > FIT_CAPTURE_DISTANCE + 0.001
       || candidateValue < minValue - 0.001
       || candidateValue > maxValue + 0.001

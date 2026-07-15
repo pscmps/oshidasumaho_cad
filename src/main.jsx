@@ -74,7 +74,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-25';
+const APP_VERSION = 'proto-2026-06-02-26';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -4822,9 +4822,8 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
         <li>「+内歯」では20度圧力角の内歯車を追加し、モジュール・歯数・外径を成立範囲内で調整できます。</li>
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
-        <li>アシストの「フィット」をオンにすると、スライダー操作中の図形がロック済みの隣接面や同じ面にある他の図形の端・段差・中央へ近づいた時に吸着します。</li>
+        <li>アシストの「フィット」をオンにすると、スライダー操作中の図形がロック済みの隣接面や同じ面にある他の図形の端・段差・中央・幅・高さへ近づいた時に吸着します。</li>
         <li>ロック面の外形中央と各配置図形の中心は、隣接面に破線で表示されます。各図形の薄い「＋」は中心位置で、フィットした図形は黒く表示されます。</li>
-        <li>ロック面にある最外形以外の図形端も薄い点線で表示されます。辺へフィットすると補助線と対象の辺が少し濃くなります。</li>
         <li>吸着後は同じスライダーをそのまま動かして微調整できます。数値入力欄はフィットせず、入力値をそのまま使用します。</li>
         <li>3D成立前の右上には簡単な手順を表示します。アシストの「簡易ヘルプ」で表示を切り替えられます。</li>
         <li>各面の「拡大」を押すか面をダブルタップすると、その面だけを表示します。「縮小」または再度のダブルタップで3面図へ戻ります。</li>
@@ -5244,34 +5243,8 @@ function ShapeDimensions({ shape, outerBounds }) {
 }
 
 function FitCenterGuides({ targets, feedback }) {
-  const isActiveEdge = (axis, edge) => (
-    feedback
-    && feedback.kind !== 'center'
-    && feedback.axis === axis
-    && Math.abs(feedback.target - edge) < 0.051
-  );
   return (
     <g className="fit-center-guides" aria-hidden="true">
-      {(targets?.x?.guideEdges ?? []).map((edge) => (
-        <line
-          key={`x-edge-${edge}`}
-          className={`fit-edge-guide ${isActiveEdge('x', edge) ? 'active' : ''}`}
-          x1={edge}
-          y1="0"
-          x2={edge}
-          y2="120"
-        />
-      ))}
-      {(targets?.y?.guideEdges ?? []).map((edge) => (
-        <line
-          key={`y-edge-${edge}`}
-          className={`fit-edge-guide ${isActiveEdge('y', edge) ? 'active' : ''}`}
-          x1="0"
-          y1={edge}
-          x2="120"
-          y2={edge}
-        />
-      ))}
       {(targets?.x?.centers ?? []).map((center) => (
         <line
           key={`x-${center}`}
@@ -5305,35 +5278,6 @@ function FitCenterGuides({ targets, feedback }) {
         />
       ))}
     </g>
-  );
-}
-
-function ShapeFitEdgeHighlight({ shape, feedback }) {
-  if (!shape || !feedback || feedback.kind === 'center') {
-    return null;
-  }
-  const bounds = getShapeBounds2D(shape);
-  if (feedback.axis === 'x') {
-    const x = feedback.kind === 'min' ? bounds.minX : bounds.maxX;
-    return (
-      <line
-        className="shape-fit-edge-highlight"
-        x1={x}
-        y1={bounds.minY}
-        x2={x}
-        y2={bounds.maxY}
-      />
-    );
-  }
-  const y = feedback.kind === 'min' ? bounds.minY : bounds.maxY;
-  return (
-    <line
-      className="shape-fit-edge-highlight"
-      x1={bounds.minX}
-      y1={y}
-      x2={bounds.maxX}
-      y2={y}
-    />
   );
 }
 
@@ -5417,12 +5361,6 @@ function FacePlan({
           active={fitFeedback?.shapeId === shape.id}
         />
       ))}
-      {fitFeedback ? (
-        <ShapeFitEdgeHighlight
-          shape={shapes.find((shape) => shape.id === fitFeedback.shapeId)}
-          feedback={fitFeedback}
-        />
-      ) : null}
       {dimensionShapes.map((shape) => (
         <ShapeDimensions key={`dimensions-${shape.id}`} shape={shape} outerBounds={outerBounds} />
       ))}

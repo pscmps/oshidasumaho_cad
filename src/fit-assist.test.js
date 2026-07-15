@@ -18,18 +18,22 @@ test('fit targets contain visible straight steps, outer bounds, and one overall 
     edges: [10, 35, 50],
     center: 30,
     centers: [30],
+    size: 40,
+    sizes: [40],
   });
   assert.deepEqual(extractAxisFitTargets(steppedPolygon, 'y'), {
     edges: [10, 30, 50],
     center: 30,
     centers: [30],
+    size: 40,
+    sizes: [40],
   });
 });
 
 test('slanted detail does not create extra step targets', () => {
   const polygon = [[[[10, 10], [40, 20], [30, 50], [10, 10]]]];
   assert.deepEqual(extractAxisFitTargets(polygon, 'x'), {
-    edges: [10, 40], center: 25, centers: [25],
+    edges: [10, 40], center: 25, centers: [25], size: 30, sizes: [30],
   });
 });
 
@@ -42,7 +46,7 @@ test('individual source shapes add their own edges and centers as fit targets', 
 
   assert.deepEqual(targets.edges, [10, 35, 37, 47, 50]);
   assert.deepEqual(targets.centers, [30, 42]);
-  assert.deepEqual(targets.guideEdges, [35, 37, 47]);
+  assert.deepEqual(targets.sizes, [10, 40]);
 });
 
 test('individual shapes can provide local fit targets without an outer outline', () => {
@@ -52,7 +56,7 @@ test('individual shapes can provide local fit targets without an outer outline',
 
   assert.deepEqual(targets.edges, [20, 70]);
   assert.deepEqual(targets.centers, [45]);
-  assert.deepEqual(targets.guideEdges, [20, 70]);
+  assert.deepEqual(targets.sizes, [50]);
 });
 
 test('a rectangle lower edge fits to an individual source rectangle lower edge', () => {
@@ -63,7 +67,7 @@ test('a rectangle lower edge fits to an individual source rectangle lower edge',
     rawValue: 34.5,
     targetsByAxis: {
       x: null,
-      y: { edges: [16, 44], center: 30, centers: [30], guideEdges: [44] },
+      y: { edges: [16, 44], center: 30, centers: [30], size: 28, sizes: [28] },
     },
     evaluateShape: (y) => ({ ...shape, y }),
   });
@@ -71,6 +75,24 @@ test('a rectangle lower edge fits to an individual source rectangle lower edge',
   assert.equal(result.value, 34);
   assert.equal(result.kind, 'max');
   assert.equal(result.target, 44);
+});
+
+test('height fits to the height of an individual source rectangle', () => {
+  const shape = { type: 'rect', x: 10, y: 10, w: 20, h: 27 };
+  const result = findFitValue({
+    shape,
+    field: 'h',
+    rawValue: 28,
+    targetsByAxis: {
+      x: null,
+      y: { edges: [16, 44], center: 30, centers: [30], size: 28, sizes: [28] },
+    },
+    evaluateShape: (h) => ({ ...shape, h }),
+  });
+
+  assert.equal(result.value, 28);
+  assert.equal(result.kind, 'size');
+  assert.equal(result.target, 28);
 });
 
 test('position fit can use an individual shape center instead of the overall center', () => {
