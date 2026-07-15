@@ -119,23 +119,41 @@ export function includeShapeFitTargets(targets, shapes, axis) {
     return null;
   }
   const edges = [...(targets?.edges ?? [])];
+  const outerMin = targets?.edges?.length ? Math.min(...targets.edges) : null;
+  const outerMax = targets?.edges?.length ? Math.max(...targets.edges) : null;
+  const guideEdges = [
+    ...(targets?.guideEdges ?? (targets?.edges ?? []).filter((edge) => (
+      Math.abs(edge - outerMin) > ALIGNMENT_TOLERANCE
+      && Math.abs(edge - outerMax) > ALIGNMENT_TOLERANCE
+    ))),
+  ];
   const centers = [...(targets?.centers ?? (Number.isFinite(targets?.center) ? [targets.center] : []))];
   shapes.forEach((shape) => {
     const bounds = getShapeBounds2D(shape);
     if (axis === 'x') {
       edges.push(bounds.minX, bounds.maxX);
+      guideEdges.push(bounds.minX, bounds.maxX);
       centers.push(bounds.centerX);
     } else {
       edges.push(bounds.minY, bounds.maxY);
+      guideEdges.push(bounds.minY, bounds.maxY);
       centers.push(bounds.centerY);
     }
   });
   const normalizedCenters = uniqueSorted(centers);
+  const normalizedGuideEdges = uniqueSorted(guideEdges).filter((edge) => (
+    outerMin === null
+    || (
+      Math.abs(edge - outerMin) > ALIGNMENT_TOLERANCE
+      && Math.abs(edge - outerMax) > ALIGNMENT_TOLERANCE
+    )
+  ));
   return {
     ...(targets ?? {}),
     edges: uniqueSorted(edges),
     center: targets?.center ?? normalizedCenters[0],
     centers: normalizedCenters,
+    guideEdges: normalizedGuideEdges,
   };
 }
 

@@ -42,6 +42,7 @@ test('individual source shapes add their own edges and centers as fit targets', 
 
   assert.deepEqual(targets.edges, [10, 35, 37, 47, 50]);
   assert.deepEqual(targets.centers, [30, 42]);
+  assert.deepEqual(targets.guideEdges, [35, 37, 47]);
 });
 
 test('individual shapes can provide local fit targets without an outer outline', () => {
@@ -51,6 +52,25 @@ test('individual shapes can provide local fit targets without an outer outline',
 
   assert.deepEqual(targets.edges, [20, 70]);
   assert.deepEqual(targets.centers, [45]);
+  assert.deepEqual(targets.guideEdges, [20, 70]);
+});
+
+test('a rectangle lower edge fits to an individual source rectangle lower edge', () => {
+  const shape = { type: 'rect', x: 10, y: 34.5, w: 20, h: 10 };
+  const result = findFitValue({
+    shape,
+    field: 'y',
+    rawValue: 34.5,
+    targetsByAxis: {
+      x: null,
+      y: { edges: [16, 44], center: 30, centers: [30], guideEdges: [44] },
+    },
+    evaluateShape: (y) => ({ ...shape, y }),
+  });
+
+  assert.equal(result.value, 34);
+  assert.equal(result.kind, 'max');
+  assert.equal(result.target, 44);
 });
 
 test('position fit can use an individual shape center instead of the overall center', () => {
