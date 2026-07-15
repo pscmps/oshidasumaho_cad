@@ -110,6 +110,32 @@ export function extractAxisFitTargets(polygons, axis) {
   return {
     edges: uniqueSorted(edges),
     center: roundToModelPrecision((min + max) / 2),
+    centers: [roundToModelPrecision((min + max) / 2)],
+  };
+}
+
+export function includeShapeFitTargets(targets, shapes, axis) {
+  if (!targets && !shapes.length) {
+    return null;
+  }
+  const edges = [...(targets?.edges ?? [])];
+  const centers = [...(targets?.centers ?? (Number.isFinite(targets?.center) ? [targets.center] : []))];
+  shapes.forEach((shape) => {
+    const bounds = getShapeBounds2D(shape);
+    if (axis === 'x') {
+      edges.push(bounds.minX, bounds.maxX);
+      centers.push(bounds.centerX);
+    } else {
+      edges.push(bounds.minY, bounds.maxY);
+      centers.push(bounds.centerY);
+    }
+  });
+  const normalizedCenters = uniqueSorted(centers);
+  return {
+    ...(targets ?? {}),
+    edges: uniqueSorted(edges),
+    center: targets?.center ?? normalizedCenters[0],
+    centers: normalizedCenters,
   };
 }
 
@@ -147,7 +173,9 @@ function getAlignmentChecks(bounds, axis, targets, positionField) {
     { error: Math.abs(max - target), kind: 'max', target },
   ]);
   if (positionField) {
-    checks.push({ error: Math.abs(center - targets.center), kind: 'center', target: targets.center });
+    (targets.centers ?? [targets.center]).filter(Number.isFinite).forEach((target) => {
+      checks.push({ error: Math.abs(center - target), kind: 'center', target });
+    });
   }
   return checks;
 }

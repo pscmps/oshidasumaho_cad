@@ -4,6 +4,7 @@ import {
   extractAxisFitTargets,
   findFitValue,
   getShapeBounds2D,
+  includeShapeFitTargets,
   isFitBypassActive,
 } from './fit-assist.js';
 
@@ -16,16 +17,55 @@ test('fit targets contain visible straight steps, outer bounds, and one overall 
   assert.deepEqual(extractAxisFitTargets(steppedPolygon, 'x'), {
     edges: [10, 35, 50],
     center: 30,
+    centers: [30],
   });
   assert.deepEqual(extractAxisFitTargets(steppedPolygon, 'y'), {
     edges: [10, 30, 50],
     center: 30,
+    centers: [30],
   });
 });
 
 test('slanted detail does not create extra step targets', () => {
   const polygon = [[[[10, 10], [40, 20], [30, 50], [10, 10]]]];
-  assert.deepEqual(extractAxisFitTargets(polygon, 'x'), { edges: [10, 40], center: 25 });
+  assert.deepEqual(extractAxisFitTargets(polygon, 'x'), {
+    edges: [10, 40], center: 25, centers: [25],
+  });
+});
+
+test('individual source shapes add their own edges and centers as fit targets', () => {
+  const base = extractAxisFitTargets(steppedPolygon, 'x');
+  const targets = includeShapeFitTargets(base, [
+    { type: 'circle', x: 42, y: 30, r: 5 },
+    { type: 'rect', x: 10, y: 10, w: 40, h: 40 },
+  ], 'x');
+
+  assert.deepEqual(targets.edges, [10, 35, 37, 47, 50]);
+  assert.deepEqual(targets.centers, [30, 42]);
+});
+
+test('individual shapes can provide local fit targets without an outer outline', () => {
+  const targets = includeShapeFitTargets(null, [
+    { type: 'rect', x: 20, y: 10, w: 50, h: 20 },
+  ], 'x');
+
+  assert.deepEqual(targets.edges, [20, 70]);
+  assert.deepEqual(targets.centers, [45]);
+});
+
+test('position fit can use an individual shape center instead of the overall center', () => {
+  const shape = { type: 'rect', x: 19, y: 5, w: 10, h: 10 };
+  const result = findFitValue({
+    shape,
+    field: 'x',
+    rawValue: 37,
+    targetsByAxis: { x: { edges: [10, 50], center: 30, centers: [30, 42.4] }, y: null },
+    evaluateShape: (x) => ({ ...shape, x }),
+  });
+
+  assert.equal(result.value, 37.4);
+  assert.equal(result.kind, 'center');
+  assert.equal(result.target, 42.4);
 });
 
 test('position fit aligns a rectangle edge or overall center within the capture distance', () => {

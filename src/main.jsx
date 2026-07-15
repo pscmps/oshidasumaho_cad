@@ -65,6 +65,7 @@ import {
   extractAxisFitTargets,
   findFitValue,
   getShapeBounds2D,
+  includeShapeFitTargets,
   isFitBypassActive,
 } from './fit-assist.js';
 import './style.css';
@@ -73,7 +74,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'proto-2026-06-02-23';
+const APP_VERSION = 'proto-2026-06-02-24';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -356,7 +357,8 @@ function getFitTargetsForFace(document, targetFace) {
       .find(([, sourceDimension]) => sourceDimension === dimension)?.[0];
     const sourceShapes = document.shapes.filter((shape) => normalizeFace(shape.face) === sourceFace);
     const polygons = getFaceBooleanPolygons(sourceShapes);
-    return [targetAxis, extractAxisFitTargets(polygons, sourceAxis)];
+    const outlineTargets = extractAxisFitTargets(polygons, sourceAxis);
+    return [targetAxis, includeShapeFitTargets(outlineTargets, sourceShapes, sourceAxis)];
   }));
 }
 
@@ -2531,7 +2533,15 @@ function App() {
       return patch;
     }
 
-    const targetsByAxis = getFitTargetsForFace(current, shape.face);
+    const localShapes = current.shapes.filter((item) => (
+      item.id !== shape.id
+      && normalizeFace(item.face) === normalizeFace(shape.face)
+    ));
+    const adjacentTargets = getFitTargetsForFace(current, shape.face);
+    const targetsByAxis = Object.fromEntries(['x', 'y'].map((axis) => [
+      axis,
+      includeShapeFitTargets(adjacentTargets[axis], localShapes, axis),
+    ]));
     const constraint = getLockedFaceConstraint(current, normalizeFace(shape.face));
     const limits = getShapeControlLimits(
       shape,
@@ -4812,8 +4822,8 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
         <li>「+内歯」では20度圧力角の内歯車を追加し、モジュール・歯数・外径を成立範囲内で調整できます。</li>
         <li>図形をタップすると、その図形の編集UIへ移動します。</li>
         <li>図形以外をタップすると、その面の先頭へ戻ります。</li>
-        <li>アシストの「フィット」をオンにすると、スライダー操作中の図形がロック済みの隣接面の外形端・段差・中央へ近づいた時に吸着します。</li>
-        <li>ロック面の外形中央は隣接面に破線で表示されます。各図形の薄い「＋」は中心位置で、フィットした図形は黒く表示されます。</li>
+        <li>アシストの「フィット」をオンにすると、スライダー操作中の図形がロック済みの隣接面や同じ面にある他の図形の端・段差・中央へ近づいた時に吸着します。</li>
+        <li>ロック面の外形中央と各配置図形の中心は、隣接面に破線で表示されます。各図形の薄い「＋」は中心位置で、フィットした図形は黒く表示されます。</li>
         <li>吸着後は同じスライダーをそのまま動かして微調整できます。数値入力欄はフィットせず、入力値をそのまま使用します。</li>
         <li>3D成立前の右上には簡単な手順を表示します。アシストの「簡易ヘルプ」で表示を切り替えられます。</li>
         <li>各面の「拡大」を押すか面をダブルタップすると、その面だけを表示します。「縮小」または再度のダブルタップで3面図へ戻ります。</li>
@@ -5235,24 +5245,38 @@ function ShapeDimensions({ shape, outerBounds }) {
 function FitCenterGuides({ targets, feedback }) {
   return (
     <g className="fit-center-guides" aria-hidden="true">
-      {targets?.x ? (
+      {(targets?.x?.centers ?? []).map((center) => (
         <line
-          className={feedback?.kind === 'center' && feedback.axis === 'x' ? 'active' : ''}
-          x1={targets.x.center}
+          key={`x-${center}`}
+          className={
+            feedback?.kind === 'center'
+            && feedback.axis === 'x'
+            && Math.abs(feedback.target - center) < 0.051
+              ? 'active'
+              : ''
+          }
+          x1={center}
           y1="0"
-          x2={targets.x.center}
+          x2={center}
           y2="120"
         />
-      ) : null}
-      {targets?.y ? (
+      ))}
+      {(targets?.y?.centers ?? []).map((center) => (
         <line
-          className={feedback?.kind === 'center' && feedback.axis === 'y' ? 'active' : ''}
+          key={`y-${center}`}
+          className={
+            feedback?.kind === 'center'
+            && feedback.axis === 'y'
+            && Math.abs(feedback.target - center) < 0.051
+              ? 'active'
+              : ''
+          }
           x1="0"
-          y1={targets.y.center}
+          y1={center}
           x2="120"
-          y2={targets.y.center}
+          y2={center}
         />
-      ) : null}
+      ))}
     </g>
   );
 }
