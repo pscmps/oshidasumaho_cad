@@ -4859,6 +4859,19 @@ function HelpPanel({ aiPrompt, promptCopied, onCopyAiPrompt }) {
         <li>上面は幅と奥行き、正面は幅と高さ、右側面は奥行きと高さに影響します。</li>
         <li>3面すべてをロックすると、3DプレビューとSTL/STEP保存が使えるようになります。</li>
       </ul>
+      <h2>Fusionアドイン（動作確認中）</h2>
+      <p className="help-copy">
+        保存したJSONをAutodesk Fusionへ読み込み、編集履歴付きのソリッドとして再構築するアドインを公開しています。
+        導入方法とダウンロードは
+        <a
+          href="https://github.com/pscmps/oshidasumaho_cad/tree/main/fusion_addin"
+          target="_blank"
+          rel="noreferrer"
+        >
+          GitHubのFusion Add-inページ
+        </a>
+        を確認してください。
+      </p>
     </div>
   );
 }

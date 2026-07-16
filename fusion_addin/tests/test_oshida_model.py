@@ -13,6 +13,7 @@ from oshida_model import (  # noqa: E402
     get_document_dimensions,
     get_shape_bounds,
     get_shape_profiles,
+    is_full_face_rectangle,
     normalize_document,
 )
 
@@ -65,12 +66,22 @@ class OshidaModelTest(unittest.TestCase):
         self.assertAlmostEqual(rotated_bounds['maxX'] - rotated_bounds['minX'], 10, places=6)
 
     def test_internal_gear_is_an_outer_circle_with_a_tooth_hole(self):
-        shape = self.load_example('internal-gear.json')['shapes'][0]
+        document = self.load_example('internal-gear.json')
+        shape = document['shapes'][0]
         profiles = get_shape_profiles(shape)
         self.assertEqual(profiles['outer']['kind'], 'circle')
         self.assertAlmostEqual(profiles['outer']['radius'], 34)
         self.assertEqual(len(profiles['holes']), 1)
         self.assertEqual(profiles['holes'][0]['kind'], 'polyline')
+        self.assertFalse(is_full_face_rectangle(document, 'top'))
+        self.assertTrue(is_full_face_rectangle(document, 'front'))
+        self.assertTrue(is_full_face_rectangle(document, 'right'))
+
+    def test_face_with_a_cut_is_not_a_redundant_rectangle(self):
+        document = self.load_example('three-face-bracket.json')
+        self.assertFalse(is_full_face_rectangle(document, 'top'))
+        self.assertFalse(is_full_face_rectangle(document, 'front'))
+        self.assertTrue(is_full_face_rectangle(document, 'right'))
 
     def test_unknown_shape_is_rejected_instead_of_silently_removed(self):
         document = {

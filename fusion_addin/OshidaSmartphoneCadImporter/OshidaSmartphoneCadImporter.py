@@ -9,6 +9,7 @@ try:
         FACE_ORDER,
         get_document_dimensions,
         get_shape_profiles,
+        is_full_face_rectangle,
         normalize_document,
     )
 except ImportError:
@@ -16,6 +17,7 @@ except ImportError:
         FACE_ORDER,
         get_document_dimensions,
         get_shape_profiles,
+        is_full_face_rectangle,
         normalize_document,
     )
 
@@ -162,8 +164,16 @@ class FusionImporter:
         self.face_planes = {}
 
     def import_part(self):
+        constraining_faces = [
+            face
+            for face in FACE_ORDER
+            if not is_full_face_rectangle(self.document, face, self.dimensions)
+        ]
+        if not constraining_faces:
+            constraining_faces = [FACE_ORDER[0]]
+
         face_bodies = []
-        for face in FACE_ORDER:
+        for face in constraining_faces:
             body = self.build_face_body(face)
             if not body:
                 raise ValueError('{}面に有効なadd図形がありません。'.format(face))
@@ -211,6 +221,13 @@ class FusionImporter:
         result = self.root.features.combineFeatures.add(combine_input)
         if result.bodies.count < 1:
             return target_body
+        if result.bodies.count != 1:
+            raise ValueError(
+                'ブーリアン結果が複数ボディになりました: operation={}, bodies={}'.format(
+                    operation,
+                    result.bodies.count,
+                )
+            )
         return result.bodies.item(0)
 
     def create_shape_prism(self, face, shape):
@@ -241,6 +258,14 @@ class FusionImporter:
         feature = extrudes.add(extrude_input)
         if feature.bodies.count < 1:
             raise ValueError('押し出しボディを作成できません。')
+        if feature.bodies.count != 1:
+            raise ValueError(
+                '押し出し結果が複数ボディになりました: label={}, profiles={}, bodies={}'.format(
+                    label,
+                    sketch.profiles.count,
+                    feature.bodies.count,
+                )
+            )
         return feature.bodies.item(0)
 
     def create_face_sketch(self, face, label):

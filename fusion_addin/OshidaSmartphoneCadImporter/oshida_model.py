@@ -482,3 +482,27 @@ def get_document_dimensions(document_data):
     if missing:
         raise ValueError('Add shapes are required on all three faces: {}'.format(', '.join(missing)))
     return dimensions
+
+
+def is_full_face_rectangle(document_data, face, dimensions=None):
+    face_shapes = [
+        shape
+        for shape in document_data['shapes']
+        if shape['face'] == face
+    ]
+    if len(face_shapes) != 1:
+        return False
+    shape = face_shapes[0]
+    if shape['type'] != 'rect' or shape['mode'] == 'cut':
+        return False
+
+    dimensions = dimensions or get_document_dimensions(document_data)
+    first = dimensions[FACE_AXES[face]['x']]
+    second = dimensions[FACE_AXES[face]['y']]
+    bounds = get_shape_bounds(shape)
+    return (
+        bounds['minX'] <= first['min'] + EPSILON_MM
+        and bounds['maxX'] >= first['max'] - EPSILON_MM
+        and bounds['minY'] <= second['min'] + EPSILON_MM
+        and bounds['maxY'] >= second['max'] - EPSILON_MM
+    )
