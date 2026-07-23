@@ -207,6 +207,10 @@ BAMBU_FILAMENT_PROFILE=Bambu PLA Basic @BBL X1C
 
 X1 Carbonでは、スライス前にBambu機種プロファイルのincludeを解決し、ジョブ専用の一時機種プロファイルを作ります。ノズル清掃、ベッドレベリング、パージライン、流量校正など、Bambu標準の開始・終了G-codeを含めるために必要です。生成したG-codeにこれらの安全用マーカーがない場合、自動印刷開始を中止します。
 
+機種プロファイルの`inherits`も親プロファイルまで再帰的に展開します。X1 Carbonの
+`printable_area`を継承しない場合、Bambu Studio CLIが既定の200 mm造形領域として扱い、
+幅200 mmを超える正常なモデルを造形領域外と誤判定するためです。
+
 BambuプリンターのFTPSサーバーは、データ接続でTLSセッションを再利用する必要があります。Windowsの`curl.exe`とNode標準TLSクライアントでは、この要件を満たせませんでした。そのため受信機はFTPSアップロードに`src/ftps-upload.py`を使います。この補助スクリプトはPython標準ライブラリだけを使い、ファイル転送時に制御接続のTLSセッションを再利用します。
 
 `BAMBU_PRINT_TEST_ONLY=1`は初期状態の安全制限です。有効な間は、`20mm-test-cube.stl`などテスト用に見えるファイル名の場合だけ自動印刷開始を試みます。この実験的な経路を使用するプリンターで動作確認してから、`BAMBU_PRINT_TEST_ONLY=0`へ変更してください。

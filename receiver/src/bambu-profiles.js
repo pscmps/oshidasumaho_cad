@@ -13,9 +13,24 @@ async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
 
+export async function resolveMachineProfile(root, name, resolving = []) {
+  const normalizedName = withoutJson(name);
+  if (resolving.includes(normalizedName)) {
+    throw new Error(`Circular Bambu machine profile inheritance: ${[...resolving, normalizedName].join(' -> ')}`);
+  }
+
+  const machine = await readJson(profilePath(root, 'machine', normalizedName));
+  if (!machine.inherits) return machine;
+
+  const parent = await resolveMachineProfile(root, machine.inherits, [...resolving, normalizedName]);
+  return {
+    ...parent,
+    ...machine,
+  };
+}
+
 async function writeResolvedMachineProfile(config, outputDir, selected) {
-  const machinePath = profilePath(config.bambuProfileRoot, 'machine', selected.machine);
-  const machine = await readJson(machinePath);
+  const machine = await resolveMachineProfile(config.bambuProfileRoot, selected.machine);
 
   for (const includeName of machine.include || []) {
     const include = await readJson(profilePath(config.bambuProfileRoot, 'machine', includeName));
