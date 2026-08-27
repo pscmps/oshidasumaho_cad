@@ -1,7 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { buildPrintPayload } from '../src/bambu-lan-printer.js';
-import { isPrinterBusy, listAmsTrays, selectAmsTray } from '../src/bambu-mqtt.js';
+import {
+  isCommandAcknowledgement,
+  isFailedCommandAcknowledgement,
+  isFullStatusReport,
+  isPrinterBusy,
+  listAmsTrays,
+  selectAmsTray,
+  summarizePrinterStatus,
+} from '../src/bambu-mqtt.js';
 
 const config = {
   bambuPrintCommand: 'project_file',
@@ -49,8 +57,33 @@ test('project_file payload includes AMS mapping and calibration flags', () => {
   const tray = selectAmsTray(printerReport, config);
   const payload = buildPrintPayload(config, '/sdcard/cube.gcode.3mf', tray);
   assert.equal(payload.print.use_ams, true);
-  assert.deepEqual(payload.print.ams_mapping, [1]);
+  assert.deepEqual(payload.print.ams_mapping, [1, -1, -1, -1, -1]);
   assert.deepEqual(payload.print.ams_mapping2, [{ ams_id: 0, slot_id: 1 }]);
   assert.equal(payload.print.bed_leveling, true);
+  assert.equal(payload.print.bed_levelling, true);
   assert.equal(payload.print.flow_cali, true);
+  assert.equal(payload.print.file, 'cube.gcode.3mf');
+  assert.equal(payload.print.url, 'ftp:///cube.gcode.3mf');
+  assert.equal(payload.print.md5, '');
+});
+
+test('status summary exposes the printer-side developer-mode security hint', () => {
+  assert.equal(summarizePrinterStatus({ fun: 0 }).developerMode, 'likely_enabled');
+  assert.equal(summarizePrinterStatus({ fun: 0x20000000 }).developerMode, 'likely_disabled_or_secured');
+  assert.equal(summarizePrinterStatus({}).developerMode, 'unknown');
+});
+
+test('full status detection rejects partial retained updates', () => {
+  assert.equal(isFullStatusReport({ gcode_state: 'FINISH' }), false);
+  assert.equal(isFullStatusReport({ command: 'push_status' }), false);
+  assert.equal(isFullStatusReport({ command: 'push_status', gcode_state: 'FINISH' }), true);
+});
+
+test('command acknowledgement must match command and sequence id', () => {
+  const request = { command: 'project_file', sequence_id: '123' };
+  assert.equal(isCommandAcknowledgement({ command: 'project_file', sequence_id: '123' }, request), true);
+  assert.equal(isCommandAcknowledgement({ command: 'project_file', sequence_id: '124' }, request), false);
+  assert.equal(isCommandAcknowledgement({ command: 'push_status', sequence_id: '123' }, request), false);
+  assert.equal(isFailedCommandAcknowledgement({ result: 'FAIL' }), true);
+  assert.equal(isFailedCommandAcknowledgement({ result: 'success' }), false);
 });

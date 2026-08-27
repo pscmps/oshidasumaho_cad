@@ -155,6 +155,8 @@ curl.exe -X POST "https://<端末名>.<Tailnet名>.ts.net/upload" `
 3. `BAMBU_AUTO_PRINT=1`の場合、`.gcode.3mf`をFTPSでプリンターへアップロードします。
 4. LAN MQTTの`project_file`コマンドを対象プリンターへ送り、印刷を開始します。
 
+プリンター本体の設定で **Developer Mode** を有効にしてください。現在のBambuファームウェアでは、Developer Modeが無効だと状態取得やFTPSアップロードが成功しても、署名されていないLAN MQTTの印刷開始命令が無視される場合があります。受信機は`project_file`送信後にプリンターのACKを待ち、無応答または拒否を`dispatch_print`／`printer_ack`として報告します。
+
 必要な環境変数：
 
 ```powershell

@@ -119,7 +119,7 @@ async function connect(config) {
   return socket;
 }
 
-function waitForReport(socket, timeoutMs) {
+function waitForReport(socket, timeoutMs, acceptPrint = () => true) {
   return new Promise((resolve, reject) => {
     let buffered = Buffer.alloc(0);
     const timer = setTimeout(() => finish(new Error('MQTT printer report timeout')), timeoutMs);
@@ -132,7 +132,7 @@ function waitForReport(socket, timeoutMs) {
         if ((current[0] >> 4) !== 3) continue;
         try {
           const report = decodePublish(current);
-          if (report.print) finish(null, report.print);
+          if (report.print && acceptPrint(report.print)) finish(null, report.print);
         } catch (error) {
           finish(error);
         }
@@ -157,9 +157,42 @@ export async function publishPrintCommand(config, payload) {
   socket.end();
 }
 
+export async function publishPrintCommandAndWaitAck(config, payload) {
+  const request = payload?.print;
+  if (!request?.command || request.sequence_id === undefined) {
+    throw new Error('Print command and sequence_id are required when waiting for an acknowledgement');
+  }
+
+  const socket = await connect(config);
+  const acknowledgement = waitForReport(
+    socket,
+    Math.min(config.printTimeoutMs, 15000),
+    (print) => isCommandAcknowledgement(print, request),
+  );
+  socket.write(subscribePacket(`device/${config.bambuPrinterSerial}/report`));
+  socket.write(publishPacket(`device/${config.bambuPrinterSerial}/request`, payload));
+  try {
+    return await acknowledgement;
+  } catch (error) {
+    throw new Error(
+      `Printer did not acknowledge ${request.command}; verify Developer Mode is enabled on the printer: ${error.message}`,
+    );
+  } finally {
+    socket.write(Buffer.from([0xe0, 0x00]));
+    socket.end();
+  }
+}
+
 export async function getPrinterStatus(config) {
   const socket = await connect(config);
-  const report = waitForReport(socket, Math.min(config.printTimeoutMs, 15000));
+  // A retained or periodic partial update can arrive immediately after
+  // subscribing. Wait specifically for the complete pushall response instead
+  // of returning that first packet as if it were the current full state.
+  const report = waitForReport(
+    socket,
+    Math.min(config.printTimeoutMs, 15000),
+    isFullStatusReport,
+  );
   socket.write(subscribePacket(`device/${config.bambuPrinterSerial}/report`));
   socket.write(publishPacket(`device/${config.bambuPrinterSerial}/request`, {
     pushing: { command: 'pushall', sequence_id: Date.now().toString() },
@@ -173,6 +206,15 @@ export async function getPrinterStatus(config) {
 }
 
 export function summarizePrinterStatus(print = {}) {
+  const featureFlags = Number(print.fun);
+  const hasFeatureFlags = Number.isFinite(featureFlags);
+  // On current Bambu firmware, bit 29 is set when Authorization Control is
+  // active and clear when printer-side Developer Mode leaves raw LAN MQTT
+  // commands enabled. Treat this as a diagnostic hint, not a protocol
+  // guarantee, because Bambu does not publish the bit layout as a stable API.
+  const developerMode = hasFeatureFlags
+    ? ((featureFlags & 0x20000000) === 0 ? 'likely_enabled' : 'likely_disabled_or_secured')
+    : 'unknown';
   return {
     gcodeState: String(print.gcode_state || '').toUpperCase(),
     percent: print.mc_percent ?? null,
@@ -182,7 +224,23 @@ export function summarizePrinterStatus(print = {}) {
     printError: print.print_error || '',
     failReason: print.fail_reason || '',
     trayNow: print.ams?.tray_now ?? '',
+    featureFlags: hasFeatureFlags ? featureFlags : null,
+    developerMode,
   };
+}
+
+export function isFullStatusReport(print = {}) {
+  return print.command === 'push_status' && typeof print.gcode_state === 'string';
+}
+
+export function isCommandAcknowledgement(print = {}, request = {}) {
+  return print.command === request.command
+    && String(print.sequence_id ?? '') === String(request.sequence_id ?? '');
+}
+
+export function isFailedCommandAcknowledgement(print = {}) {
+  const result = String(print.result ?? '').toLowerCase();
+  return result === 'fail' || result === 'failed' || result === 'error';
 }
 
 export function listAmsTrays(print = {}, filamentType = 'PLA') {

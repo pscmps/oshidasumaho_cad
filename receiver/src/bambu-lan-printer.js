@@ -5,8 +5,10 @@ import { basename, dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   getPrinterStatus,
+  isFailedCommandAcknowledgement,
   isPrinterBusy,
   publishPrintCommand,
+  publishPrintCommandAndWaitAck,
   selectAmsTray,
   summarizePrinterStatus,
   waitForPrintOutcome,
@@ -89,6 +91,7 @@ async function uploadFtps({ config, localPath, remotePath }) {
 
 export function buildPrintPayload(config, remotePath, amsTray = null) {
   if (config.bambuPrintCommand === 'project_file') {
+    const remoteName = basename(remotePath);
     return {
       print: {
         command: 'project_file',
@@ -99,17 +102,24 @@ export function buildPrintPayload(config, remotePath, amsTray = null) {
         task_id: '0',
         subtask_id: '0',
         subtask_name: basename(remotePath),
-        url: `file://${remotePath}`,
+        // FTPS uploads into the SD-card FTP root. project_file must reference
+        // that uploaded archive through the printer's FTP URL.
+        file: remoteName,
+        url: `ftp:///${remoteName}`,
+        md5: '',
         timelapse: false,
         bed_type: 'auto',
         bed_leveling: config.bambuBedLeveling,
+        bed_levelling: config.bambuBedLeveling,
         flow_cali: config.bambuFlowCali,
         vibration_cali: config.bambuVibrationCali,
         layer_inspect: config.bambuLayerInspect,
         use_ams: Boolean(amsTray),
         ...(amsTray
           ? {
-              ams_mapping: [amsTray.globalTrayId],
+              // X1/P1/A1 firmware expects a five-position project-filament
+              // lookup table. This Phase-1 pipeline has one project filament.
+              ams_mapping: [amsTray.globalTrayId, -1, -1, -1, -1],
               ams_mapping2: [{ ams_id: amsTray.amsId, slot_id: amsTray.slotId }],
             }
           : {}),
@@ -275,7 +285,26 @@ export async function printGcodeWithBambuLan(gcodePath, upload, config) {
   }
 
   const payload = buildPrintPayload(config, printRemotePath, amsTray);
-  await publishPrintCommand(config, payload);
+  let commandAcknowledgement;
+  try {
+    commandAcknowledgement = await publishPrintCommandAndWaitAck(config, payload);
+  } catch (error) {
+    return {
+      status: 'print_failed',
+      stage: 'dispatch_print',
+      error: error.message,
+      remotePath: printRemotePath,
+    };
+  }
+  if (isFailedCommandAcknowledgement(commandAcknowledgement)) {
+    return {
+      status: 'print_failed',
+      stage: 'printer_ack',
+      error: commandAcknowledgement.reason || commandAcknowledgement.result || 'Printer rejected the print command',
+      remotePath: printRemotePath,
+      commandAcknowledgement,
+    };
+  }
 
   console.log('[bambu-lan-printer] print start command sent', {
     printerName: config.bambuPrinterName || '(not set)',
@@ -308,6 +337,7 @@ export async function printGcodeWithBambuLan(gcodePath, upload, config) {
       remotePath: printRemotePath,
       amsTray,
       recoveredWithTray,
+      commandAcknowledgement,
       printerStatus: outcomeSummary,
     };
   }
@@ -321,6 +351,7 @@ export async function printGcodeWithBambuLan(gcodePath, upload, config) {
     command: config.bambuPrintCommand,
     amsTray,
     recoveredWithTray,
+    commandAcknowledgement,
     printerStatus: outcomeSummary,
   };
 }
