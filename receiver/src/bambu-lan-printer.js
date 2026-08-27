@@ -297,10 +297,16 @@ export async function printGcodeWithBambuLan(gcodePath, upload, config) {
     };
   }
   if (isFailedCommandAcknowledgement(commandAcknowledgement)) {
+    const acknowledgementReason = commandAcknowledgement.reason
+      || commandAcknowledgement.result
+      || 'Printer rejected the print command';
+    const error = /mqtt message verify failed/i.test(acknowledgementReason)
+      ? `${acknowledgementReason}; enable Developer Mode on the printer before retrying unsigned LAN MQTT control`
+      : acknowledgementReason;
     return {
       status: 'print_failed',
       stage: 'printer_ack',
-      error: commandAcknowledgement.reason || commandAcknowledgement.result || 'Printer rejected the print command',
+      error,
       remotePath: printRemotePath,
       commandAcknowledgement,
     };

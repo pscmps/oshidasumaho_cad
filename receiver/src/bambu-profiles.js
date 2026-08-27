@@ -53,6 +53,7 @@ async function writeJobProcessProfile(config, outputDir, selected, sliceOptions)
   process.from = 'user';
   process.layer_height = sliceOptions.layerHeight;
   process.enable_support = sliceOptions.enableSupport ? '1' : '0';
+  process.sparse_infill_density = `${sliceOptions.infillDensity}%`;
   await writeFile(jobProfilePath, `${JSON.stringify(process, null, 2)}\n`, 'utf8');
   return jobProfilePath;
 }

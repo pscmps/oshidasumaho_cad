@@ -56,7 +56,11 @@ async function listGcodeFiles(outputDir) {
     .map((entry) => join(outputDir, entry.name));
 }
 
-export async function handleUploadedStl(upload, config, sliceOptions = { layerHeight: '0.20', enableSupport: false }) {
+export async function handleUploadedStl(
+  upload,
+  config,
+  sliceOptions = { layerHeight: '0.20', enableSupport: false, infillDensity: '20' },
+) {
   const jobOutputDir = join(config.outputDir, upload.id);
   await mkdir(jobOutputDir, { recursive: true });
   await access(config.bambuStudioPath, constants.F_OK);
