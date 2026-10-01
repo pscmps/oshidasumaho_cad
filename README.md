@@ -38,7 +38,7 @@ python scripts/sketch-browser-smoke.py --url http://127.0.0.1:4186/
 python scripts/ai-native-browser-smoke.py --url http://127.0.0.1:4186/
 ```
 
-Sites checkoutの `.openai/hosting.json` は既存project IDを保ち、`r2: {"binding":"CAD_EXCHANGE"}` / `capabilities: ["mcp"]` を宣言する。公開範囲はowner-only。静的GitHub版の `.openai` 設定は不要。通常buildは従来の `/oshidasumaho_cad/` baseを使用する。`?ai=1`でスケッチから、`?ai=1&cadView=model`で保存済み立体から開ける。起動時に保存された部品を消すことはない。
+Sites checkoutの `.openai/hosting.json` は既存project IDを保ち、`r2: "CAD_EXCHANGE"` / `capabilities: ["mcp"]` を宣言する。公開範囲はowner-only。静的GitHub版の `.openai` 設定は不要。通常buildは従来の `/oshidasumaho_cad/` baseを使用する。`?ai=1`でスケッチから、`?ai=1&cadView=model`で保存済み立体から開ける。起動時に保存された部品を消すことはない。
 
 ## 構成図
 
