@@ -217,7 +217,7 @@ with sync_playwright() as p:
     page.get_by_role('button', name='変更する', exact=True).click()
     page.wait_for_function("cadTools.read_cad_document.execute({}).cad.features.at(-1).radius===4")
     doc = page.evaluate('cadTools.read_cad_document.execute({})')
-    page.goto(base + '?ai=1')
+    page.goto(base + '?ai=1&cadView=model')
     ready(page)
     assert page.evaluate('cadTools.read_cad_document.execute({}).cad.features.at(-1).radius') == 4
     page.close()

@@ -17,6 +17,7 @@ const PLANES = [
 export default function NativeViewer({ mesh, ghost, groups, mode, paint, onSelect, status, view = '3d' }) {
   const container = useRef(), sceneRef = useRef(), callbacks = useRef();
   const [error, setError] = useState('');
+  const [showEdges, setShowEdges] = useState(false);
   callbacks.current = { onSelect, mode, paint };
   useEffect(() => {
     const host = container.current;
@@ -66,7 +67,7 @@ export default function NativeViewer({ mesh, ghost, groups, mode, paint, onSelec
         const c = viewport.camera;
         const span = c.isOrthographicCamera ? c.top - c.bottom : 2 * c.position.distanceTo(controls.target) * Math.tan(THREE.MathUtils.degToRad(c.fov / 2));
         ray.params.Line.threshold = span * 10 / viewport.height;
-        hit = ray.intersectObjects(s.edges).find(e => !faceHit || e.distance <= faceHit.distance + s.size * 0.015);
+        hit = ray.intersectObjects(s.edges.filter(o => o.visible)).find(e => !faceHit || e.distance <= faceHit.distance + s.size * 0.015);
       }
       if (!hit) return;
       const ref = callbacks.current.mode === 'body' ? hit.object.userData.bodyReference : hit.object.userData.reference;
@@ -129,7 +130,7 @@ export default function NativeViewer({ mesh, ghost, groups, mode, paint, onSelec
         const geometry = new THREE.BufferGeometry();
         geometry.setAttribute('position', new THREE.Float32BufferAttribute(edge.lines, 3));
         const line = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial({ color: '#476078', depthTest: true }));
-        line.userData = { reference: edge.reference, lineage: body.lineage, bodyReference: body.bodyReference };
+        line.userData = { reference: edge.reference, lineage: body.lineage, bodyReference: body.bodyReference, appearance: edge.appearance };
         s.objects.add(line); s.edges.push(line);
       });
     });
@@ -159,18 +160,27 @@ export default function NativeViewer({ mesh, ghost, groups, mode, paint, onSelec
       // visible instead of letting another body's surface cover its mark.
       o.renderOrder = marked ? 1 : 0; o.material.polygonOffsetFactor = marked ? -1 : 1;
     });
-    s.edges.forEach(o => { o.material.color.set(colors.get(o) || '#476078'); o.renderOrder = 2; });
-  }, [groups, mesh]);
+    s.edges.forEach(o => {
+      o.material.color.set(colors.get(o) || '#476078'); o.renderOrder = 2;
+      o.visible = o.userData.appearance !== 'seam' && (colors.has(o) || o.userData.appearance !== 'tangent' && (showEdges || mode === 'edge' || view === 'projections'));
+    });
+  }, [groups, mesh, showEdges, mode, view]);
   useEffect(() => {
     const s = sceneRef.current; if (!s) return;
     disposeGroup(s.ghosts);
     ghost?.bodies.forEach(body => body.faces.forEach(face => s.ghosts.add(faceObject(face, true))));
+    if (s.ghosts.children.length) {
+      s.size = Math.max(1, ...displayBounds(s).getSize(new THREE.Vector3()).toArray());
+      if (!s.faces.length || ghost?.bodies.map(b => b.lineage[0]).join('|') !== mesh?.bodies.map(b => b.lineage[0]).join('|')) fitModel(s);
+      fitPlanes(s);
+    }
   }, [ghost]);
   return <div className={`native-viewer ${view === 'projections' ? 'native-projections' : ''}`}>
     <div ref={container} className="native-canvas" aria-label={view === 'projections' ? '立体と連動する3面図・タップで選択' : 'タップで面・ふち・部品を選ぶ立体'} />
     {view === 'projections' ? <div className="projection-labels" aria-hidden="true">{PLANES.map(p => <span key={p.label}>{p.label}</span>)}</div> : null}
-    <div className="native-viewer-note" role="status">{error || status || (view === 'projections' ? '3面図もタップで選択できます' : paint ? '1本指でなぞる · 2本指で移動 / 拡大' : 'タップで選択 · 1本指で回転 · 2本指で移動 / 拡大')}</div>
-    <button className="native-fit" type="button" aria-label="部品を中央に戻す" onClick={() => { const s = sceneRef.current; if (s?.faces.length) { fitModel(s); fitPlanes(s); } }}>中央へ</button>
+    {view === '3d' ? <button type="button" className="native-edge-toggle" aria-pressed={showEdges} onClick={() => setShowEdges(!showEdges)}>輪郭線 {showEdges ? 'ON' : 'OFF'}</button> : null}
+    <div className="native-viewer-note" role="status">{error || (ghost && !mesh?.bodies.length ? '提案をプレビュー中 · 適用すると選択できます' : status) || (view === 'projections' ? '3面図もタップで選択できます' : paint ? '1本指でなぞる · 2本指で移動 / 拡大' : 'タップで選択 · 1本指で回転 · 2本指で移動 / 拡大')}</div>
+    <button className="native-fit" type="button" aria-label="部品を中央に戻す" onClick={() => { const s = sceneRef.current; if (s && (s.faces.length || s.ghosts.children.length)) { fitModel(s); fitPlanes(s); } }}>中央へ</button>
   </div>;
 }
 function viewports(s) {
@@ -178,8 +188,8 @@ function viewports(s) {
   return s.planes.map((camera, i) => ({ x: (i % 2) * s.width / 2, y: Math.floor(i / 2) * s.height / 2, width: s.width / 2, height: s.height / 2, camera }));
 }
 function fitModel(s) {
-  if (!s.faces.length) return;
-  const sphere = new THREE.Box3().setFromObject(s.objects).getBoundingSphere(new THREE.Sphere());
+  if (!s.faces.length && !s.ghosts.children.length) return;
+  const sphere = displayBounds(s).getBoundingSphere(new THREE.Sphere());
   const halfFov = THREE.MathUtils.degToRad(s.camera.fov / 2);
   const angle = Math.min(halfFov, Math.atan(Math.tan(halfFov) * s.camera.aspect));
   const distance = Math.max(1, sphere.radius) / Math.sin(angle) * 1.18;
@@ -192,8 +202,8 @@ function fitModel(s) {
   s.camera.updateProjectionMatrix(); s.controls.update(); s.controls.saveState(); s.controls.enableDamping = damping;
 }
 function fitPlanes(s) {
-  if (!s.faces.length) return;
-  const bounds = new THREE.Box3().setFromObject(s.objects), center = bounds.getCenter(new THREE.Vector3());
+  if (!s.faces.length && !s.ghosts.children.length) return;
+  const bounds = displayBounds(s), center = bounds.getCenter(new THREE.Vector3());
   const size = bounds.getSize(new THREE.Vector3()).toArray(), aspect = s.width / s.height;
   PLANES.forEach((p, i) => {
     if (!p.direction) return;
@@ -204,10 +214,18 @@ function fitPlanes(s) {
     camera.lookAt(center); camera.updateProjectionMatrix();
   });
 }
+function displayBounds(s) {
+  const box = new THREE.Box3();
+  if (s.faces.length) box.setFromObject(s.objects);
+  if (s.ghosts.children.length) box.union(new THREE.Box3().setFromObject(s.ghosts));
+  return box;
+}
 function faceObject(face, ghost) {
   const positions = face.triangles.flatMap(i => face.vertices.slice(i * 3, i * 3 + 3));
   const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.computeVertexNormals();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  if (face.normals?.length === face.vertices.length) geometry.setAttribute('normal', new THREE.Float32BufferAttribute(face.triangles.flatMap(i => face.normals.slice(i * 3, i * 3 + 3)), 3));
+  else geometry.computeVertexNormals();
   return new THREE.Mesh(geometry, new THREE.MeshStandardMaterial({
     color: ghost ? '#f6a623' : '#b8cfe5', roughness: 0.7, metalness: 0.1, side: THREE.DoubleSide,
     transparent: ghost, opacity: ghost ? 0.35 : 1, depthWrite: !ghost, polygonOffset: true, polygonOffsetFactor: ghost ? -2 : 1, polygonOffsetUnits: 1,

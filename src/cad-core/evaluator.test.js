@@ -6,6 +6,7 @@ import { evaluateDocument, meshDocument, exportEvaluated } from './evaluator.js'
 import { executeCommands } from '../cad-command/executor.js';
 import { emptyCad } from './document.js';
 import { parseModelJson, serializeModelJson } from '../model-json.js';
+import { emptyDraft, draftCommand } from './rough-sketch.js';
 
 const kernel = await testKernel();
 const document = executeCommands({ shapes: [], schemaVersion: 5, cad: emptyCad() }, [{ operation: 'addExtrude', profile: { type: 'rectangle', width: 40, height: 30 }, distance: 10, origin: [0, 0, 0] }]);
@@ -35,6 +36,43 @@ test('fillet, radius modification and chamfer produce real kernel shapes', () =>
       evaluated(edited, result => assert.ok(meshDocument(result).bodies[0].faces.length > 6));
     }
   }
+});
+test('rounding removes the sharp corner, keeps CAD normals, and distinguishes tangent boundaries', () => {
+  for (const operation of ['fillet', 'chamfer']) {
+    const edited = executeCommands(marked(edge.reference), [{ operation, selectionGroup:'red', ...(operation==='fillet'?{radius:3}:{distance:3}) }]);
+    evaluated(edited, result => {
+      const actual = meshDocument(result).bodies[0];
+      const removed = operation==='fillet' ? 9*(1-Math.PI/4)*10 : 9/2*10;
+      assert.ok(Math.abs(kernel.measureVolume(result.bodies[0].shape)-(12000-removed))<0.01);
+      const center = edge.reference.entitySelector.center;
+      assert.ok(!actual.edges.some(e=>e.reference.entitySelector.geometryType==='LINE' && e.reference.entitySelector.direction?.[2] > .99 && e.reference.entitySelector.center.every((n,i)=>Math.abs(n-center[i])<1e-5)));
+      if(operation==='fillet') {
+        assert.equal(actual.edges.filter(e=>e.appearance==='tangent').length,2);
+        const curved=actual.faces.find(f=>f.reference.entitySelector.geometryType==='CYLINDRE');
+        assert.ok(curved);
+        const normals = new Set(curved.triangles.map(i=>curved.normals.slice(i*3,i*3+3).map(n=>n.toFixed(3)).join(',')));
+        assert.ok(normals.size>3, 'CAD curved normals must survive meshing');
+      } else assert.equal(actual.edges.filter(e=>e.appearance==='tangent').length,0);
+    });
+  }
+});
+test('new sketch profiles intersect three BRep prisms and preserve holes, dimensions and STEP', async () => {
+  const d=emptyDraft(); d.dimensions={width:40,depth:30,height:10};
+  for(const view of ['top','front','right'])d.views[view].strokes=[{id:view,tool:'rect',role:'outline',points:[[.1,.1],[.9,.9]]}];
+  d.views.top.strokes.push({id:'hole',tool:'ellipse',role:'cut',points:[[.4,.4],[.6,.6]]});
+  const doc=executeCommands({shapes:[],schemaVersion:5},[draftCommand(d)]), result=evaluateDocument(kernel,doc);
+  try {
+    const b=meshDocument(result).bodies[0]; assert.ok(b.faces.some(f=>f.reference.entitySelector.geometryType!=='PLANE'));
+    assert.ok(Math.abs(kernel.measureVolume(result.bodies[0].shape)-(12000-Math.PI*5*3.75*10))<.01);
+    b.bounds[1].forEach((n,i)=>assert.ok(Math.abs(n-[40,30,10][i])<1e-4));
+    assert.match(await exportEvaluated(kernel,result,'step').text(),/ISO-10303-21/);
+    assert.match(await exportEvaluated(kernel,result,'stl').text(),/facet normal/);
+  }finally{result.dispose();}
+  const round=executeCommands({shapes:[]},[{operation:'addSketchSolid',origin:[0,0,0],dimensions:{width:20,depth:20,height:5},profiles:{top:{outer:{type:'ellipse',center:[.5,.5],radii:[.5,.5]},holes:[]}}}]);
+  evaluated(round,r=>{
+    assert.ok(Math.abs(kernel.measureVolume(r.bodies[0].shape)-Math.PI*100*5)<.1);
+    assert.ok(meshDocument(r).bodies[0].edges.some(e=>e.appearance==='seam'));
+  });
 });
 test('distance changes preserve normalized selector after JSON round trip and regeneration', () => {
   const edited = executeCommands(marked(edge.reference), [{ operation: 'changeDistance', selectionGroup: 'red', distance: 20 }]);

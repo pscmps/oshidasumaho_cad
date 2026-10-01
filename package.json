@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/*.test.js src/cad-core/*.test.js src/cad-command/*.test.js"
+    "test": "node --test src/*.test.js src/cad-core/*.test.js src/cad-command/*.test.js",
+    "build:site": "node scripts/build-site.mjs"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",

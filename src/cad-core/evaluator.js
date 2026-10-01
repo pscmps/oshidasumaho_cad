@@ -3,6 +3,8 @@ import { getAllFaceBounds, getDocumentPreviewDimensions } from './projection.js'
 import { diagnoseProjectionConsistency } from '../projection-consistency.js';
 import { cadOf, validateCad, PROJECTION_FEATURE_ID } from './document.js';
 import { geometrySelector, resolveReference } from './selectors.js';
+import { classifyEdges } from './topology-display.js';
+import { buildNativeBase, applyNativeModifier } from './native-features.js';
 
 function boundsOf(shape) {
   const box = shape.boundingBox;
@@ -59,42 +61,18 @@ export function evaluateDocument(replicad, document) {
     }
     for (const f of cad.features) {
       let shape, lineage = [f.id];
-      if (f.type === 'extrude') {
-        const profile = f.profile.type === 'rectangle'
-          ? replicad.sketchRectangle(f.profile.width, f.profile.height, { plane: 'XY', origin: f.origin })
-          : replicad.sketchCircle(f.profile.radius, { plane: 'XY', origin: f.origin });
-        shape = profile.extrude(f.distance);
+      if (['extrude', 'sketchSolid'].includes(f.type)) {
+        shape = buildNativeBase(replicad, f, own);
       } else {
         const input = bodies.get(f.input);
         if (!input) throw new Error(`入力 ${f.input} を生成できません。3面の外形を確認してください。`);
         lineage = [...input.lineage, f.id];
         if (f.type === 'transform') {
-          shape = own(input.shape.clone());
-          f.rotation.forEach((angle, i) => { if (angle) shape = own(shape.rotate(angle, [0, 0, 0], [i === 0 ? 1 : 0, i === 1 ? 1 : 0, i === 2 ? 1 : 0])); });
-          shape = shape.translate(f.translation);
+          shape = applyNativeModifier(replicad, input.shape, f, [], own);
         } else {
           const { selected, release } = selectedEntities(input, f.targets);
           try {
-            if (f.type === 'faceExtrude') {
-              // Initial direct-face editing supports planar, separate faces only.
-              // All faces resolve against the unmodified input to avoid order-dependent naming.
-              if (selected.some(s => s.entity.geomType !== 'PLANE')) throw new Error('直接押出は平面Faceに対応しています。');
-              shape = own(input.shape.clone());
-              for (const { entity } of selected) {
-                const normal = directionOf(entity, 'face');
-                const v = new replicad.Vector(normal.map(n => n * f.distance));
-                let tool;
-                try { tool = replicad.basicFaceExtrusion(entity, v); } finally { v.delete(); }
-                own(tool);
-                shape = own(f.distance > 0 ? shape.fuse(tool) : shape.cut(tool));
-              }
-            } else {
-              const faceEdges = selected.filter(s => s.entityType === 'face').flatMap(s => s.entity.edges);
-              const edges = [...selected.filter(s => s.entityType === 'edge').map(s => s.entity), ...faceEdges];
-              try {
-                shape = input.shape[f.type](e => edges.some(edge => edge.isSame(e)) ? (f.type === 'fillet' ? f.radius : f.distance) : null);
-              } finally { faceEdges.forEach(e => e.delete()); }
-            }
+            shape = applyNativeModifier(replicad, input.shape, f, selected, own);
           } finally { release(); }
         }
         bodies.delete(f.input);
@@ -113,9 +91,10 @@ export function meshDocument(evaluated) {
     // by mesh deflection, which must never become part of persistent naming.
     const candidates = entitiesOf(body);
     const bounds = boundsOf(body.shape);
+    const edgeClasses = classifyEdges(body.shape.oc, candidates);
     const ref = c => ({ featureId: c.featureId, entityType: c.entityType, entitySelector: c.entitySelector });
     try {
-      const mesh = body.shape.mesh({ tolerance: 0.1, angularTolerance: 0.15 });
+      const mesh = body.shape.mesh({ tolerance: 0.05, angularTolerance: 0.08 });
       if (!mesh.triangles.length) throw new Error('有効な三角形を生成できませんでした。');
       const edgeMesh = body.shape.meshEdges({ tolerance: 0.1, angularTolerance: 0.15 });
       return {
@@ -124,12 +103,12 @@ export function meshDocument(evaluated) {
         faces: mesh.faceGroups.map(g => {
           const c = candidates.find(c => c.entityType === 'face' && c.entity.hashCode === g.faceId);
           if (!c) throw new Error('Faceと表示メッシュの対応付けに失敗しました。');
-          return { reference: ref(c), vertices: mesh.vertices, triangles: mesh.triangles.slice(g.start, g.start + g.count) };
+          return { reference: ref(c), vertices: mesh.vertices, normals: mesh.normals, triangles: mesh.triangles.slice(g.start, g.start + g.count) };
         }),
         edges: edgeMesh.edgeGroups.map(g => {
           const c = candidates.find(c => c.entityType === 'edge' && c.entity.hashCode === g.edgeId);
           if (!c) throw new Error('Edgeと表示メッシュの対応付けに失敗しました。');
-          return { reference: ref(c), lines: edgeMesh.lines.slice(g.start * 3, (g.start + g.count) * 3) };
+          return { reference: ref(c), appearance: edgeClasses.get(c.entity.hashCode), lines: edgeMesh.lines.slice(g.start * 3, (g.start + g.count) * 3) };
         }),
       };
     } finally { candidates.forEach(c => c.entity.delete()); }

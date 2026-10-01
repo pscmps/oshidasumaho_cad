@@ -6,11 +6,14 @@
 
 `feat/ai-native-cad-foundation` で、既存の3面編集に **AI指示 / 3D選択** を追加しています。既存の `main` とGitHub Pagesへのデプロイは変更しません。個人用Sitesは別checkout・別originで非公開配信し、ブラウザ保存も既存Pagesとは独立しています。
 
-1. **AIで編集・3Dで選択** を開く。個人用Sitesは最初からこの画面で開く。元の3面編集は「•••」メニューから引き続き利用できる。
-2. 赤・緑・青の色と **面 / ふち / 部品** を選び、モデルをタップする。選んだ場所が色付きになり、件数が表示される。再タップで解除。**なぞって選ぶ** で複数面を追加できる。
-3. **どう変えますか？** に `赤いところを3ミリ削って` のように入力し、**変更する** を押す。「削る」「伸ばす」「角を丸める」「面取りする」の例から文章を入れ、数字だけ変更してもよい。部品を選ぶと厚さ・移動・回転・削除の例になる。
-4. 1本指で回転、**2本指のスライドで位置移動、ピンチで拡大縮小**。**中央へ** で視点・位置・拡大率を戻す。上の **3面図** は編集後の立体を正面・上・右から表示し、そこでも実CAD entityを選べる。元の作図モードとは別の表示。
-5. **寸法・編集履歴** で板の厚さ、丸みの半径などを直接変更できる。専門用語・内部ID・構造化データは通常の操作画面へ出さない。**AI接続・開発用設定** でサンプル応答を選び `少し丸く` / `この辺を逃がして` を入力すると、非同期の提案と半透明プレビューが届く。**適用 / キャンセル** で確定する。待機中もモデルの回転・選択・別の指示を続けられる。
+1. 個人用Sitesは**空の3面ラフスケッチ**から始まる。上・正面・右から自由線 / 四角 / 円を描く。青い外形、赤い穴・切抜き、補助線を切り替え、各面の名前を押すと大きく描ける。
+2. **コメント**を選んで場所をタップし、`ここに直径8mmの穴`などを添える。**幅・奥行き・高さ (mm)** でサイズを決める。説明・コメントの `幅80mm` / `奥行き40ミリ` / `厚さ3ミリ` は寸法欄にも反映する。
+3. **Codexでモデル化**で依頼を送る。下記の接続手順でCodexに読み取り・提案を頼む。**描いた形だけプレビュー**はAIなしで3面の輪郭・穴から立体を作る。コメントの意図はこのローカルプレビューでは解釈しない。
+4. 半透明の結果を確認し、**適用 / キャンセル**を選ぶ。適用前に元モデルは変わらない。待機中も描画・回転・選択・数値編集できる。依頼後に描き直したスケッチへ古い提案を適用することはない。
+5. 立体で赤・緑・青のグループと **面 / ふち / 部品** を選び、モデルをタップする。**なぞって選ぶ**で複数面を追加。**どう変えますか？**へ `赤いところを3ミリ削って`のように入力する。数値のある短い指示はAIなしで変更する。
+6. 1本指で回転、**2本指で位置移動 / ピンチで拡大縮小**。**中央へ**で戻る。**3面図**は編集後の同じ立体を表示し、実CAD entityを選べる。**寸法・編集履歴**で寸法や丸みの半径を変更できる。元の3面編集・アセンブリは「•••」に残る。
+
+丸め・面取りと新しいスケッチ部品は専用B-Rep処理で作る。曲面はCADカーネルの法線で滑らかに表示し、周期面の継ぎ目・接線境界・不要な同一面の分割線を通常の輪郭線にしない。立体は初期状態で線なし。**輪郭線 ON**や**ふち**選択では必要な境界を表示する。
 
 対応ブラウザでは **音声** で文章を入力できる。認識結果を確認して同じ **変更する** ボタンを使う。音声認識はブラウザ提供のサービスである。
 
@@ -20,17 +23,22 @@
 
 選択は実際のOpenCascade Face/Edgeと対応付け、生成元フィーチャーと幾何selectorをJSONへ保存する。表示用の一時的なhash/indexは保存しない。対応が消えた・複数候補がある場合は選び直しを求める。詳細と拡張点は [AI-native architecture](docs/architecture/ai-native-cad.md)。
 
-**実LLMの接続はまだ設定していません。** CADは接続なしで動作する。host側が `window.oshidaCadAIAdapter = { propose(request, { signal }) { ... } }` を注入すると **接続したAIを使う** を選べる（初回表示時にadapterがあれば自動選択）。返すのは許可command配列または確認文で、コード実行やモデル全体置換は受け付けない。Sites用adapterもtransport注入方式で、APIキーを静的frontendへ埋め込まない。
+**Codex接続（個人用Sites）**: このSite用に発行されたプラグインをCodexへインストール・接続する。画面から依頼を送った後、Codexに `CADの最新依頼を確認してモデルを提案して` と伝える。**Codexへの依頼文をコピー**には依頼IDも含まれる。CodexはSiteのMCPで構造化スケッチ・寸法・場所付きコメント・CAD実entityを読み、許可されたcommandだけを返す。ブラウザが受信し、B-Rep評価・ゴースト表示・適用確認を行う。ボタン単独でCodexを起動するAPIではなく、Codexとの短い会話を使う。APIキーは不要。GitHub Pages版は接続がなくてもスケッチの形状プレビュー・数値編集・出力まで動作する。
 
-JSONの既存 `schemaVersion: 5` は維持し、追加データは `cad.schemaVersion: 1` の独立した拡張に保存する。旧version 0〜5の読込・migration・既存storage key・URL automationは継続利用する。追加フィーチャーがあるSTL/STEPは最終B-Repから出力し、従来モデルだけのSTLは既存の距離場方式を維持する。
+交換可能な `propose(request, { signal })` interface、offline、明示的mock、`window.oshidaCadAIAdapter`注入も残す。任意コード実行やモデル全体置換は受け付けない。Sitesの依頼は認証ユーザー別にR2へ保存し、未認証のデータ取得を拒否する。
 
-個人用Sitesの静的ビルド例（公開範囲はSites側でowner-onlyに設定）：
+JSONの既存 `schemaVersion: 5` は維持し、新しい拡張は `cad.schemaVersion: 2` に保存する。CAD拡張v1と従来モデルv0〜5も読める。v2にはラフスケッチの `draft` と一般フィーチャー `sketchSolid` を追加した。既存storage key・URL automationは継続利用する。追加フィーチャーがあるSTL/STEPは最終B-Repから出力し、従来モデルだけのSTLは既存の距離場方式を維持する。
 
 ```bash
-VITE_AI_NATIVE_START=1 npm run build -- --base /
+npm test
+npm run build              # 従来のGitHub Pages用static build
+VITE_AI_NATIVE_START=1 VITE_SITE_CODEX=1 npm run build:site  # 個人用Sites: client + Worker
+node scripts/preview-site.mjs 4186  # loopback限定、開発用認証・R2で実Workerを確認
+python scripts/sketch-browser-smoke.py --url http://127.0.0.1:4186/
+python scripts/ai-native-browser-smoke.py --url http://127.0.0.1:4186/
 ```
 
-GitHub Pages用の通常buildは従来の `/oshidasumaho_cad/` baseを使用する。`?ai=1` で指示画面から開くこともできる。
+Sites checkoutの `.openai/hosting.json` は既存project IDを保ち、`r2: {"binding":"CAD_EXCHANGE"}` / `capabilities: ["mcp"]` を宣言する。公開範囲はowner-only。静的GitHub版の `.openai` 設定は不要。通常buildは従来の `/oshidasumaho_cad/` baseを使用する。`?ai=1`でスケッチから、`?ai=1&cadView=model`で保存済み立体から開ける。起動時に保存された部品を消すことはない。
 
 ## 構成図
 

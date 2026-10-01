@@ -18,7 +18,7 @@ export function createProposal(snapshot, commands, explanation = '') {
   commands = validateCommands(commands);
   const cad = cadOf(snapshot);
   const roots = [...new Set(commands.flatMap(c => {
-    if (c.operation === 'addExtrude') return [];
+    if (['addExtrude', 'addSketchSolid'].includes(c.operation)) return [];
     return c.featureId ? [root(cad, c.featureId)] : cad.selectionGroups[c.selectionGroup].map(r => root(cad, r.featureId));
   }))];
   const selectionGroups = structuredClone(cad.selectionGroups);
@@ -26,6 +26,7 @@ export function createProposal(snapshot, commands, explanation = '') {
   return { commands, explanation, selectionGroups, roots, expected: scope(snapshot, roots), previewKey: geometryKey(preview) };
 }
 export function proposalDocument(current, proposal) {
+  if (proposal.draftKey && JSON.stringify(cadOf(current).draft) !== proposal.draftKey) throw new Error('依頼したスケッチが変更されています。新しいスケッチでもう一度依頼してください。');
   if (scope(current, proposal.roots) !== proposal.expected) throw new Error('待ち時間中に対象モデルが変更されました。現在のモデルでもう一度指示してください。');
   return executeCommands(current, proposal.commands, { selectionGroups: proposal.selectionGroups });
 }

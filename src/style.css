@@ -1902,6 +1902,37 @@ h1 {
 .feature-parameters label { display: flex; align-items: center; gap: 10px; }
 .feature-parameters input { max-width: 120px; }
 .ai-settings label { display: grid; gap: 6px; }
+.native-shell .native-edge-toggle { position: absolute; right: 8px; top: 8px; min-height: 32px; background: #ffffffe0; font-size: 12px; }
+.native-shell .workspace-title { font-size: 14px; }
+.native-shell .native-view-tabs button { padding: 6px 8px; }
+.rough-workspace { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.sketch-tools { display: flex; flex: none; align-items: center; gap: 5px; padding: 6px 8px; background: white; min-width: 0; }
+.native-shell .sketch-tools button { flex: 1; min-width: 0; padding: 4px; font-size: 13px; min-height: 34px; }
+.sketch-tools select { max-width: 95px; min-width: 0; font-size: 13px; height: 34px; border: 1px solid #a5b9cf; border-radius: 6px; background: white; color: #20364e; }
+.rough-grid { flex: 1; min-height: 0; display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); grid-template-rows: repeat(2,minmax(0,1fr)); gap: 1px; background: #bdcee0; }
+.rough-grid-full { grid-template-columns: minmax(0,1fr); grid-template-rows: minmax(0,1fr); }
+.rough-pane { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: white; }
+.rough-pane svg { display: block; width: 100%; flex: 1; min-height: 0; touch-action: none; user-select: none; }
+.native-shell .rough-view-title { display: flex; justify-content: space-between; align-items: center; gap: 4px; flex: none; min-height: 27px; border: 0; border-radius: 0; padding: 3px 8px; text-align: left; font-size: 12px; background: #f6f9fc; }
+.rough-view-title span { font-size: 10px; color: #607a95; font-weight: 400; }
+.native-shell .rough-undo { position: absolute; bottom: 5px; right: 5px; min-height: 24px; font-size: 11px; padding: 2px 5px; background: #ffffffe0; }
+.rough-help { background: #eaf1f9; display: flex; flex-direction: column; justify-content: center; padding: 12px; color: #345777; overflow: auto; }
+.rough-help strong { font-size: 15px; line-height: 1.7; }
+.rough-help p { font-size: 12px; line-height: 1.6; margin: 6px 0 0; }
+.rough-marker { cursor: pointer; }
+.command-panel textarea { width: 100%; box-sizing: border-box; min-width: 0; resize: vertical; font: inherit; font-size: 16px; border: 1px solid #a5b9cf; border-radius: 8px; padding: 8px; color: #20364e; background: white; }
+.sketch-primary { display: grid; gap: 8px; }
+.sketch-primary strong { font-size: 17px; }
+.draft-dimensions { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 7px; }
+.draft-dimensions label { display: grid; gap: 4px; font-size: 12px; }
+.draft-dimensions input { width: 100%; box-sizing: border-box; font-size: 16px; }
+.sketch-comment-editor { display: grid; gap: 6px; padding: 10px; background: #fff7e9; border-radius: 8px; }
+.draft-comments { display: grid; gap: 5px; }
+.draft-comments button { text-align: left; font-weight: 400; overflow-wrap: anywhere; }
+.codex-connection { border-top: 1px solid #dce5ef; padding-top: 12px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.codex-connection p { margin: 6px 0; }
+.codex-connection button { width: 100%; }
+.codex-connection a { display: inline-block; margin-top: 8px; color: #285e98; }
 @media (min-width: 840px) {
   .app-shell { grid-template-columns: minmax(0, 1fr) 420px; }
   .native-shell { grid-template-columns: minmax(0, 1fr) 370px; grid-template-rows: minmax(0, 1fr); }
@@ -1918,6 +1949,9 @@ h1 {
 }
 @media (max-height: 540px) and (max-width: 839px) {
   .native-shell { grid-template-rows: minmax(0, 1fr) minmax(0, 46%); }
+  .rough-grid:not(.rough-grid-full) { grid-template-columns: repeat(3,minmax(0,1fr)); grid-template-rows: minmax(0,1fr); }
+  .rough-help { display: none; }
+  .rough-view-title span { min-width: 0; flex: 1; }
   .selection-guidance { display: none; }
   .selection-toolbar { gap: 4px; padding-top: 4px; padding-bottom: 4px; }
   .native-shell .selection-groups button { min-height: 32px; }

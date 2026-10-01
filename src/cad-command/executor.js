@@ -30,12 +30,15 @@ export function executeCommands(document, commands, { selectionGroups } = {}) {
     if (c.operation === 'modifyFeature') {
       const f = cad.features.find(f => f.id === c.featureId);
       if (!f) throw new Error('フィーチャーがありません。');
-      const allowed = { extrude: ['distance'], faceExtrude: ['distance'], fillet: ['radius'], chamfer: ['distance'], transform: ['translation', 'rotation'] }[f.type];
+      const allowed = { extrude: ['distance'], sketchSolid: ['dimensions'], faceExtrude: ['distance'], fillet: ['radius'], chamfer: ['distance'], transform: ['translation', 'rotation'] }[f.type];
       if (Object.keys(c.changes).some(k => !allowed.includes(k))) throw new Error('このフィーチャーの変更可能な値ではありません。');
       Object.assign(f, c.changes); continue;
     }
     if (c.operation === 'addExtrude') {
       cad.features.push({ id: nextFeatureId(cad, 'extrude'), type: 'extrude', profile: c.profile, distance: c.distance, origin: c.origin }); continue;
+    }
+    if (c.operation === 'addSketchSolid') {
+      cad.features.push({ id: nextFeatureId(cad, 'sketchSolid'), type: 'sketchSolid', profiles: c.profiles, dimensions: c.dimensions, origin: c.origin }); continue;
     }
     const refs = selected(cad, c.selectionGroup);
     if (c.operation === 'removeSelected') {
@@ -49,11 +52,14 @@ export function executeCommands(document, commands, { selectionGroups } = {}) {
     } else if (c.operation === 'changeDistance') {
       const producers = refs.map(({ featureId: id }) => {
         let f = cad.features.find(f => f.id === id);
-        while (f?.input && !['extrude', 'faceExtrude'].includes(f.type)) f = cad.features.find(p => p.id === f.input);
-        if (!f || !['extrude', 'faceExtrude'].includes(f.type)) throw new Error('押出フィーチャーを選択してください。3面投影の寸法は各面で編集します。');
+        while (f?.input && !['extrude', 'faceExtrude', 'sketchSolid'].includes(f.type)) f = cad.features.find(p => p.id === f.input);
+        if (!f || !['extrude', 'faceExtrude', 'sketchSolid'].includes(f.type)) throw new Error('板・柱やスケッチの部品を選択してください。元の3面投影の寸法は各面で編集します。');
         return f;
       });
-      [...new Set(producers)].forEach(f => { f.distance = c.relative ? f.distance + c.distance : c.distance; });
+      [...new Set(producers)].forEach(f => {
+        if (f.type === 'sketchSolid') f.dimensions.height = c.relative ? f.dimensions.height + c.distance : c.distance;
+        else f.distance = c.relative ? f.distance + c.distance : c.distance;
+      });
     } else {
       roots(cad, refs).forEach(input => {
         const targets = refs.filter(r => activeTip(cad, r.featureId) === input);

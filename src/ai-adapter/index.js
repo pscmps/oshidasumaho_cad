@@ -31,7 +31,7 @@ export async function interpretPrompt(document, prompt, { adapter = offlineAdapt
   const local = parseLocalCommand(prompt, { group, featureId, featureType: cadOf(snapshot).features.find(f => f.id === featureId)?.type });
   if (local) return { source: 'local', proposal: createProposal(snapshot, local.commands) };
   const response = await adapter.propose({
-    prompt, activeGroup: group, document: snapshot, features: featureTree(snapshot),
+    task: 'edit', prompt, activeGroup: group, document: snapshot, features: featureTree(snapshot),
     selectionGroups: cadOf(snapshot).selectionGroups, contract: AI_COMMAND_CONTRACT,
   }, { signal });
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');

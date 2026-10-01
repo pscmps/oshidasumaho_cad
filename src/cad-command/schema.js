@@ -1,6 +1,7 @@
 import { GROUPS } from '../cad-core/selectors.js';
+import { validateDimensions, validateProfiles, DIMENSIONS_SCHEMA, PROFILES_SCHEMA } from '../cad-core/rough-sketch.js';
 
-export const OPERATIONS = ['removeFeature', 'removeSelected', 'modifyFeature', 'changeDistance', 'fillet', 'chamfer', 'transform', 'extrudeSelectedFaces', 'addExtrude'];
+export const OPERATIONS = ['removeFeature', 'removeSelected', 'modifyFeature', 'changeDistance', 'fillet', 'chamfer', 'transform', 'extrudeSelectedFaces', 'addExtrude', 'addSketchSolid'];
 const object = v => v && typeof v === 'object' && !Array.isArray(v);
 const number = v => Number.isFinite(v) && Math.abs(v) <= 10000;
 const vector = v => Array.isArray(v) && v.length === 3 && v.every(number);
@@ -9,6 +10,7 @@ const fields = {
   changeDistance: ['selectionGroup', 'distance', 'relative'], fillet: ['selectionGroup', 'radius'],
   chamfer: ['selectionGroup', 'distance'], transform: ['selectionGroup', 'translation', 'rotation'],
   extrudeSelectedFaces: ['selectionGroup', 'distance'], addExtrude: ['profile', 'distance', 'origin'],
+  addSketchSolid: ['profiles', 'dimensions', 'origin'],
 };
 
 export function validateCommand(c) {
@@ -22,10 +24,14 @@ export function validateCommand(c) {
   if (c.relative !== undefined && typeof c.relative !== 'boolean') throw new Error('relativeはbooleanです。');
   if (c.operation === 'transform' && (!vector(c.translation) || !vector(c.rotation))) throw new Error('XYZ移動・回転を指定してください。');
   if (c.operation === 'modifyFeature') {
-    if (!object(c.changes) || !Object.keys(c.changes).length || Object.keys(c.changes).some(k => !['radius', 'distance', 'translation', 'rotation'].includes(k))) throw new Error('変更可能なパラメータだけを指定してください。');
-    Object.entries(c.changes).forEach(([k, v]) => { if (['translation', 'rotation'].includes(k) ? !vector(v) : !number(v)) throw new Error('パラメータ値が不正です。'); });
+    if (!object(c.changes) || !Object.keys(c.changes).length || Object.keys(c.changes).some(k => !['radius', 'distance', 'translation', 'rotation', 'dimensions'].includes(k))) throw new Error('変更可能なパラメータだけを指定してください。');
+    Object.entries(c.changes).forEach(([k, v]) => { if (k === 'dimensions') { validateDimensions(v); return; } if (['translation', 'rotation'].includes(k) ? !vector(v) : !number(v)) throw new Error('パラメータ値が不正です。'); });
   }
   if (c.operation === 'addExtrude' && (!object(c.profile) || !vector(c.origin))) throw new Error('profileとoriginが必要です。');
+  if (c.operation === 'addSketchSolid') {
+    validateProfiles(c.profiles); validateDimensions(c.dimensions);
+    if (!vector(c.origin)) throw new Error('originが必要です');
+  }
   return structuredClone(c);
 }
 
@@ -52,7 +58,8 @@ export const CAD_COMMAND_SCHEMA = { oneOf: OPERATIONS.map(operation => ({
       radius: positiveSchema, distance: operation === 'chamfer' ? positiveSchema : { ...numericSchema, not: { const: 0 } },
       relative: { type: 'boolean' }, translation: vectorSchema, rotation: vectorSchema, origin: vectorSchema,
       profile: profileSchema,
-      changes: { type: 'object', minProperties: 1, additionalProperties: false, properties: { radius: positiveSchema, distance: { ...numericSchema, not: { const: 0 } }, translation: vectorSchema, rotation: vectorSchema } },
+      profiles: PROFILES_SCHEMA, dimensions: DIMENSIONS_SCHEMA,
+      changes: { type: 'object', minProperties: 1, additionalProperties: false, properties: { radius: positiveSchema, distance: { ...numericSchema, not: { const: 0 } }, translation: vectorSchema, rotation: vectorSchema, dimensions: DIMENSIONS_SCHEMA } },
     }[k]])),
   },
 })) };
@@ -63,5 +70,5 @@ export const AI_COMMAND_CONTRACT = {
   response: { commands: 'CAD command[] (1..20)', explanation: 'string', clarification: 'string (no commands when asking)' },
   operations: fields,
   units: { distance: 'mm', radius: 'mm', translation: '[x,y,z] mm', rotation: '[x,y,z] degrees' },
-  rules: ['Use supplied entity references and feature IDs only.', 'No JavaScript, code, GUI actions or whole-document replacements.', 'Ask for clarification when intent or target is ambiguous.', 'removeSelected requires Body selection; face deletion is not supported.'],
+  rules: ['Use supplied entity references and feature IDs only.', 'No JavaScript, code, GUI actions or whole-document replacements.', 'Ask for clarification when intent or target is ambiguous.', 'removeSelected requires Body selection; face deletion is not supported.', 'For a rough sketch use addSketchSolid: normalized closed contours (0..1) in top XY, front XZ and right YZ, dimensions in mm. Intersect the three extruded profiles. Missing views span the stated dimensions. Comments and dimensions express intent; ask if they conflict.'],
 };

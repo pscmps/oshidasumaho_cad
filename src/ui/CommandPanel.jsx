@@ -1,8 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { featureTree } from '../cad-core/document.js';
 import { GROUP_LABELS } from './NativeViewer.jsx';
+import CodexConnection from './CodexConnection.jsx';
 
-const EDIT_LABELS = { projection: '元の3面図の部品', extrude: '板・柱', faceExtrude: '面を伸ばす / 削る', fillet: '角を丸める', chamfer: '面取り', transform: '移動・回転' };
+const EDIT_LABELS = { projection: '元の3面図の部品', extrude: '板・柱', sketchSolid: 'スケッチから作った部品', faceExtrude: '面を伸ばす / 削る', fillet: '角を丸める', chamfer: '面取り', transform: '移動・回転' };
 const labelFor = (f, i) => `${f.type === 'extrude' ? `${f.profile.type === 'circle' ? '円柱' : '四角い板'} ${i + 1}` : EDIT_LABELS[f.type]}${f.radius !== undefined ? ` · 半径${f.radius}mm` : f.distance !== undefined ? ` · ${f.type === 'extrude' ? '厚さ' : ''}${f.distance}mm` : ''}`;
 
 export default function CommandPanel({ document, workspace: w }) {
@@ -46,7 +47,7 @@ export default function CommandPanel({ document, workspace: w }) {
       <button type="submit" className="prompt-submit" disabled={!text.trim()}>{w.pending ? '別の指示を送る' : '変更する'}</button>
     </form>
     {voiceStatus ? <p className="command-note">{voiceStatus}</p> : null}
-    {w.pending || w.status ? <div className="command-feedback"><output className="command-status" aria-live="polite">{w.pending ? '指示を確認中。モデルは引き続き操作できます。' : w.status}</output>{w.pending ? <button type="button" onClick={w.cancel}>取消</button> : null}</div> : null}
+    {w.pending || w.status ? <div className="command-feedback"><output className="command-status" aria-live="polite">{w.status || '指示を確認中。モデルは引き続き操作できます。'}</output>{w.pending ? <button type="button" onClick={w.cancel}>取消</button> : null}</div> : null}
     {w.proposal ? <div className="command-proposal">
       <strong>この変更でよいですか？</strong><p>{w.proposal.explanation || '色のついたプレビューが変更後の形です。'}</p>
       <div className="command-actions"><button type="button" className="prompt-submit" onClick={w.applyProposal}>適用</button><button type="button" onClick={w.cancel}>キャンセル</button></div>
@@ -55,13 +56,15 @@ export default function CommandPanel({ document, workspace: w }) {
       <p className="command-note">{selected.length ? '例を選んで、数字を変えられます' : '上のモデルを選んでから、変更を伝えてください'}</p>
       <div className="command-actions">{examples.map(([label, value]) => <button key={label} type="button" onClick={() => fillExample(value)}>{label}</button>)}</div>
     </div>
-    <p className="ai-availability">{w.adapterMode === 'connected' ? '曖昧な指示は接続したAIに相談できます。' : w.adapterMode === 'mock' ? 'AIの応答は動作確認用サンプルです。' : '数値の指示はすぐ反映。曖昧な指示にはAI接続が必要です。'}</p>
+    <p className="ai-availability">{w.adapterMode === 'codex' ? '数値の指示はすぐ反映。曖昧な意図はCodexへの依頼として送ります。' : w.adapterMode === 'connected' ? '曖昧な指示は接続したAIに相談できます。' : w.adapterMode === 'mock' ? 'AIの応答は動作確認用サンプルです。' : '数値の指示はすぐ反映。曖昧な指示にはAI接続が必要です。'}</p>
+    {w.adapterMode === 'codex' ? <CodexConnection workspace={w} /> : null}
     <details className="feature-tree">
       <summary>寸法・編集履歴（{tree.length}）</summary>
       <button type="button" onClick={addPart}>＋ 四角い板を追加</button>
       <div className="feature-list">{tree.map((f, i) => <button type="button" key={f.id} aria-pressed={w.selectedFeatureId === f.id} className={w.selectedFeatureId === f.id ? 'active-toggle' : ''}
         onClick={() => w.setSelectedFeatureId(f.id)}>{labelFor(f, i)}</button>)}</div>
       {feature && feature.type !== 'projection' ? <div className="feature-parameters">
+        {feature.dimensions ? Object.entries(feature.dimensions).map(([k, value]) => <label key={`${feature.id}-${k}`}>{({width:'幅',depth:'奥行き',height:'高さ'})[k]} (mm)<input type="number" key={`${feature.id}-${k}-${value}`} defaultValue={value} step="0.1" onBlur={e => { const n = +e.target.value; if (Number.isFinite(n) && n !== value) w.runCommands([{ operation: 'modifyFeature', featureId: feature.id, changes: { dimensions: { ...feature.dimensions, [k]: n } } }]); }} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} /></label>) : null}
         {['radius', 'distance'].filter(k => feature[k] !== undefined).map(k => <label key={`${feature.id}-${k}`}>{k === 'radius' ? '丸みの半径 (mm)' : feature.type === 'extrude' ? '板・柱の厚さ (mm)' : '変更量 (mm)'}
           <input type="number" key={`${feature.id}-${k}-${feature[k]}`} defaultValue={feature[k]} step="0.1" onBlur={e => {
             if (!e.target.value.trim()) return;
@@ -73,6 +76,7 @@ export default function CommandPanel({ document, workspace: w }) {
     <details className="ai-settings"><summary>AI接続・開発用設定</summary>
       <label>指示の解釈 <select aria-label="指示の解釈" value={w.adapterMode} onChange={e => w.setAdapterMode(e.target.value)}>
         <option value="offline">数値の指示を端末で処理</option><option value="mock">サンプル応答で試す（AI未接続）</option>
+        {import.meta.env.VITE_SITE_CODEX === '1' ? <option value="codex">Codexにつなぐ</option> : null}
         {window.oshidaCadAIAdapter?.propose ? <option value="connected">接続したAIを使う</option> : null}
       </select></label>
       <details><summary>構造化データを確認</summary><pre>{JSON.stringify(w.groups, null, 2)}</pre></details>

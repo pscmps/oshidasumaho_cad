@@ -1,9 +1,10 @@
 import { GROUPS, validateReference } from './selectors.js';
+import { emptyDraft, validateDraft, validateDimensions, validateProfiles } from './rough-sketch.js';
 
-export const CAD_SCHEMA_VERSION = 1;
+export const CAD_SCHEMA_VERSION = 2;
 export const PROJECTION_FEATURE_ID = 'projection-base';
-export const FEATURE_TYPES = ['extrude', 'fillet', 'chamfer', 'transform', 'faceExtrude'];
-export const emptyCad = () => ({ schemaVersion: CAD_SCHEMA_VERSION, features: [], selectionGroups: { red: [], green: [], blue: [] }, suppressedProjection: false });
+export const FEATURE_TYPES = ['extrude', 'sketchSolid', 'fillet', 'chamfer', 'transform', 'faceExtrude'];
+export const emptyCad = () => ({ schemaVersion: CAD_SCHEMA_VERSION, features: [], selectionGroups: { red: [], green: [], blue: [] }, suppressedProjection: false, draft: emptyDraft() });
 const record = v => v && typeof v === 'object' && !Array.isArray(v);
 const positive = v => Number.isFinite(v) && v > 0 && v <= 10000;
 const vector = v => Array.isArray(v) && v.length === 3 && v.every(n => Number.isFinite(n) && Math.abs(n) <= 10000);
@@ -12,9 +13,10 @@ const keys = (v, allowed) => {
 };
 
 export function validateCad(cad) {
-  keys(cad, ['schemaVersion', 'features', 'selectionGroups', 'suppressedProjection']);
-  if (cad.schemaVersion !== CAD_SCHEMA_VERSION || !Array.isArray(cad.features) || cad.features.length > 500
+  keys(cad, ['schemaVersion', 'features', 'selectionGroups', 'suppressedProjection', ...(cad.schemaVersion === 2 ? ['draft'] : [])]);
+  if (![1, CAD_SCHEMA_VERSION].includes(cad.schemaVersion) || !Array.isArray(cad.features) || cad.features.length > 500
     || typeof cad.suppressedProjection !== 'boolean') throw new Error('CAD documentのversionまたは構造が不正です。');
+  if (cad.draft !== undefined) validateDraft(cad.draft);
   const ids = new Set([PROJECTION_FEATURE_ID]);
   const tips = new Set(cad.suppressedProjection ? [] : [PROJECTION_FEATURE_ID]);
   for (const f of cad.features) {
@@ -31,6 +33,10 @@ export function validateCad(cad) {
         keys(f.profile, ['type', 'radius']);
         if (!positive(f.profile.radius)) throw new Error('円半径が不正です。');
       } else throw new Error('未対応の押出profileです。');
+    } else if (f.type === 'sketchSolid' && cad.schemaVersion === 2) {
+      keys(f, ['id', 'type', 'dimensions', 'profiles', 'origin']);
+      validateDimensions(f.dimensions); validateProfiles(f.profiles);
+      if (!vector(f.origin)) throw new Error('スケッチ部品の位置が不正です');
     } else {
       if (!tips.has(f.input)) throw new Error(`入力 ${f.input} は存在しないか、後続フィーチャーがあります。`);
       tips.delete(f.input);
@@ -59,7 +65,10 @@ export function validateCad(cad) {
   return cad;
 }
 
-export function cadOf(document) { return document.cad || emptyCad(); }
+export function cadOf(document) {
+  const cad = document.cad || emptyCad();
+  return cad.schemaVersion === 1 ? { ...cad, schemaVersion: 2, draft: emptyDraft() } : cad;
+}
 export function geometryKey(document) {
   const cad = cadOf(document);
   return JSON.stringify([document.shapes, cad.features, cad.suppressedProjection]);

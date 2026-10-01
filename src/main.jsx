@@ -101,6 +101,8 @@ import { buildReplicadStepBlob, evaluateInWorker, exportInWorker } from './cad-c
 import { hasNativeGeometry, meshToSurfaces } from './cad-core/mesh.js';
 import NativeViewer from './ui/NativeViewer.jsx';
 import CommandPanel from './ui/CommandPanel.jsx';
+import RoughSketchViewer from './ui/RoughSketchViewer.jsx';
+import SketchPanel from './ui/SketchPanel.jsx';
 import SelectionToolbar from './ui/SelectionToolbar.jsx';
 import { useCadWorkspace } from './ui/useCadWorkspace.js';
 import './style.css';
@@ -307,8 +309,8 @@ function normalizeRotation(rotation) {
 }
 
 function loadDocument() {
-  const fallback = import.meta.env.VITE_AI_NATIVE_START === '1'
-    ? { ...initialDocument, shapes: [], cad: { ...emptyCad(), features: [{ id: 'extrude-1', type: 'extrude', profile: { type: 'rectangle', width: 40, height: 30 }, distance: 10, origin: [0, 0, 0] }] } }
+  const fallback = (import.meta.env.VITE_AI_NATIVE_START === '1' || new URLSearchParams(window.location.search).get('ai') === '1')
+    ? { ...initialDocument, shapes: [], cad: emptyCad() }
     : initialDocument;
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
@@ -375,9 +377,11 @@ function App() {
   const [appMode, setAppMode] = useState('part');
   const [document, setDocument] = useState(loadDocument);
   const [nativeOpen, setNativeOpen] = useState(() => import.meta.env.VITE_AI_NATIVE_START === '1' || new URLSearchParams(window.location.search).get('ai') === '1');
-  const [nativeView, setNativeView] = useState('3d');
+  const [nativeView, setNativeView] = useState(() => { const p = new URLSearchParams(window.location.search); return p.has('json') || p.get('cadView') === 'model' ? '3d' : 'sketch'; });
+  const [selectedComment, setSelectedComment] = useState(null);
   const [nativeMenuOpen, setNativeMenuOpen] = useState(false);
   const workspace = useCadWorkspace(document, setDocument, nativeOpen || hasNativeGeometry(document));
+  useEffect(() => { if (workspace.proposal?.commands.some(c => c.operation === 'addSketchSolid')) setNativeView('3d'); }, [workspace.proposal]);
   const outputReady = Boolean((!document.cad?.suppressedProjection && getLockedPreviewDimensions(document)) || document.cad?.features.length);
   const [assembly, setAssembly] = useState(loadAssemblyDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -1347,8 +1351,9 @@ function App() {
       <section className="viewer-panel" aria-label="CAD viewer">
         {appMode === 'part' ? <div className="native-switch">
           {nativeOpen ? <>
-            <strong className="workspace-title">AIで編集</strong>
+            <strong className="workspace-title">AI CAD</strong>
             <div className="native-view-tabs" role="group" aria-label="モデルの表示方法">
+              <button type="button" aria-pressed={nativeView === 'sketch'} className={nativeView === 'sketch' ? 'active-toggle' : ''} onClick={() => { setNativeView('sketch'); setOutputOpen(false); }}>スケッチ</button>
               <button type="button" aria-pressed={nativeView === '3d'} className={nativeView === '3d' ? 'active-toggle' : ''} onClick={() => setNativeView('3d')}>立体</button>
               <button type="button" aria-pressed={nativeView === 'projections'} className={nativeView === 'projections' ? 'active-toggle' : ''} onClick={() => setNativeView('projections')}>3面図</button>
             </div>
@@ -1377,7 +1382,8 @@ function App() {
             onPartMode={openPartMode}
           />
         ) : nativeOpen ? (
-          <NativeViewer mesh={workspace.mesh} ghost={workspace.ghost} groups={workspace.groups} mode={workspace.mode} paint={workspace.paint} onSelect={workspace.select} status={workspace.meshStatus} view={nativeView} />
+          nativeView === 'sketch' ? <RoughSketchViewer draft={workspace.draft} updateDraft={workspace.updateDraft} selectedComment={selectedComment} onComment={setSelectedComment} />
+          : <NativeViewer mesh={workspace.mesh} ghost={workspace.ghost} groups={workspace.groups} mode={workspace.mode} paint={workspace.paint} onSelect={workspace.select} status={workspace.meshStatus} view={nativeView} />
         ) : (
           <Viewer
             document={document}
@@ -1413,7 +1419,7 @@ function App() {
             onLocalPrintOpen={openLocalPrintDialog}
           />
         )}
-        {appMode === 'part' && nativeOpen ? <SelectionToolbar workspace={workspace} /> : null}
+        {appMode === 'part' && nativeOpen && nativeView !== 'sketch' ? <SelectionToolbar workspace={workspace} /> : null}
       </section>
 
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
@@ -1450,7 +1456,7 @@ function App() {
           />
         ) : null}
 
-        {appMode === 'part' && nativeOpen && !outputOpen ? <CommandPanel document={document} workspace={workspace} /> : null}
+        {appMode === 'part' && nativeOpen && !outputOpen ? nativeView === 'sketch' ? <SketchPanel workspace={workspace} selectedComment={selectedComment} onComment={setSelectedComment} /> : <CommandPanel document={document} workspace={workspace} /> : null}
         {appMode === 'part' && showingFaceControls ? (
           <header className="control-header">
             <div>
