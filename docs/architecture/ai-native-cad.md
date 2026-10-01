@@ -42,9 +42,22 @@ flowchart LR
 | `cad-command/executor.js` | immutable document差分、依存削除、parameter変更 |
 | `cad-command/proposals.js` | snapshot targets、対象bodyの競合検出、最新docへの再適用 |
 | `ai-adapter/index.js` | offline / mock / transport / Site-host transport interface |
-| `ui/NativeViewer.jsx` | 回転・ズーム・tap / paint、実entityの表示と選択 |
+| `ui/NativeViewer.jsx` | 1本指orbit / 2本指pan + dolly、実entityの表示と選択、最終meshの3面図 |
 | `ui/useCadWorkspace.js` | 非同期問い合わせ、ghost、apply、cancel、command undo |
-| `ui/CommandPanel.jsx` | group / prompt / browser voice / feature tree |
+| `ui/SelectionToolbar.jsx` | 色・面 / ふち / 部品・選択件数・paintの常時表示 |
+| `ui/CommandPanel.jsx` | prompt主導、自然な例文、browser voice、日本語の編集履歴 |
+
+## スマホUIと投影表示
+
+AI画面は独立した `.native-shell`。grid列と子パネルに `minmax(0, …)` / `min-width: 0` を指定し、長いfeature名・削除ボタン・canvasのintrinsic pixel sizeが画面幅を押し広げるのを防ぐ。canvasはCSSで表示サイズを固定し、rendererは `setSize(width, height, false)` を使う。
+
+`visualViewport` のresize / scrollから表示高さ・offsetを更新する。keyboardやブラウザのツールバーが動いても固定されたshell内にviewerと指示欄を収める。指示formは下パネル内のsticky表示。詳細は初期状態で閉じ、日本語の説明・例文を優先する。
+
+OrbitControlsの2本指は `DOLLY_PAN`。回転を混ぜない。複数pointer中は選択を発火しない。fitは全実Bodyのsphereとcamera aspectから距離を決め、dampingの残量を解消してpan / 回転 / zoomを戻す。新Bodyを追加したら全体をfitし、通常の差分編集ではユーザーの視点を保持する。
+
+AI画面の3面図は同一WebGL canvasの4 viewport（正面、上面、右側面、立体）に、**同じ最終B-Rep mesh**を描画する。3面にはorthographic cameraを使い、各viewportのcameraでraycastする。Face / Edge参照、選択色、ghostも共通。元のprojection editorは別メニューで残す。一般featureを古い2D shapesへ変換・上書きすることはしない。
+
+日本語の `赤の角を半径2ミリで丸めて` / `赤の厚さを3ミリにして` / `X方向に5ミリ移動して` / `Z軸まわりに90度回して` などをlocal parserへ追加。量のない曖昧な指示は数字を推測せずadapterへ渡す。UIの例文も同じpipelineを使う。
 
 ## 保存形式
 
@@ -140,6 +153,6 @@ Sketch / Revolve / Cut / Union / Hole / Pattern / Mirrorは今後feature typeの
 
 `npm test` は既存8 test modulesにcommand / selector / async proposal / migration testsと実OpenCascade evaluator testsを追加する。後者はブラウザと同じWASMをNodeで読込み、面の正負押出、R2→R3、chamfer、transform、STEP / STL、bracket / spur gear / rack / internal gearを検証する。
 
-ブラウザsmokeはスマホ幅で3D選択、mock待機中の別group選択、ghost適用、R編集、reload / JSON round trip、出力、URL automation、assemblyを確認する。WebMCP APIの登録・valid stage・invalid拒否はbrowser registry shimで確認する。実WebMCP hostでの認証済み呼出確認はこの環境では利用できない。
+ブラウザsmokeは320〜430px幅・横向き・短いviewportのはみ出し、2本指panとrecenter、面 / ふち / 部品選択、最終形状の3面図、自然な例文、mock待機中の別group選択、ghost適用、R編集、reload / JSON round trip、出力、URL automation、assemblyを確認する。WebMCP APIの登録・valid stage・invalid拒否はbrowser registry shimで確認する。実WebMCP hostでの認証済み呼出確認はこの環境では利用できない。
 
 GitHubへは実験branchだけpushし、mainへmergeしない。GitHub Pages workflowは引き続きmainのみ。個人Sitesは別checkoutから `--base /` と `VITE_AI_NATIVE_START=1` で静的buildし、owner-onlyで配信する。通常GitHub Pagesは従来base / 初期documentを維持する。

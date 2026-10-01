@@ -13,7 +13,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   const [group, setGroup] = useState('red'), [mode, setMode] = useState('face'), [paint, setPaint] = useState(false);
   const [proposal, setProposal] = useState(null), [pending, setPending] = useState(false);
   const [status, setStatus] = useState(''), [meshStatus, setMeshStatus] = useState('');
-  const [adapterMode, setAdapterMode] = useState('offline'), [selectedFeatureId, setSelectedFeatureId] = useState('');
+  const [adapterMode, setAdapterMode] = useState(() => window.oshidaCadAIAdapter?.propose ? 'connected' : 'offline'), [selectedFeatureId, setSelectedFeatureId] = useState('');
   const undo = useRef([]);
   const key = geometryKey(document);
 
@@ -23,7 +23,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
     setMeshStatus('形状を生成中… 操作は続けられます');
     evaluateInWorker(latest.current).then(result => {
       if (n !== meshSequence.current) return;
-      setMesh(result); setMeshStatus(result.bodies.length ? '' : '3面の外形を揃えるか、四角柱を追加してください');
+      setMesh(result); setMeshStatus(result.bodies.length ? '' : '部品がありません。「寸法・編集履歴」から板を追加できます');
     }).catch(e => { if (n === meshSequence.current) { setMesh(null); setMeshStatus(e.message); } });
     return () => { meshSequence.current++; };
   }, [key, enabled]);
@@ -100,6 +100,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
     adapterMode, setAdapterMode, selectedFeatureId, setSelectedFeatureId, submit, runCommands,
     groups: cadOf(document).selectionGroups,
     select(ref, brush = false) {
+      setStatus('');
       setDocument(current => {
         const cad = cadOf(current);
         if (brush && cad.selectionGroups[group].some(r => referenceKey(r) === referenceKey(ref))) return current;
@@ -111,9 +112,9 @@ export function useCadWorkspace(document, setDocument, enabled) {
     async applyProposal() { try { await apply(proposal); } catch (e) { setStatus(e.message); } },
     undo() {
       const last = undo.current.at(-1);
-      if (!last) { setStatus('戻せるcommandがありません'); return; }
+      if (!last) { setStatus('まだ戻せる変更がありません'); return; }
       if (geometryKey(latest.current) !== last.key) { setStatus('他のモデル編集があるため戻せません'); return; }
-      undo.current.pop(); setDocument(current => ({ ...current, cad: last.cad })); setProposal(null); setGhost(null); setStatus('前のcommandを戻しました');
+      undo.current.pop(); setDocument(current => ({ ...current, cad: last.cad })); setProposal(null); setGhost(null); setStatus('ひとつ前の変更に戻しました');
     },
   };
 }

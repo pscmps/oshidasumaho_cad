@@ -26,6 +26,30 @@ test('local grammar handles colors, speech units, R/C and numeric transform with
   assert.equal(parseLocalCommand('反対'), null);
   assert.equal(parseLocalCommand('R2をR3にして', { featureId: 'fillet-1' }).commands[0].featureId, 'fillet-1');
 });
+test('plain Japanese example buttons and voice phrasing execute through the local pipeline', async () => {
+  const examples = [
+    ['赤いところを３ミリ削ってください', 'extrudeSelectedFaces', 'distance', -3],
+    ['緑の面を5ミリ伸ばして', 'extrudeSelectedFaces', 'distance', 5],
+    ['青の角を半径2ミリで丸めて', 'fillet', 'radius', 2],
+    ['赤を1ミリ面取りして', 'chamfer', 'distance', 1],
+    ['赤の厚さを3ミリにして', 'changeDistance', 'distance', 3],
+    ['この部品を2ミリ薄くして', 'changeDistance', 'distance', -2],
+    ['緑をX方向に5ミリ移動して', 'transform'],
+    ['青をZ軸まわりに90度回して', 'transform'],
+  ];
+  for (const [text, operation, key, value] of examples) {
+    const c = parseLocalCommand(text).commands[0];
+    assert.equal(c.operation, operation, text); if (key) assert.equal(c[key], value, text);
+  }
+  assert.deepEqual(parseLocalCommand(examples[6][0]).commands[0].translation, [5, 0, 0]);
+  assert.deepEqual(parseLocalCommand(examples[7][0]).commands[0].rotation, [0, 0, 90]);
+  const result = await interpretPrompt(marked(body('extrude-1')), '赤の厚さを3ミリにして', {
+    adapter: createTransportAdapter(() => { throw new Error('local numeric edits must not call AI'); }),
+  });
+  assert.equal(result.source, 'local');
+  assert.equal(proposalDocument(marked(body('extrude-1')), result.proposal).cad.features[0].distance, 3);
+  for (const text of ['赤を少しだけ削って', '緑のように角を丸めて', '赤を緑まで伸ばして']) assert.equal(parseLocalCommand(text), null);
+});
 test('commands reject executable code, unknown operations and malformed values atomically', () => {
   for (const c of [{ operation: 'eval', code: 'alert(1)' }, { operation: 'fillet', selectionGroup: 'red', radius: 3, code: 'x' }, { operation: 'transform', selectionGroup: 'red', translation: [1, 2], rotation: [0, 0, 0] }, { operation: 'changeDistance', selectionGroup: 'purple', distance: 3 }, { operation: 'fillet', selectionGroup: 'red', radius: -3 }]) assert.throws(() => validateCommands([c]));
   const original = marked();
@@ -39,7 +63,7 @@ test('feature deletion cascades dependencies and removes marks, without deleting
   const deleted = executeCommands(d, [{ operation: 'removeFeature', featureId: 'extrude-1' }]);
   assert.deepEqual(deleted.cad.features.map(f => f.id), ['extrude-2']);
   assert.equal(deleted.cad.selectionGroups.red.length, 0); assert.equal(deleted.cad.selectionGroups.green.length, 0);
-  assert.throws(() => executeCommands(marked(), [{ operation: 'removeSelected', selectionGroup: 'red' }]), /Body/);
+  assert.throws(() => executeCommands(marked(), [{ operation: 'removeSelected', selectionGroup: 'red' }]), /部品/);
   assert.equal(executeCommands(marked(body('extrude-1')), [{ operation: 'removeSelected', selectionGroup: 'red' }]).cad.features.length, 0);
 });
 test('document extension preserves v5 models, selections and feature parameters through JSON', () => {

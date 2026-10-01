@@ -1,11 +1,13 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { GROUPS } from '../cad-core/selectors.js';
 import { featureTree } from '../cad-core/document.js';
-import { GROUP_COLORS, GROUP_LABELS } from './NativeViewer.jsx';
+import { GROUP_LABELS } from './NativeViewer.jsx';
+
+const EDIT_LABELS = { projection: '元の3面図の部品', extrude: '板・柱', faceExtrude: '面を伸ばす / 削る', fillet: '角を丸める', chamfer: '面取り', transform: '移動・回転' };
+const labelFor = (f, i) => `${f.type === 'extrude' ? `${f.profile.type === 'circle' ? '円柱' : '四角い板'} ${i + 1}` : EDIT_LABELS[f.type]}${f.radius !== undefined ? ` · 半径${f.radius}mm` : f.distance !== undefined ? ` · ${f.type === 'extrude' ? '厚さ' : ''}${f.distance}mm` : ''}`;
 
 export default function CommandPanel({ document, workspace: w }) {
   const [text, setText] = useState(''), [listening, setListening] = useState(false), [voiceStatus, setVoiceStatus] = useState('');
-  const recognition = useRef();
+  const recognition = useRef(), input = useRef();
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   useEffect(() => () => recognition.current?.abort(), []);
   const voice = () => {
@@ -13,62 +15,67 @@ export default function CommandPanel({ document, workspace: w }) {
     const r = new SpeechRecognition(); r.lang = 'ja-JP'; r.interimResults = true; r.continuous = false;
     recognition.current = r;
     r.onresult = e => { setText(Array.from(e.results).map(result => result[0].transcript).join('')); };
-    r.onerror = e => setVoiceStatus(`音声入力: ${e.error}`);
+    r.onerror = () => setVoiceStatus('音声を認識できませんでした。もう一度試すか、欄に入力してください。');
     r.onend = () => { recognition.current = null; setListening(false); };
-    try { r.start(); setListening(true); setVoiceStatus('認識した文章を確認して実行してください'); }
-    catch (e) { recognition.current = null; setListening(false); setVoiceStatus(e.message); }
+    try { r.start(); setListening(true); setVoiceStatus('話した内容を確認して「変更する」を押してください'); }
+    catch { recognition.current = null; setListening(false); setVoiceStatus('このブラウザでは音声入力を開始できませんでした'); }
   };
   const tree = featureTree(document), feature = tree.find(f => f.id === w.selectedFeatureId);
-  return <section className="command-panel" aria-label="AI-native CAD指示">
-    <div className="selection-groups" role="group" aria-label="指示グループ">
-      {GROUPS.map(g => <button type="button" key={g} className={w.group === g ? 'active-toggle' : ''} aria-pressed={w.group === g}
-        style={{ borderColor: GROUP_COLORS[g] }} onClick={() => w.setGroup(g)}><span style={{ color: GROUP_COLORS[g] }}>●</span> {GROUP_LABELS[g]} ({w.groups[g].length})</button>)}
-    </div>
-    <div className="command-actions" role="group" aria-label="選択方法">
-      {['face', 'edge', 'body'].map(m => <button key={m} type="button" aria-pressed={w.mode === m} className={w.mode === m ? 'active-toggle' : ''} onClick={() => w.setMode(m)}>{m === 'face' ? 'Face' : m === 'edge' ? 'Edge' : 'Body'}</button>)}
-      <button type="button" aria-pressed={w.paint} className={w.paint ? 'active-toggle' : ''} onClick={() => w.setPaint(!w.paint)}>塗る</button>
-      <button type="button" onClick={w.clearGroup}>選択解除</button>
-    </div>
-    <form className="command-form" onSubmit={e => { e.preventDefault(); if (text.trim()) void w.submit(text); }}>
-      <label htmlFor="cad-prompt">対象を選んで、短く指示</label>
+  const color = GROUP_LABELS[w.group], selected = w.groups[w.group], type = selected[0]?.entityType || w.mode;
+  const examples = type === 'body' ? [
+    ['厚さを変える', `${color}の厚さを3ミリにして`], ['移動する', `${color}をX方向に5ミリ移動して`], ['回転する', `${color}をZ軸まわりに90度回して`], ['削除する', `${color}を削除`],
+  ] : type === 'edge' ? [
+    ['角を丸める', `${color}を半径2ミリで丸めて`], ['面取りする', `${color}を1ミリ面取りして`],
+  ] : [
+    ['削る', `${color}を3ミリ削って`], ['伸ばす', `${color}を5ミリ伸ばして`], ['角を丸める', `${color}の角を半径2ミリで丸めて`], ['面取りする', `${color}を1ミリ面取りして`],
+  ];
+  const fillExample = value => { setText(value); input.current?.focus({ preventScroll: true }); };
+  const send = e => { e.preventDefault(); input.current?.blur(); if (text.trim()) void w.submit(text); };
+  const addPart = () => {
+    let x = -Infinity;
+    for (const b of w.mesh?.bodies || []) for (const f of b.faces) for (let i = 0; i < f.vertices.length; i += 3) x = Math.max(x, f.vertices[i]);
+    void w.runCommands([{ operation: 'addExtrude', profile: { type: 'rectangle', width: 40, height: 30 }, distance: 10, origin: [Number.isFinite(x) ? x + 30 : 0, 0, 0] }]);
+  };
+  return <section className="command-panel" aria-label="AIへの変更指示">
+    <form className="command-form" onSubmit={send}>
+      <div className="prompt-heading"><label htmlFor="cad-prompt">どう変えますか？</label><button type="button" className="undo-button" onClick={w.undo}>元に戻す</button></div>
       <div className="prompt-row">
-        <input id="cad-prompt" value={text} onChange={e => setText(e.target.value)} placeholder="赤を3ミリ削って / R3 / X5mm移動" autoComplete="off" />
-        <button type="submit">実行</button>
-        {SpeechRecognition ? <button type="button" aria-pressed={listening} onClick={voice}>{listening ? '停止' : '音声'}</button> : null}
+        <input ref={input} id="cad-prompt" value={text} onChange={e => setText(e.target.value)} placeholder="例：赤いところを3ミリ削って" autoComplete="off" enterKeyHint="send" />
+        {SpeechRecognition ? <button type="button" className="voice-button" aria-label={listening ? '音声入力を停止' : '音声で指示する'} aria-pressed={listening} onClick={voice}>{listening ? '停止' : '音声'}</button> : null}
       </div>
+      <button type="submit" className="prompt-submit" disabled={!text.trim()}>{w.pending ? '別の指示を送る' : '変更する'}</button>
     </form>
-    {voiceStatus || !SpeechRecognition ? <p className="command-note">{voiceStatus || '音声入力は対応ブラウザで利用できます。テキスト入力はいつでも使えます。'}</p> : null}
-    <div className="command-actions">
-      <label>意図の解釈 <select value={w.adapterMode} onChange={e => w.setAdapterMode(e.target.value)}>
-        <option value="offline">ローカルのみ</option><option value="mock">モックAI（動作確認）</option>
-        {window.oshidaCadAIAdapter?.propose ? <option value="connected">接続済みAI</option> : null}
-      </select></label>
-      <button type="button" onClick={w.undo}>元に戻す</button>
-      {w.pending ? <button type="button" onClick={w.cancel}>問い合わせを取消</button> : null}
-    </div>
-    <output className="command-status" aria-live="polite">{w.pending ? '処理中・CADは操作できます。 ' : ''}{w.status}</output>
+    {voiceStatus ? <p className="command-note">{voiceStatus}</p> : null}
+    {w.pending || w.status ? <div className="command-feedback"><output className="command-status" aria-live="polite">{w.pending ? '指示を確認中。モデルは引き続き操作できます。' : w.status}</output>{w.pending ? <button type="button" onClick={w.cancel}>取消</button> : null}</div> : null}
     {w.proposal ? <div className="command-proposal">
-      <strong>変更の提案</strong><p>{w.proposal.explanation}</p>
-      <pre>{JSON.stringify(w.proposal.commands, null, 2)}</pre>
-      <div className="command-actions"><button type="button" onClick={w.applyProposal}>適用</button><button type="button" onClick={w.cancel}>キャンセル</button></div>
+      <strong>この変更でよいですか？</strong><p>{w.proposal.explanation || '色のついたプレビューが変更後の形です。'}</p>
+      <div className="command-actions"><button type="button" className="prompt-submit" onClick={w.applyProposal}>適用</button><button type="button" onClick={w.cancel}>キャンセル</button></div>
     </div> : null}
-    <p className="command-note">Face: 平面の押出・削り / FaceのR・C: 境界Edge / 削除: Body。赤・緑・青に固定の操作意味はありません。</p>
-    <details className="feature-tree" open>
-      <summary>フィーチャー ({tree.length})</summary>
-      <button type="button" onClick={() => w.runCommands([{ operation: 'addExtrude', profile: { type: 'rectangle', width: 40, height: 30 }, distance: 10, origin: [0, 0, 0] }])}>+ 四角柱 40×30×10</button>
-      <div className="feature-list">{tree.map(f => <button type="button" key={f.id} aria-pressed={w.selectedFeatureId === f.id} className={w.selectedFeatureId === f.id ? 'active-toggle' : ''}
-        onClick={() => w.setSelectedFeatureId(f.id)}>{f.id} · {f.type}{f.radius !== undefined ? ` · R${f.radius}` : f.distance !== undefined ? ` · ${f.distance}mm` : ''}</button>)}</div>
+    <div className="prompt-examples" aria-label="指示の例">
+      <p className="command-note">{selected.length ? '例を選んで、数字を変えられます' : '上のモデルを選んでから、変更を伝えてください'}</p>
+      <div className="command-actions">{examples.map(([label, value]) => <button key={label} type="button" onClick={() => fillExample(value)}>{label}</button>)}</div>
+    </div>
+    <p className="ai-availability">{w.adapterMode === 'connected' ? '曖昧な指示は接続したAIに相談できます。' : w.adapterMode === 'mock' ? 'AIの応答は動作確認用サンプルです。' : '数値の指示はすぐ反映。曖昧な指示にはAI接続が必要です。'}</p>
+    <details className="feature-tree">
+      <summary>寸法・編集履歴（{tree.length}）</summary>
+      <button type="button" onClick={addPart}>＋ 四角い板を追加</button>
+      <div className="feature-list">{tree.map((f, i) => <button type="button" key={f.id} aria-pressed={w.selectedFeatureId === f.id} className={w.selectedFeatureId === f.id ? 'active-toggle' : ''}
+        onClick={() => w.setSelectedFeatureId(f.id)}>{labelFor(f, i)}</button>)}</div>
       {feature && feature.type !== 'projection' ? <div className="feature-parameters">
-        {['radius', 'distance'].filter(k => feature[k] !== undefined).map(k => <label key={`${feature.id}-${k}`}>{k === 'radius' ? 'R (mm)' : '距離 (mm)'}
+        {['radius', 'distance'].filter(k => feature[k] !== undefined).map(k => <label key={`${feature.id}-${k}`}>{k === 'radius' ? '丸みの半径 (mm)' : feature.type === 'extrude' ? '板・柱の厚さ (mm)' : '変更量 (mm)'}
           <input type="number" key={`${feature.id}-${k}-${feature[k]}`} defaultValue={feature[k]} step="0.1" onBlur={e => {
-            const value = Number(e.target.value); if (value !== feature[k]) w.runCommands([{ operation: 'modifyFeature', featureId: feature.id, changes: { [k]: value } }]);
+            if (!e.target.value.trim()) return;
+            const value = Number(e.target.value); if (Number.isFinite(value) && value !== feature[k]) w.runCommands([{ operation: 'modifyFeature', featureId: feature.id, changes: { [k]: value } }]);
           }} onKeyDown={e => { if (e.key === 'Enter') e.currentTarget.blur(); }} /></label>)}
-        <button type="button" onClick={() => w.runCommands([{ operation: 'removeFeature', featureId: feature.id }])}>このフィーチャーと後続を削除</button>
+        <button type="button" onClick={() => w.runCommands([{ operation: 'removeFeature', featureId: feature.id }])}>この編集と、それに続く編集を削除</button>
       </div> : null}
     </details>
-    <details><summary>選択データ / command例</summary>
-      <pre>{JSON.stringify(w.groups, null, 2)}</pre>
-      <p className="command-note">R3、C1、3mm、赤を5mm伸ばす、青をZ90度回転。モックは「少し丸く」「この辺を逃がして」。JSON commandも入力できます。</p>
+    <details className="ai-settings"><summary>AI接続・開発用設定</summary>
+      <label>指示の解釈 <select aria-label="指示の解釈" value={w.adapterMode} onChange={e => w.setAdapterMode(e.target.value)}>
+        <option value="offline">数値の指示を端末で処理</option><option value="mock">サンプル応答で試す（AI未接続）</option>
+        {window.oshidaCadAIAdapter?.propose ? <option value="connected">接続したAIを使う</option> : null}
+      </select></label>
+      <details><summary>構造化データを確認</summary><pre>{JSON.stringify(w.groups, null, 2)}</pre></details>
     </details>
   </section>;
 }

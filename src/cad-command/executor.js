@@ -39,7 +39,7 @@ export function executeCommands(document, commands, { selectionGroups } = {}) {
     }
     const refs = selected(cad, c.selectionGroup);
     if (c.operation === 'removeSelected') {
-      if (refs.some(r => r.entityType !== 'body')) throw new Error('削除はBody選択で実行してください。面・Edgeだけの削除は未対応です。');
+      if (refs.some(r => r.entityType !== 'body')) throw new Error('部品を消すには「部品」で選択してください。面をへこませる場合は「3ミリ削って」のように伝えてください。');
       // Body selection removes the producing root and its downstream operations.
       roots(cad, refs).forEach(id => {
         let f;
@@ -61,7 +61,7 @@ export function executeCommands(document, commands, { selectionGroups } = {}) {
         const f = { id: nextFeatureId(cad, type), type, input };
         if (type === 'transform') Object.assign(f, { translation: c.translation, rotation: c.rotation });
         else {
-          if (targets.some(r => r.entityType === 'body' || (type === 'faceExtrude' && r.entityType !== 'face'))) throw new Error(type === 'faceExtrude' ? 'Faceを選択してください。' : 'FaceまたはEdgeを選択してください。');
+          if (targets.some(r => r.entityType === 'body' || (type === 'faceExtrude' && r.entityType !== 'face'))) throw new Error(type === 'faceExtrude' ? '「面」で選択してから、伸ばす量・削る量を伝えてください。' : '丸める場所を「面」か「ふち」で選択してください。');
           Object.assign(f, { targets, ...(type === 'fillet' ? { radius: c.radius } : { distance: c.distance }) });
         }
         cad.features.push(f);

@@ -101,6 +101,7 @@ import { buildReplicadStepBlob, evaluateInWorker, exportInWorker } from './cad-c
 import { hasNativeGeometry, meshToSurfaces } from './cad-core/mesh.js';
 import NativeViewer from './ui/NativeViewer.jsx';
 import CommandPanel from './ui/CommandPanel.jsx';
+import SelectionToolbar from './ui/SelectionToolbar.jsx';
 import { useCadWorkspace } from './ui/useCadWorkspace.js';
 import './style.css';
 
@@ -108,7 +109,7 @@ const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
-const APP_VERSION = 'ai-native-2026-10-01';
+const APP_VERSION = 'ai-native-2026-10-01-ui2';
 const SOLID_PREVIEW_STEPS = 18;
 const CIRCLE_MESH_SEGMENTS = 64;
 const STL_VOXEL_CELL_SIZE = 0.5;
@@ -374,6 +375,8 @@ function App() {
   const [appMode, setAppMode] = useState('part');
   const [document, setDocument] = useState(loadDocument);
   const [nativeOpen, setNativeOpen] = useState(() => import.meta.env.VITE_AI_NATIVE_START === '1' || new URLSearchParams(window.location.search).get('ai') === '1');
+  const [nativeView, setNativeView] = useState('3d');
+  const [nativeMenuOpen, setNativeMenuOpen] = useState(false);
   const workspace = useCadWorkspace(document, setDocument, nativeOpen || hasNativeGeometry(document));
   const outputReady = Boolean((!document.cad?.suppressedProjection && getLockedPreviewDimensions(document)) || document.cad?.features.length);
   const [assembly, setAssembly] = useState(loadAssemblyDocument);
@@ -439,6 +442,20 @@ function App() {
   const selectedAssemblyInstance = assembly.instances.find((instance) => instance.id === selectedAssemblyId);
 
   useEffect(() => { if (nativeOpen) controlPanelRef.current?.scrollTo({ top: 0 }); }, [nativeOpen]);
+  useEffect(() => {
+    if (!nativeOpen || appMode !== 'part') return;
+    const viewport = window.visualViewport, style = window.document.documentElement.style;
+    const resize = () => {
+      style.setProperty('--workspace-height', `${viewport?.height || window.innerHeight}px`);
+      style.setProperty('--workspace-top', `${viewport?.offsetTop || 0}px`);
+    };
+    resize(); viewport?.addEventListener('resize', resize); viewport?.addEventListener('scroll', resize);
+    window.addEventListener('resize', resize);
+    return () => {
+      viewport?.removeEventListener('resize', resize); viewport?.removeEventListener('scroll', resize);
+      window.removeEventListener('resize', resize); style.removeProperty('--workspace-height'); style.removeProperty('--workspace-top');
+    };
+  }, [nativeOpen, appMode]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
@@ -1326,11 +1343,25 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${nativeOpen && appMode === 'part' ? 'native-shell' : ''}`}>
       <section className="viewer-panel" aria-label="CAD viewer">
         {appMode === 'part' ? <div className="native-switch">
-          <button type="button" className={nativeOpen ? 'active-toggle' : ''} aria-pressed={nativeOpen} onClick={() => { setNativeOpen(!nativeOpen); setOutputOpen(false); }}> {nativeOpen ? '3面編集へ' : 'AI指示 / 3D選択'} </button>
-          {nativeOpen ? <><button type="button" onClick={() => openSavePanel('json')}>保存</button><button type="button" onClick={openLoadPanel}>呼び出し</button><button type="button" onClick={openAssemblyMode}>アセンブリ</button></> : null}
+          {nativeOpen ? <>
+            <strong className="workspace-title">AIで編集</strong>
+            <div className="native-view-tabs" role="group" aria-label="モデルの表示方法">
+              <button type="button" aria-pressed={nativeView === '3d'} className={nativeView === '3d' ? 'active-toggle' : ''} onClick={() => setNativeView('3d')}>立体</button>
+              <button type="button" aria-pressed={nativeView === 'projections'} className={nativeView === 'projections' ? 'active-toggle' : ''} onClick={() => setNativeView('projections')}>3面図</button>
+            </div>
+            <div className="native-menu">
+              <button type="button" aria-label="保存・読込・その他" aria-expanded={nativeMenuOpen} onClick={() => setNativeMenuOpen(!nativeMenuOpen)}>•••</button>
+              {nativeMenuOpen ? <div className="native-menu-popover">
+                <button type="button" onClick={() => { setNativeMenuOpen(false); openSavePanel('json'); }}>保存・書き出し</button>
+                <button type="button" onClick={() => { setNativeMenuOpen(false); openLoadPanel(); }}>部品を開く</button>
+                <button type="button" onClick={() => { setNativeMenuOpen(false); setNativeOpen(false); setOutputOpen(false); }}>元の3面編集</button>
+                <button type="button" onClick={() => { setNativeMenuOpen(false); openAssemblyMode(); }}>アセンブリ</button>
+              </div> : null}
+            </div>
+          </> : <button type="button" onClick={() => { setNativeOpen(true); setOutputOpen(false); }}>AIで編集・3Dで選択</button>}
         </div> : null}
         {appMode === 'assembly' ? (
           <AssemblyViewer
@@ -1346,7 +1377,7 @@ function App() {
             onPartMode={openPartMode}
           />
         ) : nativeOpen ? (
-          <NativeViewer mesh={workspace.mesh} ghost={workspace.ghost} groups={workspace.groups} mode={workspace.mode} paint={workspace.paint} onSelect={workspace.select} status={workspace.meshStatus} />
+          <NativeViewer mesh={workspace.mesh} ghost={workspace.ghost} groups={workspace.groups} mode={workspace.mode} paint={workspace.paint} onSelect={workspace.select} status={workspace.meshStatus} view={nativeView} />
         ) : (
           <Viewer
             document={document}
@@ -1382,10 +1413,11 @@ function App() {
             onLocalPrintOpen={openLocalPrintDialog}
           />
         )}
+        {appMode === 'part' && nativeOpen ? <SelectionToolbar workspace={workspace} /> : null}
       </section>
 
       <section ref={controlPanelRef} className="control-panel" aria-label="CAD controls">
-        {urlAutomationStatus ? (
+        {urlAutomationStatus && (!nativeOpen || urlAutomationStatus.type !== 'success' || urlDownloadArtifact) ? (
           <section
             className={`url-automation-status ${urlAutomationStatus.type}${urlAutomationMode ? ' automation' : ''}`}
             role={urlAutomationStatus.type === 'error' ? 'alert' : 'status'}
@@ -1534,6 +1566,9 @@ function App() {
           />
         ) : null}
 
+        {appMode === 'part' && nativeOpen && outputOpen ? <div className="native-output-back">
+          <button type="button" onClick={() => { setOutputOpen(false); controlPanelRef.current?.scrollTo({ top: 0 }); }}>← 変更指示へ戻る</button>
+        </div> : null}
         {appMode === 'part' && outputOpen ? (
           <OutputPanel
             format={outputFormat}
@@ -4113,4 +4148,6 @@ function NumberField({ label, value, min, max, step = 1, compact = false, onChan
   );
 }
 
-createRoot(document.getElementById('root')).render(<App />);
+const appRoot = import.meta.hot?.data.root ?? createRoot(document.getElementById('root'));
+if (import.meta.hot) import.meta.hot.data.root = appRoot;
+appRoot.render(<App />);

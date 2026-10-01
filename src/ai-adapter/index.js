@@ -10,7 +10,7 @@ export function createTransportAdapter(generate) {
 // A Site host can inject its LLM transport; CAD never imports a vendor SDK.
 export const createChatGPTSiteAdapter = createTransportAdapter;
 export const offlineAdapter = {
-  async propose() { return { clarification: 'ローカルで解釈できません。R3、3mm、X5mm移動などを使うか、AI adapterを接続してください。' }; },
+  async propose() { return { clarification: 'この意図を解釈するAIはまだ接続されていません。下の「削る」「伸ばす」などから文章の例を選び、量を指定すると変更できます。' }; },
 };
 export function createMockAdapter({ delay = 1200 } = {}) {
   return createTransportAdapter(async (request, { signal } = {}) => {
@@ -20,9 +20,9 @@ export function createMockAdapter({ delay = 1200 } = {}) {
       const timer = setTimeout(() => { signal?.removeEventListener('abort', aborted); resolve(); }, delay);
       signal?.addEventListener('abort', aborted, { once: true });
     });
-    if (/少し丸く|丸くして/.test(request.prompt)) return { commands: [{ operation: 'fillet', selectionGroup: request.activeGroup, radius: 2 }], explanation: 'モック提案: 選択したEdge（Faceなら境界Edge）をR2にします。' };
-    if (/逃がして/.test(request.prompt)) return { commands: [{ operation: 'chamfer', selectionGroup: request.activeGroup, distance: 1 }], explanation: 'モック提案: 選択したEdge（Faceなら境界Edge）をC1にします。' };
-    return { clarification: 'モックは「少し丸く」「この辺を逃がして」に対応しています。寸法を指定する場合はローカルcommandを使えます。' };
+    if (/少し丸く|丸くして/.test(request.prompt)) return { commands: [{ operation: 'fillet', selectionGroup: request.activeGroup, radius: 2 }], explanation: 'サンプル提案：選んだふちを半径2mmで丸めます。面を選んだ場合は周囲のふちを丸めます。' };
+    if (/逃がして/.test(request.prompt)) return { commands: [{ operation: 'chamfer', selectionGroup: request.activeGroup, distance: 1 }], explanation: 'サンプル提案：選んだふちを1mm面取りします。面を選んだ場合は周囲のふちを面取りします。' };
+    return { clarification: 'サンプル応答では「少し丸く」「この辺を逃がして」を試せます。数字を指定した文章は、AIを待たずに変更できます。' };
   });
 }
 
