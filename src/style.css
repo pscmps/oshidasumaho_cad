@@ -1837,3 +1837,40 @@ h1 {
     grid-template-rows: auto 68px;
   }
 }
+/* Optional AI-native workspace; existing three-projection UI keeps its layout. */
+.native-switch, .command-actions, .selection-groups, .prompt-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.native-switch { padding: 6px 12px; border-bottom: 1px solid #c7d6e8; background: #fff; }
+.native-switch button, .command-panel button { min-height: 40px; padding: 8px 12px; font-size: 14px; }
+.native-viewer { position: relative; height: calc(100% - 52px); min-height: 220px; }
+.viewer-panel { display: flex; flex-direction: column; }
+.viewer-panel > .viewer-frame { flex: 1; min-height: 0; height: auto; }
+.viewer-panel > .native-viewer { flex: 1; min-height: 0; height: auto; }
+.native-canvas { width: 100%; height: 100%; touch-action: none; }
+.native-canvas canvas { display: block; }
+.native-viewer-note { position: absolute; bottom: 8px; left: 12px; right: 88px; font-size: 14px; color: #263a50; pointer-events: none; background: #ffffffda; border-radius: 6px; padding: 4px 7px; }
+.native-fit { position: absolute; bottom: 8px; right: 10px; min-height: 36px; }
+.command-panel { padding: 16px; color: #20364e; display: grid; gap: 12px; }
+.command-panel label { font-size: 14px; }
+.command-panel input, .command-panel select { font: inherit; padding: 9px; border: 1px solid #a5b9cf; border-radius: 6px; min-width: 0; color: #20364e; background: #fff; }
+.command-panel .active-toggle { color: #20364e; background: #dce9fa; box-shadow: inset 0 0 0 1px #486e9c; }
+.command-form { display: grid; gap: 6px; }
+.prompt-row { flex-wrap: nowrap; }
+.prompt-row input { flex: 1; width: 0; font-size: 16px; }
+.prompt-row button { flex-shrink: 0; }
+.command-note { margin: 0; font-size: 14px; line-height: 1.6; color: #47617a; }
+.command-status { font-size: 14px; min-height: 22px; }
+.command-proposal { background: #fff7e9; border: 1px solid #e9c47a; border-radius: 8px; padding: 12px; }
+.command-panel pre { max-height: 180px; overflow: auto; font-size: 13px; background: #f0f4f9; padding: 10px; border-radius: 6px; }
+.command-panel summary { cursor: pointer; font-size: 14px; margin-bottom: 8px; }
+.feature-list { display: grid; gap: 6px; margin-top: 8px; }
+.feature-list button { text-align: left; }
+.feature-parameters { display: grid; gap: 8px; margin-top: 10px; }
+.feature-parameters label { display: flex; align-items: center; gap: 10px; }
+.feature-parameters input { max-width: 140px; }
+@media (max-width: 450px) {
+  .command-panel { padding: 12px; gap: 10px; }
+  .selection-groups { gap: 5px; }
+  .selection-groups button { padding: 8px; flex: 1; }
+  .native-switch { gap: 5px; padding: 6px; }
+  .native-switch button { padding: 6px 8px; }
+}

@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/model-json.test.js src/url-automation.test.js src/projection-consistency.test.js src/gear-geometry.test.js src/rack-gear-geometry.test.js src/internal-gear-geometry.test.js src/numeric-precision.test.js src/fit-assist.test.js"
+    "test": "node --test src/*.test.js src/cad-core/*.test.js src/cad-command/*.test.js"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
@@ -17,6 +17,7 @@
     "react-dom": "latest",
     "replicad": "^0.23.1",
     "replicad-opencascadejs": "^0.23.0",
+    "three": "^0.184.0",
     "vite": "latest"
   }
 }

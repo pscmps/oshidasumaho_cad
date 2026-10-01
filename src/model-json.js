@@ -18,6 +18,7 @@ import {
   getInternalGearMinimumOuterDiameter,
 } from './internal-gear-geometry.js';
 import { ceilToModelPrecision, normalizeModelPrecision } from './numeric-precision.js';
+import { validateCad } from './cad-core/document.js';
 
 export const MODEL_SCHEMA_VERSION = 5;
 
@@ -416,6 +417,12 @@ export function validateAndMigrateModelDocument(value) {
     [...SUPPORTED_FACES].forEach((face) => {
       validateConstraint(document.areaLockConstraints[face], `areaLockConstraints.${face}`);
     });
+  }
+
+  // Optional versioned extension: v0-v5 files retain their existing round trip.
+  if (document.cad !== undefined) {
+    try { validateCad(document.cad); }
+    catch (error) { throw new ModelJsonError(error.message, 'INVALID_CAD_DOCUMENT'); }
   }
 
   return {

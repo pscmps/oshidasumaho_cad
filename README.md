@@ -2,6 +2,34 @@
 
 スマートフォンのブラウザで、上面・正面・右側面に四角形、円、平歯車、ラックギヤ、内歯車を配置して機械部品を作る軽量CADです。単品部品の3面編集、3Dプレビュー、JSON/STL/STEP出力と、保存した部品を配置するアセンブリ機能を開発しています。
 
+## AI-native CAD 実験ブランチ
+
+`feat/ai-native-cad-foundation` で、既存の3面編集に **AI指示 / 3D選択** を追加しています。既存の `main` とGitHub Pagesへのデプロイは変更しません。個人用Sitesは別checkout・別originで非公開配信し、ブラウザ保存も既存Pagesとは独立しています。
+
+1. **AI指示 / 3D選択** を開く。既存の3面モデルをそのまま使うか、**+ 四角柱** で一般フィーチャーを追加する。
+2. 赤・緑・青とFace / Edge / Bodyを選び、モデルをタップする。複数選択でき、再タップで解除できる。**塗る** はドラッグで複数Faceを追加する。通常はドラッグで回転、ピンチで拡大。塗る間は2本指で回転・拡大できる。
+3. `R3`、`C1`、`赤を3ミリ削って`、`赤を5mm伸ばす`、`X5mm移動`、`青をZ90度回転`、`赤を削除` などを入力する。ローカルで解釈できる指示はLLMを呼ばず、workerで形状検証して適用する。
+4. フィーチャーを選ぶと距離・Rを数値で編集できる。選択したフィレットへの `R2をR3にして` / `R3` もパラメータ差分になる。
+5. 意図の解釈を **モックAI（動作確認）** にして `少し丸く` / `この辺を逃がして` を入力すると、非同期の提案と半透明ゴーストが届く。**適用 / キャンセル** で確定する。待機中も回転・選択・別commandを実行できる。
+
+対応ブラウザでは **音声** で文章を入力できる。認識結果を確認して同じ **実行** ボタンを使う。音声認識はブラウザ提供のサービスであり、ブラウザによって音声が外部へ送られる場合がある。
+
+現在の一般フィーチャーは矩形・円の押出、平面Faceの押出 / 削り、フィレット、面取り、XYZ移動・回転。FaceへのR/Cはその境界Edgeへ作用する。**削除はBodyまたはフィーチャーを対象** とし、選択Faceを理由にBody全体を削除することはない。フィーチャー削除は依存する後続も削除する。アセンブリでは追加フィーチャーを含む部品も既存の配置・回転・色・3面投影で利用できる。拘束solverは今回未実装。
+
+選択は実際のOpenCascade Face/Edgeと対応付け、生成元フィーチャーと幾何selectorをJSONへ保存する。表示用の一時的なhash/indexは保存しない。対応が消えた・複数候補がある場合は選び直しを求める。詳細と拡張点は [AI-native architecture](docs/architecture/ai-native-cad.md)。
+
+**実LLMの接続はまだ設定していません。** CADは接続なしで動作する。host側が `window.oshidaCadAIAdapter = { propose(request, { signal }) { ... } }` を注入すると **接続済みAI** を選べる。返すのは許可command配列または確認文で、コード実行やモデル全体置換は受け付けない。Sites用adapterもtransport注入方式で、APIキーを静的frontendへ埋め込まない。
+
+JSONの既存 `schemaVersion: 5` は維持し、追加データは `cad.schemaVersion: 1` の独立した拡張に保存する。旧version 0〜5の読込・migration・既存storage key・URL automationは継続利用する。追加フィーチャーがあるSTL/STEPは最終B-Repから出力し、従来モデルだけのSTLは既存の距離場方式を維持する。
+
+個人用Sitesの静的ビルド例（公開範囲はSites側でowner-onlyに設定）：
+
+```bash
+VITE_AI_NATIVE_START=1 npm run build -- --base /
+```
+
+GitHub Pages用の通常buildは従来の `/oshidasumaho_cad/` baseを使用する。`?ai=1` で指示画面から開くこともできる。
+
 ## 構成図
 
 ### 画面状態遷移
@@ -74,12 +102,7 @@ JSONの入力、React state、形状処理、localStorage、3D描画、ファイ
 
 ### JSONをCLIから利用する場合
 
-JSONの解析・version検証・移行は [src/model-json.js](src/model-json.js) に分離しています。このモジュールはDOMやReactに依存しません。将来のJSON→STL CLIでは再利用できますが、現状のSTL生成本体は [src/main.jsx](src/main.jsx) 内のUI・プレビュー処理と同居しています。CLI化する際は、次の処理をブラウザ非依存モジュールへ分離する必要があります。
-
-- 3面からの外形寸法確定
-- add/cut形状の評価
-- 符号付き距離場の生成
-- Marching TetrahedraとSTLシリアライズ
+JSONの解析・version検証・移行は [src/model-json.js](src/model-json.js) に分離しています。形状評価・距離場・Marching Tetrahedra・STLシリアライズは [src/cad-core/projection.js](src/cad-core/projection.js)、既存のreplicadソリッド生成は [src/cad-core/kernel.js](src/cad-core/kernel.js) へ切り出しています。ReactやDOMに依存しないため、CLIでも再利用できます。ブラウザ側のOpenCascade読込はworker用runtime、Nodeでの検証にはtest loaderを使用します。
 
 ## Output
 
