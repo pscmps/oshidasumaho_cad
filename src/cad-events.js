@@ -107,7 +107,7 @@ export function createEvents(bucket, owner, { webhookFetch, now = Date.now, slee
     const challenge = crypto.randomUUID() + crypto.randomUUID(), id = `msg_verification_${crypto.randomUUID()}`;
     let response;
     try { response = await signedPost(s, JSON.stringify({ type: 'verification', challenge }), id); }
-    catch (e) { const reason = e.name === 'TimeoutError' ? 'timeout' : 'connection_refused'; console.warn(JSON.stringify({ event: 'cad.callback.verification', outcome: 'rejected', reason })); throw new EventError(-32015, 'CallbackEndpointError', { reason }); }
+    catch (e) { const reason = e.name === 'TimeoutError' ? 'timeout' : 'connection_refused'; const names = ['TypeError', 'Error', 'TimeoutError', 'AbortError', 'NetworkError']; console.warn(JSON.stringify({ event: 'cad.callback.verification', outcome: 'rejected', reason, exceptionType: names.includes(e.name) ? e.name : 'other', eventErrorCode: e instanceof EventError ? e.code : null })); throw new EventError(-32015, 'CallbackEndpointError', { reason }); }
     console.info(JSON.stringify({ event: 'cad.callback.verification', outcome: 'received', httpStatus: response.status }));
     if (!response.ok) { await response.body?.cancel(); throw new EventError(-32015, 'CallbackEndpointError', { reason: response.status >= 500 ? 'http_5xx' : 'http_4xx' }); }
     const result = await readJsonBounded(response);
