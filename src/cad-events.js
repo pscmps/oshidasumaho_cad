@@ -103,15 +103,17 @@ export function createEvents(bucket, owner, { webhookFetch, now = Date.now, slee
   }
   async function verify(s) {
     const cacheKey = `${root}verified/${await digest(s.url)}.json`, cache = await get(cacheKey), secretHash = await digest(s.secret);
-    if (cache?.value.until > now() && cache.value.secretHash === secretHash) return;
+    if (cache?.value.until > now() && cache.value.secretHash === secretHash) { console.info(JSON.stringify({ event: 'cad.callback.verification', outcome: 'cached' })); return; }
     const challenge = crypto.randomUUID() + crypto.randomUUID(), id = `msg_verification_${crypto.randomUUID()}`;
     let response;
     try { response = await signedPost(s, JSON.stringify({ type: 'verification', challenge }), id); }
-    catch (e) { throw new EventError(-32015, 'CallbackEndpointError', { reason: e.name === 'TimeoutError' ? 'timeout' : 'connection_refused' }); }
+    catch (e) { const reason = e.name === 'TimeoutError' ? 'timeout' : 'connection_refused'; console.warn(JSON.stringify({ event: 'cad.callback.verification', outcome: 'rejected', reason })); throw new EventError(-32015, 'CallbackEndpointError', { reason }); }
+    console.info(JSON.stringify({ event: 'cad.callback.verification', outcome: 'received', httpStatus: response.status }));
     if (!response.ok) { await response.body?.cancel(); throw new EventError(-32015, 'CallbackEndpointError', { reason: response.status >= 500 ? 'http_5xx' : 'http_4xx' }); }
     const result = await readJsonBounded(response);
-    if (!(await sameChallenge(result?.challenge, challenge))) throw new EventError(-32015, 'CallbackEndpointError', { reason: 'challenge_failed' });
+    if (!(await sameChallenge(result?.challenge, challenge))) { console.warn(JSON.stringify({ event: 'cad.callback.verification', outcome: 'rejected', reason: 'challenge_failed' })); throw new EventError(-32015, 'CallbackEndpointError', { reason: 'challenge_failed' }); }
     await put(cacheKey, { until: now() + VERIFY_TTL, secretHash }, cache?.etag);
+    console.info(JSON.stringify({ event: 'cad.callback.verification', outcome: 'complete' }));
   }
   async function subscribe(params) {
     const v = identity(params, true), id = `sub_${await digest(canonical({ owner, ...v }))}`;

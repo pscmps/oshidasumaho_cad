@@ -149,7 +149,16 @@ async function mcp(request, env) {
     } else return rpcError(rpc.id, -32601, 'Method not found', 404);
   } catch (e) {
     if (e.status === 401) return rpcError(rpc.id, -32012, 'Authentication required', 401);
+    if (['events/subscribe', 'events/unsubscribe'].includes(rpc.method)) {
+      const reasons = ['timeout', 'connection_refused', 'http_5xx', 'http_4xx', 'challenge_failed'];
+      console.warn(JSON.stringify({ event: 'cad.mcp.subscription', method: rpc.method, outcome: 'rejected',
+        code: Number.isInteger(e.code) ? e.code : -32603,
+        reason: reasons.includes(e.data?.reason) ? e.data.reason : 'other' }));
+    }
     return rpcError(rpc.id, e.code ?? -32603, e instanceof EventError ? e.message : 'Internal error', 200, e.data);
+  }
+  if (['events/subscribe', 'events/unsubscribe'].includes(rpc.method)) {
+    console.info(JSON.stringify({ event: 'cad.mcp.subscription', method: rpc.method, outcome: 'complete' }));
   }
   if (['server/discover', 'tools/list', 'events/list'].includes(rpc.method)) {
     // Catalog observations contain only public counts and fixed labels.
