@@ -39,7 +39,7 @@ The event ID/body, attempts, lease, and delivery result are persisted. R2 condit
 
 There is no independent scheduler/queue service. If execution is interrupted, an unfinished delivery resumes only when this user's authenticated request polling reaches the Site again. Closing the CAD page can therefore delay recovery; this is bounded best-effort delivery, not an autonomous guaranteed queue. Fresh ingress authentication gates every batch. Pending requests that have been canceled or answered are not delivered. No historical event replay is advertised.
 
-Identical `propose_cad_commands` calls are idempotent. Different second responses are rejected. Receiving a proposal does not emit another event, avoiding a feedback loop.
+Identical `propose_cad_commands` calls are idempotent. Existing commands cannot be replaced. A clarification-only response may advance once to commands with an explicit user `clarificationAnswer` and the current `expectedResponseRevision`; the previous question and supplement are retained under CAS. Receiving a proposal does not emit another event, avoiding a feedback loop.
 
 ## Validation and connection gate
 
@@ -54,3 +54,13 @@ The production connection is ready only after the existing plugin is rescanned, 
 - https://modelcontextprotocol.io/specification/2026-07-28/basic/transports/streamable-http
 - https://blog.cloudflare.com/workers-environment-live-object-bindings/
 - https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public
+
+## Written intent and clarification continuation
+
+Explicit user-written dimensions and conditions take priority. Dimension fields and sketch geometry fill only unspecified details; a mismatch with default fields alone is not a reason to stop. Explicit corrections supersede the text they correct. Remaining contradictions within explicit text or an indeterminate essential target still require clarification. For reversible previews, the agent may use reasonable sketch-supported placement/extent assumptions, disclose them in the explanation, and wait for Apply.
+
+A clarification-only response may advance to commands only after an explicit user supplement. Read `responseRevision` (legacy stored responses are revision 1), then call `propose_cad_commands` with `clarificationAnswer` containing the user supplement and `expectedResponseRevision`. The server requires a matching revision, preserves the previous question and supplement in `responseHistory`, increments the revision, and rejects any different replacement of an existing commands response. Identical retries do not increment or duplicate history. This does not emit another event. A policy change alone is not a user answer.
+
+The browser keeps polling through clarification and displays the question while waiting. Submitted request IDs remain in the same Site URL as `cadRequest`. Reloading that URL resumes an authenticated read of the original snapshot and latest response without sending a new request. For a request created by an older client, open `?ai=1&cadRequest=<requestId>` on the same Site. Commands become a preview only; the original document/sketch stale checks remain authoritative. If the user changes the sketch/model instead, explicitly submit a new request with the updated text and snapshot.
+
+Example: written outer diameter 30, inner diameter 20, height 30, and transverse hole diameter 3 resolve to 30 x 30 x 30 mm despite default fields 80 x 50 x 20. A top annulus combined with a rectangular front profile containing a radius 0.05 normalized circle at [0.5, 0.5] represents a Y-directed hole at height 15 through both walls. The centered, both-wall extent is an assumption to disclose, not a stated user requirement. This command cannot represent a blind or single-wall side hole. Kernel regression checks its bounds and removed volume; the original document remains unchanged until Apply.

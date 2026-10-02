@@ -70,5 +70,26 @@ export const AI_COMMAND_CONTRACT = {
   response: { commands: 'CAD command[] (1..20)', explanation: 'string', clarification: 'string (no commands when asking)' },
   operations: fields,
   units: { distance: 'mm', radius: 'mm', translation: '[x,y,z] mm', rotation: '[x,y,z] degrees' },
-  rules: ['Use supplied entity references and feature IDs only.', 'No JavaScript, code, GUI actions or whole-document replacements.', 'Ask for clarification when intent or target is ambiguous.', 'removeSelected requires Body selection; face deletion is not supported.', 'For a rough sketch use addSketchSolid: normalized closed contours (0..1) in top XY, front XZ and right YZ, dimensions in mm. Intersect the three extruded profiles. Missing views span the stated dimensions. Comments and dimensions express intent; ask if they conflict.'],
+  intentPolicy: {
+    priority: ['explicit_user_text', 'dimension_fields', 'sketch_geometry'],
+    explicitText: ['request.prompt', 'sketchDraft.notes', 'anchored comments'],
+    fallbackOnlyForUnspecified: true,
+    clarifyOnDefaultDimensionMismatch: false,
+    reversiblePreviewAssumptions: 'Use reasonable sketch-supported assumptions for unspecified details; state them in explanation and keep the proposal unapplied.',
+  },
+  clarificationWorkflow: {
+    continuation: 'Only after the user explicitly answers or supplements a stored clarification, call propose_cad_commands with commands, clarificationAnswer containing that user supplement, and expectedResponseRevision copied from read_cad_request. The previous question and supplement are retained. Do not invent a user answer or infer it solely from a contract/policy change.',
+    immutableCommands: true,
+    idempotentRetry: 'An identical response is safe to repeat. A different existing commands proposal cannot be replaced.',
+    browserResume: 'The originating page keeps polling through a question. To resume after reload or an older client, open this same Site with ?ai=1&cadRequest=<requestId>. Original model/sketch stale checks still apply; a resumed proposal is never auto-applied.',
+  },
+  rules: [
+    'Use supplied entity references and feature IDs only.',
+    'No JavaScript, code, GUI actions or whole-document replacements.',
+    'Explicit written dimensions and conditions take priority over dimension fields and sketch proportions. Use dimension fields and the sketch only for details not specified in text. Never ask solely because explicit text differs from default dimension fields.',
+    'Treat an explicit written correction as superseding the earlier text it corrects. If explicit written requirements themselves remain contradictory, or an essential target cannot be determined, ask for clarification.',
+    'For a reversible preview, infer reasonable unspecified placement or extent from the sketch and explain every material assumption. Do not claim the user specified it; never auto-apply.',
+    'removeSelected requires Body selection; face deletion is not supported.',
+    'For a rough sketch use addSketchSolid: normalized closed contours (0..1) in top XY, front XZ and right YZ, dimensions in mm. Intersect the extruded profiles. Missing views span the resolved dimensions. A front-profile hole cuts through the full Y depth; a right-profile hole cuts through the full X width. This cannot represent a blind or one-wall-only side hole. Use text-resolved dimensions in the command even if sketchDraft.dimensions still contains defaults.',
+  ],
 };

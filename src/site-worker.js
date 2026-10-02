@@ -40,10 +40,11 @@ const requestIdSchema = { type: 'string', pattern: '^[a-f0-9-]{36}$' };
 const TOOLS = [
   { name: 'get_cad_connection_status', description: 'Read whether this user has an active CAD-request webhook subscription. Returns counts and expiration only, never callback URLs or secrets. Does not subscribe or change models.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } },
   { name: 'list_cad_requests', description: 'List the authenticated user’s pending CAD sketch/edit requests, newest first. No model is changed.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } },
-  { name: 'read_cad_request', description: 'Read one CAD request: structured sketch strokes, anchored comments, dimensions, feature graph, actual CAD entity selection groups and permitted-command contract. Interpret intent from this data; ask if ambiguous.', inputSchema: { type: 'object', properties: { requestId: requestIdSchema }, required: ['requestId'], additionalProperties: false }, annotations: { readOnlyHint: true } },
-  { name: 'propose_cad_commands', description: 'Return a proposal for an existing request. Use only permitted CAD commands. The browser will generate a ghost and ask the user to apply. Never execute code or replace the whole document. For sketches use addSketchSolid normalized closed profiles; read the contract first. Either commands or clarification, never both. Repeating the identical response is safe; replacing an existing response is rejected.', inputSchema: { type: 'object', properties: { requestId: requestIdSchema, commands: { type: 'array', items: CAD_COMMAND_SCHEMA, minItems: 1, maxItems: 20 }, explanation: { type: 'string', maxLength: 4000 }, clarification: { type: 'string', maxLength: 4000 } }, required: ['requestId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
+  { name: 'read_cad_request', description: 'Read one CAD request: structured sketch strokes, anchored comments, dimensions, feature graph, actual CAD entity selection groups and permitted-command contract. Read the returned contract: explicit written dimensions and conditions take priority; dimension fields and sketches fill only unspecified details. Explain reasonable assumptions for an unapplied preview.', inputSchema: { type: 'object', properties: { requestId: requestIdSchema }, required: ['requestId'], additionalProperties: false }, annotations: { readOnlyHint: true } },
+  { name: 'propose_cad_commands', description: 'Return a proposal for an existing request. Use only permitted CAD commands. The browser will generate a ghost and ask the user to apply. Never execute code or replace the whole document. For sketches use addSketchSolid normalized closed profiles; read the contract first. Either commands or clarification, never both. Identical replies are idempotent. Existing commands cannot be replaced. Only after explicit user supplementation, a clarification-only response can advance to commands using clarificationAnswer and expectedResponseRevision from read_cad_request. Preserve the user answer; never invent it.', inputSchema: { type: 'object', properties: { requestId: requestIdSchema, commands: { type: 'array', items: CAD_COMMAND_SCHEMA, minItems: 1, maxItems: 20 }, explanation: { type: 'string', maxLength: 4000 }, clarification: { type: 'string', maxLength: 4000 }, clarificationAnswer: { type: 'string', minLength: 1, maxLength: 4000, description: 'The explicit user answer or supplement to the stored clarification; required only when advancing that clarification to commands.' }, expectedResponseRevision: { type: 'integer', minimum: 1, description: 'Response revision returned by read_cad_request; required with clarificationAnswer.' } }, required: ['requestId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
 ];
 
+const responseRevision = data => data.responseRevision ?? (data.response ? 1 : 0);
 async function callTool(name, args, store, events) {
   if (name === 'get_cad_connection_status') { exact(args, []); return events.status(); }
   if (name === 'list_cad_requests') {
@@ -59,13 +60,15 @@ async function callTool(name, args, store, events) {
   }
   if (name === 'read_cad_request') {
     exact(args, ['requestId']); const { data } = await store.get(args.requestId);
-    return { ...data, contract: AI_COMMAND_CONTRACT };
+    return { ...data, responseRevision: responseRevision(data), contract: AI_COMMAND_CONTRACT };
   }
   if (name === 'propose_cad_commands') {
-    exact(args, ['requestId', 'commands', 'explanation', 'clarification']);
+    exact(args, ['requestId', 'commands', 'explanation', 'clarification', 'clarificationAnswer', 'expectedResponseRevision']);
     const { data, etag } = await store.get(args.requestId);
     if (data.cancelled) throw new Error('この依頼は取り消し済みです');
-    if ([args.explanation, args.clarification].some(s => s !== undefined && (typeof s !== 'string' || s.length > 4000))) throw new Error('説明は4000字以内です');
+    if ([args.explanation, args.clarification, args.clarificationAnswer].some(s => s !== undefined && (typeof s !== 'string' || s.length > 4000))) throw new Error('説明は4000字以内です');
+    if (args.expectedResponseRevision !== undefined && (!Number.isSafeInteger(args.expectedResponseRevision) || args.expectedResponseRevision < 1)) throw new Error('応答番号が不正です。依頼を読み直してください');
+    if (args.clarificationAnswer !== undefined && !args.clarificationAnswer.trim()) throw new Error('確認質問への明示的な補足を入力してください');
     let response;
     if (args.clarification && !args.commands) response = { clarification: args.clarification };
     else {
@@ -74,19 +77,29 @@ async function callTool(name, args, store, events) {
       createProposal(data.request.document, commands); // Validate graph and captured targets; no kernel or JS runs server-side.
       response = { commands, explanation: args.explanation || '' };
     }
-    if (data.response) {
-      if (canonical(data.response) !== canonical(response)) throw new Error('この依頼は回答済みです');
-    } else {
-      try { await store.put(args.requestId, { ...data, response }, etag); }
-      catch (error) { const latest = (await store.get(args.requestId)).data; if (latest.cancelled || canonical(latest.response ?? null) !== canonical(response)) throw error; }
+    const revision = responseRevision(data), identical = data.response && canonical(data.response) === canonical(response);
+    const continuing = data.response?.clarification && !data.response.commands && response.commands
+      && args.clarificationAnswer?.trim() && args.expectedResponseRevision === revision;
+    if (data.response && !identical && !continuing) throw new Error('この依頼は回答済みです。確認質問から進むには明示的な補足と現在の応答番号が必要です');
+    if (!data.response && (args.clarificationAnswer !== undefined || args.expectedResponseRevision !== undefined)) throw new Error('補足は保存済みの確認質問に対して指定してください');
+    let saved = data;
+    if (!identical) {
+      saved = { ...data, response, responseRevision: revision + 1,
+        ...(continuing ? { responseHistory: [...(data.responseHistory || []), { revision, response: data.response, clarificationAnswer: args.clarificationAnswer.trim(), continuedAt: new Date().toISOString() }] } : {}) };
+      try { await store.put(args.requestId, saved, etag); }
+      catch (error) {
+        const latest = (await store.get(args.requestId)).data;
+        if (latest.cancelled || canonical(latest.response ?? null) !== canonical(response)) throw error;
+        saved = latest;
+      }
     }
-    return { status: 'proposed', requestId: args.requestId, applied: false };
+    return { status: 'proposed', requestId: args.requestId, responseRevision: responseRevision(saved), applied: false };
   }
   throw new Error('未対応のツールです');
 }
 
 const MODERN = '2026-07-28', LEGACY = '2025-03-26';
-const INFO = { name: 'oshida-personal-cad', version: '3.0.0' };
+const INFO = { name: 'oshida-personal-cad', version: '3.1.0' };
 function rpcError(id, code, message, status = 200, data) { return json({ jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data ? { data } : {}) } }, status); }
 function headerName(value) {
   if (value?.startsWith('=?base64?') && value.endsWith('?=')) { try { return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(value.slice(9, -2)), c => c.charCodeAt(0))); } catch { return null; } }
@@ -204,7 +217,7 @@ export default { async fetch(request, env, ctx) {
         await events.queue(data, url.origin);
         if (ctx?.waitUntil) dispatch(match[1]); else await dispatch(match[1]);
       }
-      return json({ response: data.response || null, cancelled: data.cancelled, webhook: { ...await events.status(data.request.task), ...await events.deliveryStatus(match[1]) } });
+      return json({ requestId: data.requestId, responseRevision: responseRevision(data), ...(url.searchParams.get('includeRequest') === '1' ? { request: data.request } : {}), response: data.response || null, cancelled: data.cancelled, webhook: { ...await events.status(data.request.task), ...await events.deliveryStatus(match[1]) } });
     }
     return json({ error: 'Method not allowed' }, 405);
   } catch (e) { return json({ error: e.message || '接続を利用できません' }, e.status || 400); }

@@ -18,7 +18,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   const [adapterMode, setAdapterMode] = useState(() => import.meta.env.VITE_SITE_CODEX === '1' ? 'codex' : window.oshidaCadAIAdapter?.propose ? 'connected' : 'offline'), [selectedFeatureId, setSelectedFeatureId] = useState('');
   const [requestId, setRequestId] = useState('');
   const [webhook, setWebhook] = useState(null);
-  const undo = useRef([]);
+  const undo = useRef([]), resumeStarted = useRef(false);
   const key = geometryKey(document);
   const draft = cadOf(document).draft || emptyDraft(), draftKey = JSON.stringify(draft);
 
@@ -91,7 +91,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
       const adapter = getAdapter(n);
       const result = await interpretPrompt(latest.current, prompt, { adapter, group, featureId: selectedFeatureId, signal: controller.signal });
       if (n !== sequence.current) return;
-      if (result.clarification) { setStatus(result.clarification); return; }
+      if (result.clarification) { setStatus(result.clarification + '\n元の指示に回答を補足して、もう一度送ってください。新しい依頼として続けます。'); return; }
       if (result.source === 'local') { await apply(result.proposal); }
       else { setProposal(result.proposal); setStatus('提案が届きました。ゴーストを確認して適用してください。'); }
     } catch (e) { if (n === sequence.current && e.name !== 'AbortError') setStatus(e.message); }
@@ -102,8 +102,9 @@ export function useCadWorkspace(document, setDocument, enabled) {
   };
   function getAdapter(n) {
     return adapterMode === 'codex' ? createCodexAdapter({
-      onQueued: (id, connection) => { if (sequence.current === n) { setRequestId(id); setWebhook(connection); setStatus(connection?.notificationError ? '依頼は保存済みですが、通知を準備できませんでした。接続状態を確認しています。' : connection?.connected ? '依頼を保存しました。dotへ通知中です。' : '依頼は保存済みです。自動連携が未接続のため、dotにCADの最新依頼を確認するよう伝えてください。'); } },
+      onQueued: (id, connection) => { if (sequence.current === n) { const url = new URL(window.location.href); url.searchParams.set('cadRequest', id); window.history.replaceState(null, '', url); setRequestId(id); setWebhook(connection); setStatus(connection?.notificationError ? '依頼は保存済みですが、通知を準備できませんでした。接続状態を確認しています。' : connection?.connected ? '依頼を保存しました。dotへ通知中です。' : '依頼は保存済みです。自動連携が未接続のため、dotにCADの最新依頼を確認するよう伝えてください。'); } },
       onWebhook: connection => { if (sequence.current === n) setWebhook(connection); },
+      onClarification: question => { if (sequence.current === n) setStatus(question + '\n補足をdotに伝えると、この依頼の提案を引き続き受け取れます。説明やスケッチを変更した場合は新しい依頼を送ってください。'); },
     })
       : adapterMode === 'mock' ? createMockAdapter() : adapterMode === 'connected' ? window.oshidaCadAIAdapter : offlineAdapter;
   }
@@ -120,13 +121,32 @@ export function useCadWorkspace(document, setDocument, enabled) {
       if (!Object.values(sketchDraft.views).some(v => v.strokes.length) && !sketchDraft.notes.trim()) throw new Error('外形を描くか、作りたい部品を説明してください');
       const response = await getAdapter(n).propose({ task: 'sketch', prompt: `${sketchDraft.notes || '描いたスケッチを部品にしてください'}\n追加位置の目安: ${JSON.stringify(sketchOrigin())} mm`, document: snapshot, sketchDraft, contract: AI_COMMAND_CONTRACT }, { signal: controller.signal });
       if (n !== sequence.current) return;
-      if (response?.clarification && !response.commands) { setStatus(String(response.clarification)); return; }
+      if (response?.clarification && !response.commands) { setStatus(String(response.clarification) + '\n「部品の説明」に回答を補足して、もう一度「Codexでモデル化」を押してください。新しい依頼として続けます。'); return; }
       const p = createProposal(snapshot, validateCommands(response?.commands), String(response?.explanation || 'スケッチからの提案です'));
       p.draftKey = JSON.stringify(sketchDraft); proposalDocument(latest.current, p);
       setProposal(p); setStatus('Codexの提案が届きました。立体を確認して適用してください');
     } catch (e) { if (n === sequence.current && e.name !== 'AbortError') setStatus(e.message); }
     finally { if (n === sequence.current) setPending(false); }
   }
+  async function resumeRequest(id) {
+    request.current?.abort(); const controller = new AbortController(); request.current = controller;
+    const n = ++sequence.current; setPending(true); setRequestId(id); setStatus('同じ依頼の最新応答を確認しています');
+    try {
+      const saved = await getAdapter(n).resume(id, { signal: controller.signal });
+      if (n !== sequence.current) return;
+      const p = createProposal(saved.request.document, validateCommands(saved.response.commands), String(saved.response.explanation || '補足を反映した提案です'));
+      if (saved.request.task === 'sketch') p.draftKey = JSON.stringify(saved.request.sketchDraft);
+      proposalDocument(latest.current, p);
+      setProposal(p); setStatus('提案を再取得しました。形と前提を確認してから適用してください');
+    } catch (e) { if (n === sequence.current && e.name !== 'AbortError') setStatus(e.message); }
+    finally { if (n === sequence.current) setPending(false); }
+  }
+  useEffect(() => {
+    if (!enabled || adapterMode !== 'codex' || resumeStarted.current) return;
+    resumeStarted.current = true;
+    const id = new URLSearchParams(window.location.search).get('cadRequest');
+    if (id) void resumeRequest(id);
+  }, [enabled, adapterMode]);
   async function previewSketch() {
     try {
       const snapshot = structuredClone(latest.current), d = cadOf(snapshot).draft || emptyDraft();

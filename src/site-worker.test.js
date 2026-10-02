@@ -140,3 +140,104 @@ test('production transport verifies and delivers with Workers redirect semantics
   assert.equal(state.connected, false);
   assert.equal(sent.length, 3, 'redirect produces one attempt and is never followed');
 });
+
+test('written dimensions override fallback fields; explicit clarification follow-up uses a new request', async () => {
+  const e = env(), fetch = fetcher(e), original = request();
+  original.prompt = 'Outer diameter 30 mm, inner diameter 20 mm, height 30 mm; side hole diameter 3 mm.';
+  original.sketchDraft.notes = original.prompt;
+  assert.deepEqual(original.sketchDraft.dimensions, { width: 80, depth: 50, height: 20 });
+  assert.equal((await fetch('/api/cad/requests', { method: 'POST', body: JSON.stringify({ requestId: id, request: original }) })).status, 201);
+  const read = JSON.parse((await (await rpc(fetch, 'tools/call', { name: 'read_cad_request', arguments: { requestId: id } })).json()).result.content[0].text);
+  assert.equal(read.contract.intentPolicy.priority[0], 'explicit_user_text');
+  assert.equal(read.contract.intentPolicy.fallbackOnlyForUnspecified, true);
+  assert.equal(read.contract.intentPolicy.clarifyOnDefaultDimensionMismatch, false);
+  const call = async args => (await (await rpc(fetch, 'tools/call', { name: 'propose_cad_commands', arguments: args })).json()).result;
+  await call({ requestId: id, clarification: 'Where should the side hole go?' });
+  const command = { ...cmd, dimensions: { width: 30, depth: 30, height: 30 } };
+  assert.equal((await call({ requestId: id, commands: [command] })).isError, true, 'a different response cannot silently replace the question');
+  const nextId = 'f37671c5-7bb7-4c12-b0c3-4306f3ff2039';
+  const followup = structuredClone(original);
+  followup.prompt += ' Correction: use the written dimensions; preview the centered hole through both walls.';
+  followup.sketchDraft.notes = followup.prompt;
+  assert.equal((await fetch('/api/cad/requests', { method: 'POST', body: JSON.stringify({ requestId: nextId, request: followup }) })).status, 201);
+  const result = await call({ requestId: nextId, commands: [command], explanation: 'Written dimensions 30 x 30 x 30 mm override fallback fields.' });
+  assert.equal(JSON.parse(result.content[0].text).applied, false);
+  const originalResponse = await (await fetch('/api/cad/requests/' + id)).json();
+  assert.equal(originalResponse.response.clarification, 'Where should the side hole go?');
+  const nextResponse = await (await fetch('/api/cad/requests/' + nextId)).json();
+  assert.deepEqual(nextResponse.response.commands[0].dimensions, { width: 30, depth: 30, height: 30 });
+  assert.deepEqual(original.document.cad.features, []);
+});
+
+test('explicit supplement advances a legacy clarification once with revision checks and immutable command replies', async () => {
+  const e = env(), fetch = fetcher(e);
+  await fetch('/api/cad/requests', { method: 'POST', body: JSON.stringify({ requestId: id, request: request() }) });
+  const call = async args => (await (await rpc(fetch, 'tools/call', { name: 'propose_cad_commands', arguments: args })).json()).result;
+  await call({ requestId: id, clarification: 'Which dimensions should be used?' });
+  // Already persisted production questions predate responseRevision.
+  const [key, row] = [...e.CAD_EXCHANGE.items].find(([key]) => key.endsWith(id + '.json'));
+  const legacy = JSON.parse(row.text); delete legacy.responseRevision;
+  await e.CAD_EXCHANGE.put(key, JSON.stringify(legacy));
+  const read = async () => JSON.parse((await (await rpc(fetch, 'tools/call', { name: 'read_cad_request', arguments: { requestId: id } })).json()).result.content[0].text);
+  assert.equal((await read()).responseRevision, 1);
+  const update = { requestId: id, commands: [cmd], explanation: 'Use written dimensions; centered through-hole is a preview assumption.', clarificationAnswer: 'Use my written dimensions.', expectedResponseRevision: 1 };
+  assert.equal((await call({ requestId: id, commands: [cmd] })).isError, true);
+  assert.equal((await call({ ...update, expectedResponseRevision: 2 })).isError, true);
+  assert.equal((await call({ ...update, clarificationAnswer: ' ' })).isError, true);
+  const first = JSON.parse((await call(update)).content[0].text);
+  assert.equal(first.applied, false); assert.equal(first.responseRevision, 2);
+  assert.deepEqual(JSON.parse((await call(update)).content[0].text), first);
+  assert.equal((await call({ ...update, commands: [{ ...cmd, dimensions: { width: 50, depth: 30, height: 3 } }], expectedResponseRevision: 2 })).isError, true);
+  const stored = await read();
+  assert.equal(stored.responseHistory.length, 1);
+  assert.equal(stored.responseHistory[0].response.clarification, 'Which dimensions should be used?');
+  assert.equal(stored.responseHistory[0].clarificationAnswer, update.clarificationAnswer);
+  assert.deepEqual(stored.request.document.cad.features, []);
+  const resumed = await (await fetch('/api/cad/requests/' + id + '?includeRequest=1')).json();
+  assert.deepEqual(resumed.request, stored.request); assert.equal(resumed.responseRevision, 2);
+  assert.equal((await (await fetch('/api/cad/requests/' + id)).json()).request, undefined, 'normal polling avoids resending the snapshot');
+  assert.equal((await fetcher(e, 'bob')('/api/cad/requests/' + id + '?includeRequest=1')).status, 404);
+});
+
+test('concurrent different continuations cannot overwrite each other; canceled questions remain closed', async () => {
+  const e = env(), fetch = fetcher(e);
+  const call = async args => (await (await rpc(fetch, 'tools/call', { name: 'propose_cad_commands', arguments: args })).json()).result;
+  await fetch('/api/cad/requests', { method: 'POST', body: JSON.stringify({ requestId: id, request: request() }) });
+  await call({ requestId: id, clarification: 'Question' });
+  const continuation = { requestId: id, commands: [cmd], clarificationAnswer: 'Explicit answer', expectedResponseRevision: 1 };
+  const results = await Promise.all([call(continuation), call({ ...continuation, commands: [{ ...cmd, dimensions: { width: 45, depth: 30, height: 3 } }] })]);
+  assert.equal(results.filter(value => !value.isError).length, 1);
+  assert.equal(results.filter(value => value.isError).length, 1);
+  const other = 'cfdc9cc8-e222-4a5c-9e52-d638004d0460';
+  await fetch('/api/cad/requests', { method: 'POST', body: JSON.stringify({ requestId: other, request: request() }) });
+  await call({ requestId: other, clarification: 'Question' });
+  await fetch('/api/cad/requests/' + other + '/cancel', { method: 'POST' });
+  assert.equal((await call({ ...continuation, requestId: other })).isError, true);
+});
+
+test('Codex adapter stays on a clarification until the same request returns commands', async () => {
+  const calls = [], questions = []; let polls = 0, queuedId;
+  const adapter = createCodexAdapter({ interval: 1, onQueued: value => { queuedId = value; }, onClarification: question => questions.push(question), fetcher: async (url, options = {}) => {
+    calls.push({ url, method: options.method || 'GET' });
+    if (options.method === 'POST') return Response.json({ requestId: JSON.parse(options.body).requestId });
+    polls++;
+    return Response.json({ responseRevision: polls < 3 ? 1 : 2, response: polls < 3 ? { clarification: 'Question' } : { commands: [cmd], explanation: 'Supplemented' } });
+  } });
+  const response = await adapter.propose(request());
+  assert.deepEqual(response.commands, [cmd]); assert.deepEqual(questions, ['Question']);
+  assert.equal(calls.filter(call => call.method === 'POST').length, 1);
+  assert.ok(calls.filter(call => call.method === 'GET').every(call => call.url.endsWith(queuedId)));
+});
+
+test('Codex resume retrieves the original snapshot and revised proposal without submitting again', async () => {
+  const original = request(), calls = [], questions = [];
+  const adapter = createCodexAdapter({ interval: 1, onClarification: question => questions.push(question), fetcher: async (url, options = {}) => {
+    calls.push({ url, method: options.method || 'GET' });
+    if (url.endsWith('?includeRequest=1')) return Response.json({ request: original, response: { clarification: 'Question' }, responseRevision: 1 });
+    return Response.json({ response: { commands: [cmd], explanation: 'Supplemented' }, responseRevision: 2 });
+  } });
+  const result = await adapter.resume(id);
+  assert.deepEqual(result.request, original); assert.deepEqual(result.response.commands, [cmd]);
+  assert.deepEqual(questions, ['Question']); assert.equal(calls.length, 2);
+  assert.ok(calls.every(call => call.method === 'GET'));
+});

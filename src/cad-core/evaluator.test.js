@@ -101,3 +101,29 @@ test('existing bracket, gear, rack and internal gear build exact geometry and ST
     } finally { result.dispose(); }
   }
 });
+
+test('written 30/20/30 ring with centered diameter-3 transverse hole cuts both walls in an unapplied proposal', () => {
+  const command = { operation: 'addSketchSolid', origin: [0,0,0], dimensions: { width: 30, depth: 30, height: 30 }, profiles: {
+    top: { outer: { type: 'ellipse', center: [0.5,0.5], radii: [0.5,0.5] }, holes: [{ type: 'ellipse', center: [0.5,0.5], radii: [1/3,1/3] }] },
+    front: { outer: { type: 'polygon', points: [[0,0],[1,0],[1,1],[0,1]] }, holes: [{ type: 'ellipse', center: [0.5,0.5], radii: [0.05,0.05] }] },
+  } };
+  const original = { schemaVersion: 5, shapes: [], cad: emptyCad() };
+  const candidate = executeCommands(original, [command]);
+  assert.equal(original.cad.features.length, 0, 'building a candidate does not mutate the original');
+  evaluated(candidate, result => {
+    assert.equal(result.bodies.length, 1);
+    const bounds = meshDocument(result).bodies[0].bounds;
+    bounds[0].forEach(n => assert.ok(Math.abs(n) < 0.001));
+    bounds[1].forEach(n => assert.ok(Math.abs(n - 30) < 0.001));
+    // Integrate the circular tool across the two annulus walls, independently
+    // of the profile-intersection implementation (x = 1.5 sin(theta)).
+    const steps = 400, h = Math.PI / steps;
+    const area = theta => 9 * Math.cos(theta) ** 2 * (Math.sqrt(225 - 2.25 * Math.sin(theta) ** 2) - Math.sqrt(100 - 2.25 * Math.sin(theta) ** 2));
+    let removed = 0;
+    for (let i = 0; i <= steps; i++) removed += (i === 0 || i === steps ? 1 : i % 2 ? 4 : 2) * area(-Math.PI/2 + i*h);
+    removed *= h / 3;
+    assert.ok(removed > 70 && removed < 72);
+    const expected = Math.PI * (225 - 100) * 30 - removed;
+    assert.ok(Math.abs(kernel.measureVolume(result.bodies[0].shape) - expected) < 0.05);
+  });
+});
