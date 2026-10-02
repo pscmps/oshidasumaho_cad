@@ -151,6 +151,13 @@ async function mcp(request, env) {
     if (e.status === 401) return rpcError(rpc.id, -32012, 'Authentication required', 401);
     return rpcError(rpc.id, e.code ?? -32603, e instanceof EventError ? e.message : 'Internal error', 200, e.data);
   }
+  if (['server/discover', 'tools/list', 'events/list'].includes(rpc.method)) {
+    // Catalog observations contain only public counts and fixed labels.
+    console.info(JSON.stringify({ event: 'cad.mcp.catalog', method: rpc.method,
+      protocol: modern ? MODERN : LEGACY, toolCount: result.tools?.length ?? null,
+      eventCount: result.events?.length ?? null,
+      advertisesEvents: !!result.capabilities?.events }));
+  }
   return json({ jsonrpc: '2.0', id: rpc.id ?? null, result: { ...(modern ? { resultType: 'complete' } : {}), ...result } });
 }
 
