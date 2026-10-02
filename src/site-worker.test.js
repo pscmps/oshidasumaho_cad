@@ -45,6 +45,21 @@ test('authenticated draft -> Codex read -> strict proposal -> browser polling; s
 });
 
 const modernRpc=(fetch,method,params={},headers={})=>fetch('/mcp',{method:'POST',headers:{'Content-Type':'application/json','MCP-Protocol-Version':'2026-07-28','Mcp-Method':method,...(method==='tools/call'?{'Mcp-Name':params.name}:{}),...headers},body:JSON.stringify({jsonrpc:'2.0',id:2,method,params:{...params,_meta:{'io.modelcontextprotocol/protocolVersion':'2026-07-28','io.modelcontextprotocol/clientCapabilities':{}}}})});
+
+test('rejection diagnostics contain fixed labels and flags, never caller data or credentials', async () => {
+  const messages = [], previous = console.warn;
+  console.warn = value => messages.push(value);
+  try {
+    const fetch = fetcher(env(), 'private-user-marker');
+    const response = await fetch('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', Authorization: 'Bearer private-token-marker' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'private-request-marker', method: 'initialize', params: { clientInfo: { name: 'private-client-marker' } } }) });
+    assert.equal(response.status, 400);
+    assert.deepEqual(JSON.parse(messages[0]), { event: 'cad.mcp.rejected', reason: 'metadata-missing', method: 'initialize', protocol: '2026-07-28', hasMethodHeader: false, hasNameHeader: false, hasMetadata: false, hasMetadataVersion: false, hasClientCapabilities: false });
+    assert.equal(messages.join('').includes('private-'), false);
+    assert.equal((await modernRpc(fetch, 'events/list', {}, { 'Mcp-Method': 'private-header-marker' })).status, 400);
+    assert.equal(JSON.parse(messages[1]).reason, 'header-mismatch');
+    assert.equal(messages.join('').includes('private-'), false);
+  } finally { console.warn = previous; }
+});
 test('MCP2 discovery/events and mandatory header consistency coexist with legacy tools',async()=>{
   const e=env(),fetch=fetcher(e),anon=fetcher(e,null);
   const discovery=await(await modernRpc(anon,'server/discover')).json();assert.equal(discovery.result.resultType,'complete');assert.deepEqual(discovery.result.capabilities.events,{});

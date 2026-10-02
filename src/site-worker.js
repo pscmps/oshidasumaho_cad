@@ -93,17 +93,29 @@ function headerName(value) {
   return value;
 }
 function eventsOf(env, user) { return createEvents(env.CAD_EXCHANGE, user, { webhookFetch }); }
+function mcpDiagnostic(request, rpc, reason) {
+  // Fixed labels and presence flags only: never log body values, credentials,
+  // request IDs, tool arguments, callback addresses, or user identity.
+  const methods = ['initialize', 'server/discover', 'tools/list', 'tools/call', 'events/list', 'events/subscribe', 'events/unsubscribe', 'ping', 'notifications/initialized'];
+  const meta = rpc?.params?._meta;
+  console.warn(JSON.stringify({ event: 'cad.mcp.rejected', reason,
+    method: methods.includes(rpc?.method) ? rpc.method : 'other',
+    protocol: [MODERN, LEGACY].includes(request.headers.get('MCP-Protocol-Version')) ? request.headers.get('MCP-Protocol-Version') : 'other-or-absent',
+    hasMethodHeader: request.headers.has('Mcp-Method'), hasNameHeader: request.headers.has('Mcp-Name'),
+    hasMetadata: !!object(meta), hasMetadataVersion: typeof meta?.['io.modelcontextprotocol/protocolVersion'] === 'string',
+    hasClientCapabilities: !!object(meta?.['io.modelcontextprotocol/clientCapabilities']) }));
+}
 async function mcp(request, env) {
   if (request.method !== 'POST') return new Response(null, { status: request.method === 'GET' ? 405 : 400 });
   const origin = request.headers.get('Origin');
   if (origin && origin !== new URL(request.url).origin) return rpcError(null, -32012, 'Forbidden origin', 403);
-  let rpc; try { rpc = await readBody(request); } catch { return rpcError(null, -32700, 'Parse error', 400); }
+  let rpc; try { rpc = await readBody(request); } catch { mcpDiagnostic(request, null, 'parse-error'); return rpcError(null, -32700, 'Parse error', 400); }
   if (!object(rpc) || rpc.jsonrpc !== '2.0' || typeof rpc.method !== 'string' || rpc.params !== undefined && !object(rpc.params)) return rpcError(rpc?.id, -32600, 'Invalid Request', 400);
   const version = request.headers.get('MCP-Protocol-Version'), metaVersion = rpc.params?._meta?.['io.modelcontextprotocol/protocolVersion'];
   const modern = rpc.method === 'server/discover' || rpc.method.startsWith('events/') || metaVersion !== undefined || version === MODERN;
   if (modern) {
-    if (!object(rpc.params?._meta) || typeof metaVersion !== 'string' || !object(rpc.params._meta['io.modelcontextprotocol/clientCapabilities'])) return rpcError(rpc.id, -32602, 'Required MCP request metadata missing', 400);
-    if (version !== metaVersion || request.headers.get('Mcp-Method') !== rpc.method || rpc.method === 'tools/call' && headerName(request.headers.get('Mcp-Name')) !== rpc.params?.name) return rpcError(rpc.id, -32020, 'HeaderMismatch', 400);
+    if (!object(rpc.params?._meta) || typeof metaVersion !== 'string' || !object(rpc.params._meta['io.modelcontextprotocol/clientCapabilities'])) { mcpDiagnostic(request, rpc, 'metadata-missing'); return rpcError(rpc.id, -32602, 'Required MCP request metadata missing', 400); }
+    if (version !== metaVersion || request.headers.get('Mcp-Method') !== rpc.method || rpc.method === 'tools/call' && headerName(request.headers.get('Mcp-Name')) !== rpc.params?.name) { mcpDiagnostic(request, rpc, 'header-mismatch'); return rpcError(rpc.id, -32020, 'HeaderMismatch', 400); }
     if (version !== MODERN) return rpcError(rpc.id, -32022, 'UnsupportedProtocolVersionError', 400, { supported: [MODERN], requested: version });
   } else if (version && version !== LEGACY) return rpcError(rpc.id, -32022, 'UnsupportedProtocolVersionError', 400, { supported: [MODERN, LEGACY], requested: version });
   let result;
