@@ -23,7 +23,7 @@
 
 選択は実際のOpenCascade Face/Edgeと対応付け、生成元フィーチャーと幾何selectorをJSONへ保存する。表示用の一時的なhash/indexは保存しない。対応が消えた・複数候補がある場合は選び直しを求める。詳細と拡張点は [AI-native architecture](docs/architecture/ai-native-cad.md)。
 
-**Codex接続（個人用Sites）**: このSite用に発行されたプラグインをCodexへインストール・接続する。画面から依頼を送った後、Codexに `CADの最新依頼を確認してモデルを提案して` と伝える。**Codexへの依頼文をコピー**には依頼IDも含まれる。CodexはSiteのMCPで構造化スケッチ・寸法・場所付きコメント・CAD実entityを読み、許可されたcommandだけを返す。ブラウザが受信し、B-Rep評価・ゴースト表示・適用確認を行う。ボタン単独でCodexを起動するAPIではなく、Codexとの短い会話を使う。APIキーは不要。GitHub Pages版は接続がなくてもスケッチの形状プレビュー・数値編集・出力まで動作する。
+**dot連携（個人用Sites）**: 同じSiteプラグインにMCP 2.0の `cad.request.created` イベントを追加した。プラグインの再スキャン・接続後、dotで「CADの新しい依頼を受け取ったら、モデルを読んで提案を返して」と購読を設定する。接続済みなら、画面の明示的な依頼送信から署名付きWebhookでdotへ通知する。dotは構造化スケッチ・寸法・場所付きコメント・CAD実entityを読み、許可されたcommandだけを返す。ブラウザがB-Rep評価・ゴースト表示を行い、ユーザーが適用するまで元モデルは変わらない。新しいLLM APIキーや有料推論APIは使わない。購読未設定・通知失敗も画面に表示し、従来の依頼文コピーは手動経路として残す。実際のdotでの購読・通知・提案の往復は接続後に別途検証する。[プロトコル・再送の制約](docs/architecture/mcp-events.md)。GitHub Pages版の静的動作は維持する。
 
 交換可能な `propose(request, { signal })` interface、offline、明示的mock、`window.oshidaCadAIAdapter`注入も残す。任意コード実行やモデル全体置換は受け付けない。Sitesの依頼は認証ユーザー別にR2へ保存し、未認証のデータ取得を拒否する。
 

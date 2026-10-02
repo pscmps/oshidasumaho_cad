@@ -17,6 +17,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   const [status, setStatus] = useState(''), [meshStatus, setMeshStatus] = useState('');
   const [adapterMode, setAdapterMode] = useState(() => import.meta.env.VITE_SITE_CODEX === '1' ? 'codex' : window.oshidaCadAIAdapter?.propose ? 'connected' : 'offline'), [selectedFeatureId, setSelectedFeatureId] = useState('');
   const [requestId, setRequestId] = useState('');
+  const [webhook, setWebhook] = useState(null);
   const undo = useRef([]);
   const key = geometryKey(document);
   const draft = cadOf(document).draft || emptyDraft(), draftKey = JSON.stringify(draft);
@@ -100,7 +101,10 @@ export function useCadWorkspace(document, setDocument, enabled) {
     try { await apply(createProposal(latest.current, commands)); } catch (e) { setStatus(e.message); }
   };
   function getAdapter(n) {
-    return adapterMode === 'codex' ? createCodexAdapter({ onQueued: id => { if (sequence.current === n) { setRequestId(id); setStatus('Codexへ依頼を置きました。Codexに「CADの最新依頼を確認してモデルを提案して」と伝えてください。'); } } })
+    return adapterMode === 'codex' ? createCodexAdapter({
+      onQueued: (id, connection) => { if (sequence.current === n) { setRequestId(id); setWebhook(connection); setStatus(connection?.notificationError ? '依頼は保存済みですが、通知を準備できませんでした。接続状態を確認しています。' : connection?.connected ? '依頼を保存しました。dotへ通知中です。' : '依頼は保存済みです。自動連携が未接続のため、dotにCADの最新依頼を確認するよう伝えてください。'); } },
+      onWebhook: connection => { if (sequence.current === n) setWebhook(connection); },
+    })
       : adapterMode === 'mock' ? createMockAdapter() : adapterMode === 'connected' ? window.oshidaCadAIAdapter : offlineAdapter;
   }
   function sketchOrigin() {
@@ -136,7 +140,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   return {
     mesh, ghost, group, setGroup, mode, setMode, paint, setPaint, proposal, pending, status, meshStatus,
     adapterMode, setAdapterMode, selectedFeatureId, setSelectedFeatureId, submit, runCommands,
-    requestId, draft, requestSketch, previewSketch, message: setStatus,
+    requestId, webhook, draft, requestSketch, previewSketch, message: setStatus,
     updateDraft(value) { setDocument(current => {
       const cad = cadOf(current), before = cad.draft || emptyDraft();
       const next = typeof value === 'function' ? value(before) : value; validateDraft(next);

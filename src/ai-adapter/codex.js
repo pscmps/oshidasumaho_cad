@@ -1,6 +1,6 @@
-// Site-hosted MCP exchange: Codex reads a request and stages an allowed-command response.
-// This does not invoke Codex on the user's behalf or require an API key.
-export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800, onQueued = () => {} } = {}) {
+// Site-hosted MCP exchange. An active MCP Events subscription notifies dot;
+// its existing connection returns an unapplied proposal, with no LLM API key.
+export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800, onQueued = () => {}, onWebhook = () => {} } = {}) {
   const json = async (url, options) => {
     const response = await fetcher(url, { credentials: 'same-origin', ...options });
     if (!response.ok) {
@@ -11,13 +11,14 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
   };
   return { async propose(request, { signal } = {}) {
     const requestId = crypto.randomUUID();
-    await json('/api/cad/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, request }), signal });
-    onQueued(requestId);
+    const queued = await json('/api/cad/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, request }), signal });
+    onQueued(requestId, queued.webhook);
     const deadline = Date.now() + 15 * 60 * 1000;
     try {
       while (Date.now() < deadline) {
         if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
         const result = await json(`/api/cad/requests/${requestId}`, { signal });
+        if (result.webhook) onWebhook(result.webhook);
         if (result.response) return result.response;
         if (result.cancelled) throw new Error('この依頼は取り消されています');
         await new Promise((resolve, reject) => {

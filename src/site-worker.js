@@ -2,6 +2,8 @@ import { validateAndMigrateModelDocument } from './model-json.js';
 import { validateDraft } from './cad-core/rough-sketch.js';
 import { AI_COMMAND_CONTRACT, CAD_COMMAND_SCHEMA, validateCommands } from './cad-command/schema.js';
 import { createProposal } from './cad-command/proposals.js';
+import { createEvents, EVENT, EventError, canonical } from './cad-events.js';
+import { webhookFetch } from './webhook-fetch.js';
 
 const ID = /^[a-f0-9-]{36}$/;
 const MAX_BYTES = 1000000;
@@ -36,12 +38,14 @@ function storage(env, user) {
 }
 const requestIdSchema = { type: 'string', pattern: '^[a-f0-9-]{36}$' };
 const TOOLS = [
+  { name: 'get_cad_connection_status', description: 'Read whether this user has an active CAD-request webhook subscription. Returns counts and expiration only, never callback URLs or secrets. Does not subscribe or change models.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } },
   { name: 'list_cad_requests', description: 'List the authenticated user’s pending CAD sketch/edit requests, newest first. No model is changed.', inputSchema: { type: 'object', properties: {}, additionalProperties: false }, annotations: { readOnlyHint: true } },
   { name: 'read_cad_request', description: 'Read one CAD request: structured sketch strokes, anchored comments, dimensions, feature graph, actual CAD entity selection groups and permitted-command contract. Interpret intent from this data; ask if ambiguous.', inputSchema: { type: 'object', properties: { requestId: requestIdSchema }, required: ['requestId'], additionalProperties: false }, annotations: { readOnlyHint: true } },
-  { name: 'propose_cad_commands', description: 'Return a proposal for an existing request. Use only permitted CAD commands. The browser will generate a ghost and ask the user to apply. Never execute code or replace the whole document. For sketches use addSketchSolid normalized closed profiles; read the contract first. Either commands or clarification, never both.', inputSchema: { type: 'object', properties: { requestId: requestIdSchema, commands: { type: 'array', items: CAD_COMMAND_SCHEMA, minItems: 1, maxItems: 20 }, explanation: { type: 'string', maxLength: 4000 }, clarification: { type: 'string', maxLength: 4000 } }, required: ['requestId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false } },
+  { name: 'propose_cad_commands', description: 'Return a proposal for an existing request. Use only permitted CAD commands. The browser will generate a ghost and ask the user to apply. Never execute code or replace the whole document. For sketches use addSketchSolid normalized closed profiles; read the contract first. Either commands or clarification, never both. Repeating the identical response is safe; replacing an existing response is rejected.', inputSchema: { type: 'object', properties: { requestId: requestIdSchema, commands: { type: 'array', items: CAD_COMMAND_SCHEMA, minItems: 1, maxItems: 20 }, explanation: { type: 'string', maxLength: 4000 }, clarification: { type: 'string', maxLength: 4000 } }, required: ['requestId'], additionalProperties: false }, annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
 ];
 
-async function callTool(name, args, store) {
+async function callTool(name, args, store, events) {
+  if (name === 'get_cad_connection_status') { exact(args, []); return events.status(); }
   if (name === 'list_cad_requests') {
     exact(args, []);
     const all = []; let cursor;
@@ -60,7 +64,7 @@ async function callTool(name, args, store) {
   if (name === 'propose_cad_commands') {
     exact(args, ['requestId', 'commands', 'explanation', 'clarification']);
     const { data, etag } = await store.get(args.requestId);
-    if (data.cancelled || data.response) throw new Error('この依頼は取り消し済み、または回答済みです');
+    if (data.cancelled) throw new Error('この依頼は取り消し済みです');
     if ([args.explanation, args.clarification].some(s => s !== undefined && (typeof s !== 'string' || s.length > 4000))) throw new Error('説明は4000字以内です');
     let response;
     if (args.clarification && !args.commands) response = { clarification: args.clarification };
@@ -70,35 +74,76 @@ async function callTool(name, args, store) {
       createProposal(data.request.document, commands); // Validate graph and captured targets; no kernel or JS runs server-side.
       response = { commands, explanation: args.explanation || '' };
     }
-    await store.put(args.requestId, { ...data, response }, etag);
+    if (data.response) {
+      if (canonical(data.response) !== canonical(response)) throw new Error('この依頼は回答済みです');
+    } else {
+      try { await store.put(args.requestId, { ...data, response }, etag); }
+      catch (error) { const latest = (await store.get(args.requestId)).data; if (latest.cancelled || canonical(latest.response ?? null) !== canonical(response)) throw error; }
+    }
     return { status: 'proposed', requestId: args.requestId, applied: false };
   }
   throw new Error('未対応のツールです');
 }
 
+const MODERN = '2026-07-28', LEGACY = '2025-03-26';
+const INFO = { name: 'oshida-personal-cad', version: '3.0.0' };
+function rpcError(id, code, message, status = 200, data) { return json({ jsonrpc: '2.0', id: id ?? null, error: { code, message, ...(data ? { data } : {}) } }, status); }
+function headerName(value) {
+  if (value?.startsWith('=?base64?') && value.endsWith('?=')) { try { return new TextDecoder('utf-8', { fatal: true }).decode(Uint8Array.from(atob(value.slice(9, -2)), c => c.charCodeAt(0))); } catch { return null; } }
+  return value;
+}
+function eventsOf(env, user) { return createEvents(env.CAD_EXCHANGE, user, { webhookFetch }); }
 async function mcp(request, env) {
   if (request.method !== 'POST') return new Response(null, { status: request.method === 'GET' ? 405 : 400 });
-  const rpc = await readBody(request); let result;
-  if (rpc.jsonrpc !== '2.0' || typeof rpc.method !== 'string') return json({ jsonrpc: '2.0', id: rpc.id ?? null, error: { code: -32600, message: 'Invalid Request' } }, 400);
-  if (rpc.method === 'initialize') result = { protocolVersion: '2025-03-26', capabilities: { tools: {} }, serverInfo: { name: 'oshida-personal-cad', version: '2.0.0' } };
-  else if (rpc.method.startsWith('notifications/')) return new Response(null, { status: 202 });
-  else if (rpc.method === 'ping') result = {};
-  else if (rpc.method === 'tools/list') result = { tools: TOOLS };
-  else if (rpc.method === 'tools/call') {
-    const user = userOf(request); // unauthenticated calls fail with HTTP 401, including guessed IDs.
-    try { const value = await callTool(rpc.params?.name, rpc.params?.arguments || {}, storage(env, user)); result = { content: [{ type: 'text', text: JSON.stringify(value) }] }; }
-    catch (e) { result = { content: [{ type: 'text', text: e.message }], isError: true }; }
-  } else return json({ jsonrpc: '2.0', id: rpc.id ?? null, error: { code: -32601, message: 'Method not found' } });
-  return json({ jsonrpc: '2.0', id: rpc.id ?? null, result });
+  const origin = request.headers.get('Origin');
+  if (origin && origin !== new URL(request.url).origin) return rpcError(null, -32012, 'Forbidden origin', 403);
+  let rpc; try { rpc = await readBody(request); } catch { return rpcError(null, -32700, 'Parse error', 400); }
+  if (!object(rpc) || rpc.jsonrpc !== '2.0' || typeof rpc.method !== 'string' || rpc.params !== undefined && !object(rpc.params)) return rpcError(rpc?.id, -32600, 'Invalid Request', 400);
+  const version = request.headers.get('MCP-Protocol-Version'), metaVersion = rpc.params?._meta?.['io.modelcontextprotocol/protocolVersion'];
+  const modern = rpc.method === 'server/discover' || rpc.method.startsWith('events/') || metaVersion !== undefined || version === MODERN;
+  if (modern) {
+    if (!object(rpc.params?._meta) || typeof metaVersion !== 'string' || !object(rpc.params._meta['io.modelcontextprotocol/clientCapabilities'])) return rpcError(rpc.id, -32602, 'Required MCP request metadata missing', 400);
+    if (version !== metaVersion || request.headers.get('Mcp-Method') !== rpc.method || rpc.method === 'tools/call' && headerName(request.headers.get('Mcp-Name')) !== rpc.params?.name) return rpcError(rpc.id, -32020, 'HeaderMismatch', 400);
+    if (version !== MODERN) return rpcError(rpc.id, -32022, 'UnsupportedProtocolVersionError', 400, { supported: [MODERN], requested: version });
+  } else if (version && version !== LEGACY) return rpcError(rpc.id, -32022, 'UnsupportedProtocolVersionError', 400, { supported: [MODERN, LEGACY], requested: version });
+  let result;
+  try {
+    if (rpc.method === 'server/discover') result = { supportedVersions: [MODERN], capabilities: { tools: {}, events: {} }, _meta: { 'io.modelcontextprotocol/serverInfo': INFO } };
+    else if (rpc.method === 'initialize' && !modern) result = { protocolVersion: LEGACY, capabilities: { tools: {} }, serverInfo: INFO };
+    else if (rpc.method.startsWith('notifications/') && !modern) return new Response(null, { status: 202 });
+    else if (rpc.method === 'ping') result = {};
+    else if (rpc.method === 'tools/list') result = { tools: TOOLS };
+    else if (rpc.method === 'tools/call') {
+      const user = userOf(request); // Never manufacture a user from service access.
+      if (!TOOLS.some(t => t.name === rpc.params?.name)) return rpcError(rpc.id, -32602, 'Unknown tool', 400);
+      try { const value = await callTool(rpc.params?.name, rpc.params?.arguments ?? {}, storage(env, user), eventsOf(env, user)); result = { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value }; }
+      catch (e) { result = { content: [{ type: 'text', text: e instanceof EventError ? e.message : e.message }], isError: true }; }
+    } else if (rpc.method.startsWith('events/')) {
+      const user = userOf(request), events = eventsOf(env, user);
+      if (rpc.method === 'events/list') {
+        if (rpc.params?.cursor != null) throw new EventError(-32602, 'Invalid cursor');
+        result = { events: [EVENT] };
+      } else if (rpc.method === 'events/subscribe') result = await events.subscribe(rpc.params);
+      else if (rpc.method === 'events/unsubscribe') result = await events.unsubscribe(rpc.params);
+      else return rpcError(rpc.id, -32601, 'Method not found', 404);
+    } else return rpcError(rpc.id, -32601, 'Method not found', 404);
+  } catch (e) {
+    if (e.status === 401) return rpcError(rpc.id, -32012, 'Authentication required', 401);
+    return rpcError(rpc.id, e.code ?? -32603, e instanceof EventError ? e.message : 'Internal error', 200, e.data);
+  }
+  return json({ jsonrpc: '2.0', id: rpc.id ?? null, result: { ...(modern ? { resultType: 'complete' } : {}), ...result } });
 }
 
-export default { async fetch(request, env) {
+export default { async fetch(request, env, ctx) {
   const url = new URL(request.url);
   try {
     if (url.pathname === '/mcp') return await mcp(request, env);
     if (!url.pathname.startsWith('/api/cad/')) return env.ASSETS ? env.ASSETS.fetch(request) : new Response('Not found', { status: 404 });
-    const user = userOf(request), store = storage(env, user);
+    const user = userOf(request), store = storage(env, user), events = eventsOf(env, user);
+    const readCurrent = async id => { try { return (await store.get(id)).data; } catch (error) { if (error.status === 404) return null; throw error; } };
+    const dispatch = id => { const work = events.dispatch(id, readCurrent).catch(() => {}); if (ctx?.waitUntil) ctx.waitUntil(work); return work; };
     if (request.method === 'POST' && request.headers.get('Origin') && request.headers.get('Origin') !== url.origin) return json({ error: 'このサイトから操作してください' }, 403);
+    if (url.pathname === '/api/cad/connection' && request.method === 'GET') return json(await events.status());
     if (url.pathname === '/api/cad/requests' && request.method === 'POST') {
       const body = await readBody(request); exact(body, ['requestId', 'request']); idOf(body.requestId);
       const r = body.request; exact(r, ['task', 'prompt', 'document', 'sketchDraft', 'activeGroup', 'features', 'selectionGroups', 'contract']);
@@ -106,14 +151,25 @@ export default { async fetch(request, env) {
       const document = validateAndMigrateModelDocument(r.document);
       if (r.task === 'sketch') validateDraft(r.sketchDraft);
       const safe = { task: r.task, prompt: r.prompt, document, ...(r.task === 'sketch' ? { sketchDraft: r.sketchDraft } : {}), ...(r.activeGroup ? { activeGroup: r.activeGroup } : {}) };
-      await store.put(body.requestId, { requestId: body.requestId, request: safe, createdAt: new Date().toISOString(), cancelled: false });
-      return json({ requestId: body.requestId }, 201);
+      const saved = { requestId: body.requestId, request: safe, createdAt: new Date().toISOString(), cancelled: false };
+      await store.put(body.requestId, saved);
+      let subscribed = 0, notificationError = false;
+      try { subscribed = await events.queue(saved, url.origin); if (ctx?.waitUntil) dispatch(body.requestId); else await dispatch(body.requestId); }
+      catch { notificationError = true; }
+      return json({ requestId: body.requestId, webhook: { connected: subscribed > 0, notificationError } }, 201);
     }
     const match = url.pathname.match(/^\/api\/cad\/requests\/([a-f0-9-]{36})(\/cancel)?$/);
     if (!match) return json({ error: 'Not found' }, 404);
     const { data, etag } = await store.get(match[1]);
     if (match[2] && request.method === 'POST') { await store.put(match[1], { ...data, cancelled: true }, etag); return json({ cancelled: true }); }
-    if (!match[2] && request.method === 'GET') return json({ response: data.response || null, cancelled: data.cancelled });
+    if (!match[2] && request.method === 'GET') {
+      if (!data.cancelled && !data.response) {
+        // Repair an interrupted queue write, but never replay pre-subscription requests.
+        await events.queue(data, url.origin);
+        if (ctx?.waitUntil) dispatch(match[1]); else await dispatch(match[1]);
+      }
+      return json({ response: data.response || null, cancelled: data.cancelled, webhook: { ...await events.status(data.request.task), ...await events.deliveryStatus(match[1]) } });
+    }
     return json({ error: 'Method not allowed' }, 405);
   } catch (e) { return json({ error: e.message || '接続を利用できません' }, e.status || 400); }
 } };
