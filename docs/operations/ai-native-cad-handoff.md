@@ -69,3 +69,28 @@ python scripts/cad-exchange-browser-smoke.py --base-url http://127.0.0.1:4199/
 - ブラウザ保存が壊れている場合は上書きを止める。既存データを退避・確認してから人が復旧方法を決める。自動削除や初期化はしない。
 - Webhookは最大3回の再送と保存済みoutbox。独立scheduler/queueはなく、途中中断からの復帰は認証済み画面ポーリングに依存する。
 - ビルドの大きなWASM/JSチャンク警告は残る。形状カーネル由来で、今回の不具合修正では構成変更しなかった。
+
+## 購読期限と自動更新の確認（2026-10-02）
+
+結論: `2026-10-03T15:36:55.013Z` は現在の購読leaseの失効時刻。サービスの利用契約終了日でも、自動化の総実行期間の上限でもない。翌日以降の継続はChatGPTからの期限前更新を前提とする。現実装は更新に対応しているが、本番で最初の自動更新が成功したことはまだ確認できていない。
+
+### 公式仕様と実装
+
+- [OpenAI MCP Events / Refresh a subscription](https://developers.openai.com/plugins/build/mcp-events#refresh-a-subscription) は、ChatGPTが `refreshBefore` より前に、同じ購読identityと保存済みcursorで `events/subscribe` を再実行すると明記している。具体的な更新時刻、余裕時間、更新障害時の再試行保証は、この公開仕様には記載されていない。
+- 同仕様はTTL省略時のサーバー既定値、有限TTLの交渉、`ttlMs: null`への有限期間の応答を許容する。[MCP Events draft / Subscription TTL](https://github.com/modelcontextprotocol/experimental-ext-triggers-events/blob/main/docs/design-sketch-proposal.md#subscription-ttl) もクライアントの更新責任を定める。24時間と7日はこのCAD実装の設定であり、プロトコル共通の期間上限ではない。
+- `src/cad-events.js` は既定24時間、1回の最大7日、nullも24時間。認証済み `events/subscribe` とcallback検証が成功して初めて `expiresAt = now + duration` を保存し、その値を `refreshBefore` として返す。
+- 有効期間内の更新は同じID・1件の購読を維持し、既存の作成時刻とgenerationを保持する。保存済み購読はWorker再起動後もR2から読み出せる。期限を過ぎると新規queueと送信直前の検査で配信を停止する。状態の読取り、画面ポーリング、イベント受信だけでは期間は延長されない。
+- 失効後の再購読は新しいgenerationになり、旧outboxを再開しない。`cursor: null`でreplay非対応のため、購読切れの間に発生した依頼は更新だけでは自動通知されない。保存済み依頼自体の読取りは別経路で可能。
+
+### 実証の範囲
+
+- 2026-10-02 17:33 UTCの本番read-only確認: `connected: true`, `subscriptions: 1`, `refreshBefore: 2026-10-03T15:36:55.013Z`。初回の観測値からまだ進んでいない。よって「公式に自動更新する設計」と「この購読の本番更新成功」を区別する。期限前の同値だけで更新失敗とは判定しない。
+- 取得できた最近のSiteログは15件（17:22〜17:23 UTC）で、更新成功を示す記録は含まれなかった。これは全期間の更新試行不存在を証明しない。callback URL・secret・認証情報は調査記録へ保存していない。
+- 仮想時計のローカル回帰5ケースを追加。TTL既定/上限/null、期限前更新後に旧期限を越えて再起動・配信成功、期限ちょうどで停止、失効後の再購読で旧通知を復活させないこと、更新時のcallback検証失敗で旧期限を延長しないことを検証。イベント関連テストは **16/16成功**。先の全体163件成功とは別の追加確認であり、ChatGPT側schedulerの実証ではない。
+- 本番の購読・secret・TTL・automationは変更していない。追加物はテストとこの記録のみ。実装不具合は今回の期限確認では見つからず、Site再公開は不要。
+
+### 朝の報告と次回の観測
+
+ベトナム10月3日10:00は03:00 UTCで、今回の期限（同日22:36:55ベトナム時間）より12時間以上前。朝に期限がまだ同値でも、失敗確定とは報告しない。「更新対応済み、初回本番更新は未観測」と伝える。
+
+親dotは必要時に既存automationの有効状態と `get_cad_connection_status` を読み、期限が先へ進んだことを更新の証拠にする。automationがenabledであることだけでは更新成功の証拠にならない。期限後も未更新なら、自動起動の継続は未成立として既存購読の更新経路を調査する。購読・automationを重複作成したり、secret再発行・TTL延長・無期限化で代用したりしない。観測用の新たなスケジュールは今回作成していない。

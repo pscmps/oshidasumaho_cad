@@ -152,3 +152,69 @@ test('transient storage faults keep pending work retryable and 425 retries safel
   assert.equal((await h.events.deliveryStatus(requestId)).pending, 1);
   h.respond([425, 200]); await h.events.dispatch(requestId, async () => d); assert.equal((await h.events.deliveryStatus(requestId)).delivered, 1);
 });
+
+test('lease lifetime defaults to one day, bounds finite requests and never grants infinity', async () => {
+  const day = 86400000;
+  for (const [extra, duration] of [[{}, day], [{ ttlMs: null }, day], [{ ttlMs: 60000 }, 60000], [{ ttlMs: 10 * day }, 7 * day]]) {
+    const h = harness(), started = h.deps.now();
+    const granted = await h.events.subscribe(params({}, extra));
+    assert.equal(Date.parse(granted.refreshBefore), started + duration);
+    assert.equal(granted.cursor, null);
+  }
+});
+
+test('renewal preserves one identity and survives beyond the original expiry after restart', async () => {
+  const h = harness(), hour = 3600000;
+  const first = await h.events.subscribe(params());
+  h.advance(23 * hour);
+  const refreshed = await createEvents(h.bucket, 'alice', h.deps).subscribe(params());
+  assert.equal(refreshed.id, first.id);
+  assert.equal(Date.parse(refreshed.refreshBefore), Date.parse(first.refreshBefore) + 23 * hour);
+  assert.equal(h.sent.filter(s => s.parsed.type === 'verification').length, 2);
+  h.advance(2 * hour);
+  const restarted = createEvents(h.bucket, 'alice', h.deps);
+  assert.deepEqual(await restarted.status(), { event: EVENT_NAME, connected: true, subscriptions: 1, refreshBefore: refreshed.refreshBefore });
+  const d = h.data(); await restarted.queue(d, 'https://cad.test'); await restarted.dispatch(d.requestId, async () => d);
+  assert.equal((await restarted.deliveryStatus(d.requestId)).delivered, 1);
+});
+
+test('status and queue activity never renew a lease and expiry stops a previously queued delivery', async () => {
+  const h = harness(), first = await h.events.subscribe(params({}, { ttlMs: 10000 })), d = h.data();
+  await h.events.queue(d, 'https://cad.test');
+  h.advance(9999);
+  assert.equal((await h.events.status()).refreshBefore, first.refreshBefore);
+  h.advance(1);
+  assert.deepEqual(await h.events.status(), { event: EVENT_NAME, connected: false, subscriptions: 0, refreshBefore: null });
+  assert.equal(await h.events.queue(h.data(), 'https://cad.test'), 0);
+  await h.events.dispatch(d.requestId, async () => d);
+  assert.equal((await h.events.deliveryStatus(d.requestId)).stopped, 1);
+  assert.equal(h.sent.filter(s => s.parsed.type !== 'verification').length, 0);
+});
+
+test('renewing after expiry does not revive old queued work or replay events from the gap', async () => {
+  const h = harness(), first = await h.events.subscribe(params({}, { ttlMs: 10000 })), old = h.data();
+  await h.events.queue(old, 'https://cad.test');
+  h.advance(10001);
+  const gap = { ...h.data(), requestId: 'b7c7c4a8-9005-49e2-91e8-568cd4b68212' };
+  assert.equal(await h.events.queue(gap, 'https://cad.test'), 0);
+  h.advance(1);
+  assert.equal((await h.events.subscribe(params())).id, first.id);
+  assert.equal((await h.events.status()).subscriptions, 1);
+  assert.equal(await h.events.queue(gap, 'https://cad.test'), 0);
+  await h.events.dispatch(old.requestId, async () => old);
+  assert.equal((await h.events.deliveryStatus(old.requestId)).stopped, 1);
+  assert.equal(h.sent.filter(s => s.parsed.type !== 'verification').length, 0);
+  const fresh = { ...h.data(), requestId: 'c7c7c4a8-9005-49e2-91e8-568cd4b68212' };
+  await h.events.queue(fresh, 'https://cad.test'); await h.events.dispatch(fresh.requestId, async () => fresh);
+  assert.equal((await h.events.deliveryStatus(fresh.requestId)).delivered, 1);
+});
+
+test('failed callback proof during renewal leaves the existing expiration unchanged', async () => {
+  const h = harness(), first = await h.events.subscribe(params());
+  h.advance(300001); h.badChallenge();
+  await assert.rejects(h.events.subscribe(params()), e => e.code === -32015 && e.data.reason === 'challenge_failed');
+  const status = await h.events.status();
+  assert.equal(status.subscriptions, 1); assert.equal(status.refreshBefore, first.refreshBefore);
+  h.advance(Date.parse(first.refreshBefore) - h.deps.now());
+  assert.equal((await h.events.status()).connected, false);
+});
