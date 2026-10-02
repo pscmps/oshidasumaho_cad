@@ -71,6 +71,26 @@ test('MCP2 discovery/events and mandatory header consistency coexist with legacy
   assert.equal((await modernRpc(fetch,'does/not/exist')).status,404);
   assert.equal((await modernRpc(fetch,'events/list',{}, {Origin:'https://evil.test'})).status,403);
 });
+
+test('authenticated Sites dispatch restores absent mirrors only; direct, unauthenticated and mismatched traffic remain rejected', async () => {
+  const e = env(), fetch = fetcher(e), anon = fetcher(e, null);
+  const dispatch = { 'x-dispatched-app': 'site---6abe87fa3e3481919fe3e891c4e6f082' };
+  const request = (send, method, params = {}, headers = {}) => send('/mcp', { method: 'POST', headers: { 'Content-Type': 'application/json', 'MCP-Protocol-Version': '2026-07-28', ...headers }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params: { ...params, _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} } } }) });
+  const discovery = await request(fetch, 'server/discover', {}, dispatch);
+  assert.equal(discovery.status, 200);
+  assert.deepEqual((await discovery.json()).result.capabilities.events, {});
+  const status = await request(fetch, 'tools/call', { name: 'get_cad_connection_status', arguments: {} }, dispatch);
+  assert.equal(status.status, 200);
+  assert.equal((await status.json()).result.structuredContent.connected, false);
+  assert.equal((await request(fetch, 'events/list', {}, dispatch)).status, 200);
+  assert.equal((await request(fetch, 'server/discover')).status, 400);
+  assert.equal((await request(anon, 'server/discover', {}, dispatch)).status, 400);
+  assert.equal((await request(fetch, 'server/discover', {}, { 'x-dispatched-app': 'another-site' })).status, 400);
+  assert.equal((await request(fetch, 'server/discover', {}, { ...dispatch, 'Mcp-Method': 'tools/list' })).status, 400);
+  assert.equal((await request(fetch, 'tools/call', { name: 'get_cad_connection_status' }, { ...dispatch, 'Mcp-Name': 'read_cad_request' })).status, 400);
+  assert.equal((await request(fetch, 'server/discover', {}, { ...dispatch, 'MCP-Protocol-Version': '2025-03-26' })).status, 400);
+  assert.equal((await modernRpc(anon, 'tools/call', { name: 'get_cad_connection_status', arguments: {} }, dispatch)).status, 401);
+});
 test('idempotent create cannot overwrite a request; cross-origin, bad draft, conflict and cancellation are bounded',async()=>{
   const e=env(),fetch=fetcher(e),post=body=>fetch('/api/cad/requests',{method:'POST',body:JSON.stringify(body)});
   assert.equal((await post({requestId:id,request:request()})).status,201);

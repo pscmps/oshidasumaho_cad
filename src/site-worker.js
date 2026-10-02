@@ -113,9 +113,17 @@ async function mcp(request, env) {
   if (!object(rpc) || rpc.jsonrpc !== '2.0' || typeof rpc.method !== 'string' || rpc.params !== undefined && !object(rpc.params)) return rpcError(rpc?.id, -32600, 'Invalid Request', 400);
   const version = request.headers.get('MCP-Protocol-Version'), metaVersion = rpc.params?._meta?.['io.modelcontextprotocol/protocolVersion'];
   const modern = rpc.method === 'server/discover' || rpc.method.startsWith('events/') || metaVersion !== undefined || version === MODERN;
+  // Sites' authenticated dispatch currently omits MCP2 mirrored method/name
+  // headers (confirmed in production discovery). Adapt only that trusted
+  // ingress; this is a hosting compatibility boundary, not relaxed MCP2
+  // validation for direct traffic. Never replace an explicitly supplied header.
+  const sitesIngress = request.headers.get('x-dispatched-app') === 'site---6abe87fa3e3481919fe3e891c4e6f082' && !!request.headers.get('oai-authenticated-user-id');
+  const methodHeader = request.headers.get('Mcp-Method') ?? (sitesIngress ? rpc.method : null);
+  const nameHeader = request.headers.get('Mcp-Name');
+  const toolName = nameHeader === null && sitesIngress ? rpc.params?.name : headerName(nameHeader);
   if (modern) {
     if (!object(rpc.params?._meta) || typeof metaVersion !== 'string' || !object(rpc.params._meta['io.modelcontextprotocol/clientCapabilities'])) { mcpDiagnostic(request, rpc, 'metadata-missing'); return rpcError(rpc.id, -32602, 'Required MCP request metadata missing', 400); }
-    if (version !== metaVersion || request.headers.get('Mcp-Method') !== rpc.method || rpc.method === 'tools/call' && headerName(request.headers.get('Mcp-Name')) !== rpc.params?.name) { mcpDiagnostic(request, rpc, 'header-mismatch'); return rpcError(rpc.id, -32020, 'HeaderMismatch', 400); }
+    if (version !== metaVersion || methodHeader !== rpc.method || rpc.method === 'tools/call' && toolName !== rpc.params?.name) { mcpDiagnostic(request, rpc, 'header-mismatch'); return rpcError(rpc.id, -32020, 'HeaderMismatch', 400); }
     if (version !== MODERN) return rpcError(rpc.id, -32022, 'UnsupportedProtocolVersionError', 400, { supported: [MODERN], requested: version });
   } else if (version && version !== LEGACY) return rpcError(rpc.id, -32022, 'UnsupportedProtocolVersionError', 400, { supported: [MODERN, LEGACY], requested: version });
   let result;
