@@ -109,3 +109,34 @@ test('Codex adapter queues a request and waits without model mutation, then acce
   const controller=new AbortController(),adapter2=createCodexAdapter({fetcher:fetch,interval:1,onQueued:()=>controller.abort()});
   await assert.rejects(adapter2.propose(before,{signal:controller.signal}),e=>e.name==='AbortError');
 });
+
+test('production transport verifies and delivers with Workers redirect semantics; redirects never activate', async t => {
+  const sent = [];
+  let redirect = false;
+  t.mock.method(globalThis, 'fetch', async (url, init) => {
+    if (!['follow', 'manual'].includes(init.redirect)) throw new TypeError('Invalid redirect value');
+    assert.equal(init.redirect, 'manual');
+    const body = JSON.parse(init.body);
+    sent.push(body);
+    if (redirect) return new Response(null, { status: 307, headers: { Location: 'http://127.0.0.1/private' } });
+    return body.type === 'verification' ? Response.json({ challenge: body.challenge }) : new Response(null, { status: 204 });
+  });
+  const e = env(), fetch = fetcher(e), params = { name: 'cad.request.created', arguments: {}, delivery: { mode: 'webhook', url: 'https://receiver.example.com/callback', secret: 'whsec_' + Buffer.alloc(32, 11).toString('base64') } };
+  const subscribed = await (await modernRpc(fetch, 'events/subscribe', params)).json();
+  assert.equal(subscribed.error, undefined);
+  assert.ok(subscribed.result.id);
+  const pending = [];
+  const created = await worker.fetch(new Request('https://cad.test/api/cad/requests', { method: 'POST', headers: { 'Content-Type': 'application/json', 'oai-authenticated-user-id': 'alice' }, body: JSON.stringify({ requestId: id, request: request() }) }), e, { waitUntil: promise => pending.push(promise) });
+  assert.equal(created.status, 201);
+  await Promise.all(pending);
+  assert.equal(sent.length, 2);
+  assert.equal(sent[1].name, 'cad.request.created');
+  assert.equal(sent[1].data.requestId, id);
+  redirect = true;
+  const isolated = fetcher(env());
+  const rejected = await (await modernRpc(isolated, 'events/subscribe', params)).json();
+  assert.equal(rejected.error.code, -32015);
+  const state = await (await isolated('/api/cad/connection')).json();
+  assert.equal(state.connected, false);
+  assert.equal(sent.length, 3, 'redirect produces one attempt and is never followed');
+});

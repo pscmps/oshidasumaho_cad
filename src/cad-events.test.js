@@ -33,7 +33,7 @@ function checkSignature(sent, key = secret) {
   const h = sent.headers;
   const signature = createHmac('sha256', Buffer.from(key.slice(6), 'base64')).update(`${h['webhook-id']}.${h['webhook-timestamp']}.${sent.body}`).digest('base64');
   assert.ok(h['webhook-signature'].split(' ').includes(`v1,${signature}`));
-  assert.equal(sent.redirect, 'error'); assert.equal(h['Content-Type'], 'application/json');
+  assert.equal(sent.redirect, 'manual'); assert.equal(h['Content-Type'], 'application/json');
 }
 
 test('subscription verification, canonical identity, refresh and restart persistence', async () => {

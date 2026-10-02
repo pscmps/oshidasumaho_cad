@@ -99,7 +99,7 @@ export function createEvents(bucket, owner, { webhookFetch, now = Date.now, slee
     const timestamp = String(Math.floor(now() / 1000));
     const secrets = [s.secret, ...(s.previousSecret && s.rotateUntil > now() ? [s.previousSecret] : [])];
     const signatures = await Promise.all(secrets.map(secret => signature(secret, id, timestamp, body)));
-    return webhookFetch(s.url, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(ATTEMPT_TIMEOUT), headers: { 'Content-Type': 'application/json', 'webhook-id': id, 'webhook-timestamp': timestamp, 'webhook-signature': signatures.join(' '), 'X-MCP-Subscription-Id': s.id }, body });
+    return webhookFetch(s.url, { method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(ATTEMPT_TIMEOUT), headers: { 'Content-Type': 'application/json', 'webhook-id': id, 'webhook-timestamp': timestamp, 'webhook-signature': signatures.join(' '), 'X-MCP-Subscription-Id': s.id }, body });
   }
   async function verify(s) {
     const cacheKey = `${root}verified/${await digest(s.url)}.json`, cache = await get(cacheKey), secretHash = await digest(s.secret);

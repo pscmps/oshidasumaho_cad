@@ -7,7 +7,7 @@ import { callbackUrl, EventError } from './cad-events.js';
 // override, resolveOverride, or a redirect-following client.
 // https://blog.cloudflare.com/workers-environment-live-object-bindings/
 // https://developers.cloudflare.com/workers/configuration/compatibility-flags/#global-fetch-strictly-public
-export function webhookFetch(url, options) {
+export async function webhookFetch(url, options) {
   const target = new URL(callbackUrl(url));
   // No callback into another hosted Site, including this application's ingress.
   if (target.hostname === 'chatgpt.site' || target.hostname.endsWith('.chatgpt.site')) {
@@ -27,9 +27,15 @@ export function webhookFetch(url, options) {
     return 'other';
   };
   try {
-    return Promise.resolve(fetch(target.href, { method: 'POST', redirect: 'error', signal: options.signal, headers: options.headers, body: options.body })).catch(error => {
-      console.warn(JSON.stringify({ event: 'cad.callback.transport', stage: 'public-fetch', outcome: 'rejected', reason: classify(error) })); throw error;
-    });
+    // workerd rejects redirect: 'error' before sending. Manual returns 3xx
+    // without following it; reject here without reading or using Location.
+    // https://github.com/cloudflare/workerd/blob/main/src/workerd/api/http.c%2B%2B
+    const response = await fetch(target.href, { method: 'POST', redirect: 'manual', signal: options.signal, headers: options.headers, body: options.body });
+    if (response.status >= 300 && response.status < 400 || response.type === 'opaqueredirect' || response.redirected) {
+      try { await response.body?.cancel(); } catch { /* Still reject the redirect. */ }
+      throw new TypeError('Webhook redirect rejected');
+    }
+    return response;
   } catch (error) {
     console.warn(JSON.stringify({ event: 'cad.callback.transport', stage: 'public-fetch', outcome: 'rejected', reason: classify(error) })); throw error;
   }
