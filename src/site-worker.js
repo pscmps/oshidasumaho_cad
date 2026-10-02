@@ -193,6 +193,19 @@ export default { async fetch(request, env, ctx) {
     const dispatch = id => { const work = events.dispatch(id, readCurrent).catch(() => {}); if (ctx?.waitUntil) ctx.waitUntil(work); return work; };
     if (request.method === 'POST' && request.headers.get('Origin') && request.headers.get('Origin') !== url.origin) return json({ error: 'このサイトから操作してください' }, 403);
     if (url.pathname === '/api/cad/connection' && request.method === 'GET') return json(await events.status());
+    if (url.pathname === '/api/cad/requests' && request.method === 'GET') {
+      const requests = []; let cursor;
+      do {
+        const page = await store.bucket.list({ prefix: store.prefix, limit: 1000, include: ['customMetadata'], ...(cursor ? { cursor } : {}) });
+        for (const item of page.objects) {
+          const m = item.customMetadata;
+          if (m && ['pending', 'answered'].includes(m.state) && Date.now() - Date.parse(m.createdAt) < 86400000)
+            requests.push({ requestId: item.key.slice(store.prefix.length, -5), createdAt: m.createdAt, prompt: m.prompt, state: m.state });
+        }
+        cursor = page.truncated ? page.cursor : undefined;
+      } while (cursor);
+      return json({ requests: requests.sort((a,b) => b.createdAt.localeCompare(a.createdAt)).slice(0,20) });
+    }
     if (url.pathname === '/api/cad/requests' && request.method === 'POST') {
       const body = await readBody(request); exact(body, ['requestId', 'request']); idOf(body.requestId);
       const r = body.request; exact(r, ['task', 'prompt', 'document', 'sketchDraft', 'activeGroup', 'features', 'selectionGroups', 'contract']);

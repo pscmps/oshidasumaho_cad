@@ -11,6 +11,13 @@ export default function CodexConnection({ workspace: w }) {
   if (w.adapterMode !== 'codex') return <p className="command-note">Codex接続は個人用Sitesで利用できます。この画面でも形のプレビューと数値編集は使えます。</p>;
   const state = w.pending && w.webhook ? w.webhook : connection;
   return <div className="codex-connection">
+    {w.recentRequests?.length ? <details open={!w.requestId} className="cad-request-recovery">
+      <summary>保存済みの依頼・提案を開く</summary>
+      <p>再送せずに、届いた提案を確認できます。</p>
+      {w.recentRequests.map(r => <button type="button" key={r.requestId} disabled={w.pending && w.requestId === r.requestId} onClick={() => void w.resumeRequest(r.requestId)}>
+        {r.state === 'answered' ? '回答を見る' : '応答を確認'} · {r.prompt.split('\n')[0].slice(0,100)}
+      </button>)}
+    </details> : w.recentError ? <p role="status">保存済み依頼を確認できません：{w.recentError}</p> : null}
     <strong>dotとの自動連携</strong>
     <p>{!state ? '接続を確認中…' : state.unavailable ? '接続状態を確認できません。サイトへのログインを確認してください。' : state.connected ? '接続済み。依頼を送るとdotへ通知します。提案はこの画面で確認してから適用できます。' : '未接続。このサイトのプラグインをdotに接続し、「CADの新しい依頼を受け取ったら、モデルを読んで提案を返して」と伝えてください。'}</p>
     {w.requestId && w.pending ? <p role="status">{state?.delivered ? 'dotへ通知済み。提案を待っています。' : state?.failed ? '通知に失敗しました。依頼は保存されています。下の依頼文をdotへ送れます。' : state?.connected ? '依頼は保存済み。dotへ通知中です。' : '依頼は保存済み。自動通知は未接続です。'} 待っている間も描画・編集できます。</p> : null}

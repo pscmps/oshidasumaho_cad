@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { cadOf, geometryKey } from '../cad-core/document.js';
 import { referenceKey, toggleReference } from '../cad-core/selectors.js';
 import { evaluateInWorker } from '../cad-core/client.js';
-import { createProposal, proposalDocument } from '../cad-command/proposals.js';
+import { createProposal, proposalDocument, resumedProposal, proposalIssue } from '../cad-command/proposals.js';
 import { CAD_COMMAND_SCHEMA, AI_COMMAND_CONTRACT, validateCommands } from '../cad-command/schema.js';
 import { interpretPrompt, offlineAdapter, createMockAdapter } from '../ai-adapter/index.js';
 import { createCodexAdapter } from '../ai-adapter/codex.js';
@@ -17,7 +17,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   const [status, setStatus] = useState(''), [meshStatus, setMeshStatus] = useState('');
   const [adapterMode, setAdapterMode] = useState(() => import.meta.env.VITE_SITE_CODEX === '1' ? 'codex' : window.oshidaCadAIAdapter?.propose ? 'connected' : 'offline'), [selectedFeatureId, setSelectedFeatureId] = useState('');
   const [requestId, setRequestId] = useState('');
-  const [webhook, setWebhook] = useState(null);
+  const [webhook, setWebhook] = useState(null), [recentRequests, setRecentRequests] = useState([]), [recentError, setRecentError] = useState('');
   const undo = useRef([]), resumeStarted = useRef(false);
   const key = geometryKey(document);
   const draft = cadOf(document).draft || emptyDraft(), draftKey = JSON.stringify(draft);
@@ -37,7 +37,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
     if (!proposal || !enabled) { setGhost(null); return; }
     let cancelled = false;
     let candidate;
-    try { candidate = proposalDocument(latest.current, proposal); }
+    try { candidate = proposalDocument(proposal.previewSnapshot || latest.current, proposal); }
     catch (e) { setGhost(null); setStatus(e.message); return; }
     evaluateInWorker(candidate).then(result => { if (!cancelled) setGhost(result); })
       .catch(e => { if (!cancelled) { setGhost(null); setStatus(`提案を生成できません: ${e.message}`); } });
@@ -130,14 +130,13 @@ export function useCadWorkspace(document, setDocument, enabled) {
   }
   async function resumeRequest(id) {
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
-    const n = ++sequence.current; setPending(true); setRequestId(id); setStatus('同じ依頼の最新応答を確認しています');
+    const n = ++sequence.current; setPending(true); setProposal(null); setRequestId(id); setStatus('同じ依頼の最新応答を確認しています');
     try {
       const saved = await getAdapter(n).resume(id, { signal: controller.signal });
       if (n !== sequence.current) return;
-      const p = createProposal(saved.request.document, validateCommands(saved.response.commands), String(saved.response.explanation || '補足を反映した提案です'));
-      if (saved.request.task === 'sketch') p.draftKey = JSON.stringify(saved.request.sketchDraft);
-      proposalDocument(latest.current, p);
-      setProposal(p); setStatus('提案を再取得しました。形と前提を確認してから適用してください');
+      const p = resumedProposal(saved.request, saved.response);
+      setProposal(p);
+      setStatus(proposalIssue(latest.current, p) ? '依頼時のスケッチから提案を表示しています。現在の作業は変更していません。' : '提案を再取得しました。形と前提を確認してから適用してください');
     } catch (e) { if (n === sequence.current && e.name !== 'AbortError') setStatus(e.message); }
     finally { if (n === sequence.current) setPending(false); }
   }
@@ -146,6 +145,12 @@ export function useCadWorkspace(document, setDocument, enabled) {
     resumeStarted.current = true;
     const id = new URLSearchParams(window.location.search).get('cadRequest');
     if (id) void resumeRequest(id);
+  }, [enabled, adapterMode]);
+  useEffect(() => {
+    if (!enabled || adapterMode !== 'codex') return;
+    const controller = new AbortController();
+    createCodexAdapter().recent({ signal: controller.signal }).then(setRecentRequests).catch(error => { if (!controller.signal.aborted) setRecentError(error.message); });
+    return () => controller.abort();
   }, [enabled, adapterMode]);
   async function previewSketch() {
     try {
@@ -161,6 +166,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
     mesh, ghost, group, setGroup, mode, setMode, paint, setPaint, proposal, pending, status, meshStatus,
     adapterMode, setAdapterMode, selectedFeatureId, setSelectedFeatureId, submit, runCommands,
     requestId, webhook, draft, requestSketch, previewSketch, message: setStatus,
+    recentRequests, recentError, resumeRequest, proposalIssue: proposalIssue(document, proposal),
     updateDraft(value) { setDocument(current => {
       const cad = cadOf(current), before = cad.draft || emptyDraft();
       const next = typeof value === 'function' ? value(before) : value; validateDraft(next);

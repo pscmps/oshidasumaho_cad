@@ -4,7 +4,7 @@ import { emptyCad, validateCad } from '../cad-core/document.js';
 import { geometrySelector, resolveReference, toggleReference } from '../cad-core/selectors.js';
 import { validateCommands } from './schema.js';
 import { executeCommands } from './executor.js';
-import { createProposal, proposalDocument } from './proposals.js';
+import { createProposal, proposalDocument, resumedProposal, proposalIssue } from './proposals.js';
 import { parseLocalCommand } from './parser.js';
 import { interpretPrompt, createMockAdapter, createTransportAdapter } from '../ai-adapter/index.js';
 import { parseModelJson, serializeModelJson } from '../model-json.js';
@@ -109,4 +109,28 @@ test('graph validation rejects duplicate ids, missing/consumed inputs and unsupp
   const d = marked();
   assert.throws(() => validateCad({ ...d.cad, features: [...d.cad.features, ...d.cad.features] }));
   assert.throws(() => executeCommands(d, [{ operation: 'modifyFeature', featureId: 'extrude-1', changes: { radius: 3 } }]));
+});
+
+test('resumed sketch proposal previews its saved snapshot while a missing or changed local draft still blocks apply', () => {
+  const original = marked();
+  original.cad.draft.notes = '外径30 内径20 高さ30';
+  const commands = [{ operation: 'addExtrude', profile: { type: 'circle', radius: 15 }, distance: 30, origin: [0,0,0] }];
+  const p = resumedProposal({ task:'sketch', document:original, sketchDraft:original.cad.draft }, { commands, explanation:'保存された提案' });
+  const fresh = { schemaVersion:5, shapes:[], cad:emptyCad() }, before = structuredClone(fresh);
+  assert.equal(proposalDocument(p.previewSnapshot,p).cad.features.length, 2);
+  assert.match(proposalIssue(fresh,p), /スケッチが変更/);
+  assert.throws(() => proposalDocument(fresh,p), /スケッチが変更/);
+  assert.deepEqual(fresh,before);
+  const edited = structuredClone(original); edited.cad.draft.notes += ' 高さ40に変更';
+  assert.match(proposalIssue(edited,p), /スケッチが変更/);
+  assert.equal(proposalIssue(original,p), '');
+  assert.equal(original.cad.features.length, 1);
+});
+test('resumed edit preview never bypasses a changed model target when applying', () => {
+  const original = marked();
+  const p = resumedProposal({task:'edit',document:original}, {commands:[{operation:'fillet',selectionGroup:'red',radius:2}]});
+  const edited = executeCommands(original, [{operation:'modifyFeature',featureId:'extrude-1',changes:{distance:24}}]);
+  assert.equal(proposalDocument(p.previewSnapshot,p).cad.features.length, 2);
+  assert.match(proposalIssue(edited,p), /対象モデルが変更/);
+  assert.throws(() => proposalDocument(edited,p), /対象モデルが変更/);
 });

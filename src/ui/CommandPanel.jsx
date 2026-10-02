@@ -50,7 +50,8 @@ export default function CommandPanel({ document, workspace: w }) {
     {w.pending || w.status ? <div className="command-feedback"><output className="command-status" aria-live="polite">{w.status || '指示を確認中。モデルは引き続き操作できます。'}</output>{w.pending ? <button type="button" onClick={w.cancel}>取消</button> : null}</div> : null}
     {w.proposal ? <div className="command-proposal">
       <strong>この変更でよいですか？</strong><p>{w.proposal.explanation || '色のついたプレビューが変更後の形です。'}</p>
-      <div className="command-actions"><button type="button" className="prompt-submit" onClick={w.applyProposal}>適用</button><button type="button" onClick={w.cancel}>キャンセル</button></div>
+      {w.proposalIssue ? <p role="status">{w.proposalIssue} 保存された提案は確認できます。現在のスケッチへの適用はできません。</p> : null}
+      <div className="command-actions"><button type="button" className="prompt-submit" disabled={!!w.proposalIssue} onClick={w.applyProposal}>適用</button><button type="button" onClick={w.cancel}>キャンセル</button></div>
     </div> : null}
     <div className="prompt-examples" aria-label="指示の例">
       <p className="command-note">{selected.length ? '例を選んで、数字を変えられます' : '上のモデルを選んでから、変更を伝えてください'}</p>

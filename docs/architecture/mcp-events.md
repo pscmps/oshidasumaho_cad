@@ -2,6 +2,11 @@
 
 This change belongs to the existing AI-native experimental branch and private Site. It does not merge into the smartphone CAD main branch, change the GitHub Pages workflow, change the Site audience, introduce another plugin, or use an external LLM API.
 
+## Browser recovery
+
+- The authenticated GET /api/cad/requests lists this user's non-cancelled requests from the last 24 hours, including answered ones (at most 20), without documents or callback data. The browser provides an explicit open action on both sketch and model views, so an old page without cadRequest in its URL does not require resubmission.
+- A resumed response previews against the saved request snapshot. If local draft/targets differ (including a new browser with no original sketch), the ghost remains visible with an explanation and Apply disabled. Applying still runs the original draft and target guards; no saved reply overwrites current work or applies automatically.
+
 ## User flow
 
 1. Connect the existing Site plugin and rescan its MCP server after publication.

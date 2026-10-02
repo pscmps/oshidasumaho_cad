@@ -25,6 +25,16 @@ export function createProposal(snapshot, commands, explanation = '') {
   const preview = executeCommands(snapshot, commands, { selectionGroups });
   return { commands, explanation, selectionGroups, roots, expected: scope(snapshot, roots), previewKey: geometryKey(preview) };
 }
+// Preview saved replies against their original snapshot without weakening apply guards.
+export function resumedProposal(request, response) {
+  const proposal = createProposal(request.document, response.commands, response.explanation || '保存された提案です');
+  if (request.task === 'sketch') proposal.draftKey = JSON.stringify(request.sketchDraft);
+  return { ...proposal, previewSnapshot: request.document };
+}
+export function proposalIssue(current, proposal) {
+  if (!proposal) return '';
+  try { proposalDocument(current, proposal); return ''; } catch (error) { return error.message; }
+}
 export function proposalDocument(current, proposal) {
   if (proposal.draftKey && JSON.stringify(cadOf(current).draft) !== proposal.draftKey) throw new Error('依頼したスケッチが変更されています。新しいスケッチでもう一度依頼してください。');
   if (scope(current, proposal.roots) !== proposal.expected) throw new Error('待ち時間中に対象モデルが変更されました。現在のモデルでもう一度指示してください。');

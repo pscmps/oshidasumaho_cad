@@ -38,6 +38,7 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
     }
   }
   return {
+    async recent({ signal } = {}) { return (await json('/api/cad/requests', { signal })).requests; },
     async propose(request, { signal } = {}) {
       const requestId = crypto.randomUUID();
       const queued = await json('/api/cad/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, request }), signal });

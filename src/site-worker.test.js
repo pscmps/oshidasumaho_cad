@@ -241,3 +241,18 @@ test('Codex resume retrieves the original snapshot and revised proposal without 
   assert.deepEqual(questions, ['Question']); assert.equal(calls.length, 2);
   assert.ok(calls.every(call => call.method === 'GET'));
 });
+
+test('browser recovery lists only this user recent active requests including answered; reading never creates a request', async () => {
+  const e=env(),fetch=fetcher(e),now=Date.now();
+  for (const [suffix,user,state,age] of [['01','alice','answered',1000],['02','alice','pending',0],['03','alice','cancelled',0],['04','bob','answered',0],['05','alice','answered',90000000]]) {
+    const requestId='a7c7c4a8-9005-49e2-91e8-568cd4b682'+suffix;
+    await e.CAD_EXCHANGE.put('cad/'+user+'/'+requestId+'.json','{}',{customMetadata:{state,createdAt:new Date(now-age).toISOString(),task:'sketch',prompt:'自分の依頼'}});
+  }
+  const count=e.CAD_EXCHANGE.items.size;
+  const recent=await createCodexAdapter({fetcher:fetch}).recent();
+  assert.equal(recent.length,2); assert.equal(recent[0].state,'pending'); assert.equal(recent[1].state,'answered');
+  assert.deepEqual(Object.keys(recent[0]).sort(),['createdAt','prompt','requestId','state']);
+  assert.equal((await fetcher(e,null)('/api/cad/requests')).status,401);
+  assert.equal((await (await fetcher(e,'bob')('/api/cad/requests')).json()).requests.length,1);
+  assert.equal(e.CAD_EXCHANGE.items.size,count);
+});
