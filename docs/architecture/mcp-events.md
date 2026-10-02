@@ -16,6 +16,8 @@ This change belongs to the existing AI-native experimental branch and private Si
 
 - Stateless `POST /mcp` implements `server/discover`, `tools/list`, `tools/call`, `events/list`, `events/subscribe`, and `events/unsubscribe` for protocol `2026-07-28`.
 - Modern requests carry the protocol and client capabilities in `_meta`, plus matching `MCP-Protocol-Version`, `Mcp-Method`, and (for tools/call) `Mcp-Name` headers. Modern successes include `resultType: complete`.
+- Hosting compatibility: production Sites dispatch was observed sending authenticated `server/discover` with complete MCP2 metadata but without `Mcp-Method`. Only the exact existing Site dispatch marker together with Sites' trusted authenticated user ID permits restoring absent method/name mirrors from the parsed body. Supplied mirrors, protocol mismatches, missing metadata, other dispatches and unauthenticated traffic remain subject to strict validation. This adapts the current Sites ingress; direct MCP2 traffic still requires the official mirrored headers. It does not substitute a service identity or grant access to caller data.
+- Rejection diagnostics log fixed method/reason/protocol labels and boolean presence flags only. They contain no caller identity, request ID, body values, tool arguments, callback URLs or credentials. Worker logs must be queried with `errors_only: false` to include these warning records.
 - Legacy `initialize` and tools remain available using protocol `2025-03-26`.
 - Event filter: `{}` for both tasks, or `{ "task": "sketch" }` / `{ "task": "edit" }`. Unknown fields and values are rejected.
 - Data schema: `{ "requestId": "UUID", "task": "sketch | edit", "url": "Site URL" }`.
