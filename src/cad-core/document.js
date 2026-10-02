@@ -13,10 +13,13 @@ const keys = (v, allowed) => {
 };
 
 export function validateCad(cad) {
-  keys(cad, ['schemaVersion', 'features', 'selectionGroups', 'suppressedProjection', ...(cad.schemaVersion === 2 ? ['draft'] : [])]);
+  keys(cad, ['schemaVersion', 'features', 'selectionGroups', 'suppressedProjection', ...(cad.schemaVersion === 2 ? ['draft', 'appliedRequestIds'] : [])]);
   if (![1, CAD_SCHEMA_VERSION].includes(cad.schemaVersion) || !Array.isArray(cad.features) || cad.features.length > 500
     || typeof cad.suppressedProjection !== 'boolean') throw new Error('CAD documentのversionまたは構造が不正です。');
   if (cad.draft !== undefined) validateDraft(cad.draft);
+  if (cad.appliedRequestIds !== undefined && (!Array.isArray(cad.appliedRequestIds) || cad.appliedRequestIds.length > 5000
+    || cad.appliedRequestIds.some(id => typeof id !== 'string' || !/^[a-f0-9-]{36}$/.test(id))
+    || new Set(cad.appliedRequestIds).size !== cad.appliedRequestIds.length)) throw new Error('提案の適用履歴が不正です。');
   const ids = new Set([PROJECTION_FEATURE_ID]);
   const tips = new Set(cad.suppressedProjection ? [] : [PROJECTION_FEATURE_ID]);
   for (const f of cad.features) {

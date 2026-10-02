@@ -143,7 +143,7 @@ export function createEvents(bucket, owner, { webhookFetch, now = Date.now, slee
     return { event: EVENT_NAME, connected: count > 0, subscriptions: count, refreshBefore: expiresAt ? new Date(expiresAt).toISOString() : null };
   }
   async function queue(data, origin) {
-    const event = { eventId: `cad_request_${data.requestId}`, name: EVENT_NAME, timestamp: data.createdAt, data: { requestId: data.requestId, task: data.request.task, url: `${origin}/?ai=1` }, cursor: null };
+    const event = { eventId: `cad_request_${data.requestId}`, name: EVENT_NAME, timestamp: data.createdAt, data: { requestId: data.requestId, task: data.request.task, url: `${origin}/?ai=1&cadRequest=${data.requestId}` }, cursor: null };
     let count = 0;
     for (const s of await subscriptions()) {
       if (!active(s) || s.createdAt > Date.parse(data.createdAt) || s.arguments.task && s.arguments.task !== data.request.task) continue;

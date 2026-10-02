@@ -7,6 +7,7 @@ import { webhookFetch } from './webhook-fetch.js';
 
 const ID = /^[a-f0-9-]{36}$/;
 const MAX_BYTES = 1000000;
+const MAX_CANCEL_ATTEMPTS = 3;
 const json = (data, status = 200) => new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } });
 const object = v => v && typeof v === 'object' && !Array.isArray(v);
 function exact(v, fields) { if (!object(v) || Object.keys(v).some(k => !fields.includes(k))) throw new Error('未対応の入力です'); }
@@ -22,16 +23,30 @@ async function readBody(request) {
   const data = await request.text(); if (new TextEncoder().encode(data).length > MAX_BYTES) throw new Error('依頼が大きすぎます');
   return JSON.parse(data);
 }
+// Only storage operations use this wrapper; input validation keeps its own status.
+// Never return provider errors, object keys, or credentials to the browser.
+async function storageOperation(operation) {
+  try { return await operation(); }
+  catch { throw Object.assign(new Error('保存先との接続を一時的に利用できません。少し待って同じ依頼を確認してください'), { status: 503 }); }
+}
 function storage(env, user) {
   const bucket = env.CAD_EXCHANGE;
   if (!bucket) throw Object.assign(new Error('Codexの接続を準備中です。スケッチは端末に保存されています'), { status: 503 });
   const prefix = `cad/${user}/`;
   return {
-    prefix, bucket,
-    async get(id) { const item = await bucket.get(`${prefix}${idOf(id)}.json`); if (!item) throw Object.assign(new Error('依頼が見つかりません'), { status: 404 }); return { data: await item.json(), etag: item.etag }; },
+    prefix,
+    list: options => storageOperation(() => bucket.list(options)),
+    async get(id) {
+      const key = `${prefix}${idOf(id)}.json`;
+      const item = await storageOperation(() => bucket.get(key));
+      if (!item) throw Object.assign(new Error('依頼が見つかりません'), { status: 404 });
+      return { data: await storageOperation(() => item.json()), etag: item.etag };
+    },
     async put(id, data, etag) {
-      const saved = await bucket.put(`${prefix}${idOf(id)}.json`, JSON.stringify(data), { onlyIf: etag ? { etagMatches: etag } : { etagDoesNotMatch: '*' }, httpMetadata: { contentType: 'application/json' },
-        customMetadata: { createdAt: data.createdAt, task: data.request.task, prompt: data.request.prompt.slice(0,400), state: data.cancelled ? 'cancelled' : data.response ? 'answered' : 'pending' } });
+      const key = `${prefix}${idOf(id)}.json`, body = JSON.stringify(data);
+      const options = { onlyIf: etag ? { etagMatches: etag } : { etagDoesNotMatch: '*' }, httpMetadata: { contentType: 'application/json' },
+        customMetadata: { createdAt: data.createdAt, task: data.request.task, prompt: data.request.prompt.slice(0,400), state: data.cancelled ? 'cancelled' : data.response ? 'answered' : 'pending' } };
+      const saved = await storageOperation(() => bucket.put(key, body, options));
       if (!saved) throw Object.assign(new Error('依頼が更新されています。読み直してください'), { status: 409 });
     },
   };
@@ -46,12 +61,12 @@ const TOOLS = [
 
 const responseRevision = data => data.responseRevision ?? (data.response ? 1 : 0);
 async function callTool(name, args, store, events) {
-  if (name === 'get_cad_connection_status') { exact(args, []); return events.status(); }
+  if (name === 'get_cad_connection_status') { exact(args, []); return storageOperation(() => events.status()); }
   if (name === 'list_cad_requests') {
     exact(args, []);
     const all = []; let cursor;
     do {
-      const list = await store.bucket.list({ prefix: store.prefix, limit: 1000, include: ['customMetadata'], ...(cursor ? { cursor } : {}) });
+      const list = await store.list({ prefix: store.prefix, limit: 1000, include: ['customMetadata'], ...(cursor ? { cursor } : {}) });
       for (const item of list.objects) if (item.customMetadata?.state === 'pending' && Date.now() - Date.parse(item.customMetadata.createdAt) < 86400000)
         all.push({ requestId: item.key.slice(store.prefix.length,-5), ...item.customMetadata });
       cursor = list.truncated ? list.cursor : undefined;
@@ -192,11 +207,11 @@ export default { async fetch(request, env, ctx) {
     const readCurrent = async id => { try { return (await store.get(id)).data; } catch (error) { if (error.status === 404) return null; throw error; } };
     const dispatch = id => { const work = events.dispatch(id, readCurrent).catch(() => {}); if (ctx?.waitUntil) ctx.waitUntil(work); return work; };
     if (request.method === 'POST' && request.headers.get('Origin') && request.headers.get('Origin') !== url.origin) return json({ error: 'このサイトから操作してください' }, 403);
-    if (url.pathname === '/api/cad/connection' && request.method === 'GET') return json(await events.status());
+    if (url.pathname === '/api/cad/connection' && request.method === 'GET') return json(await storageOperation(() => events.status()));
     if (url.pathname === '/api/cad/requests' && request.method === 'GET') {
       const requests = []; let cursor;
       do {
-        const page = await store.bucket.list({ prefix: store.prefix, limit: 1000, include: ['customMetadata'], ...(cursor ? { cursor } : {}) });
+        const page = await store.list({ prefix: store.prefix, limit: 1000, include: ['customMetadata'], ...(cursor ? { cursor } : {}) });
         for (const item of page.objects) {
           const m = item.customMetadata;
           if (m && ['pending', 'answered'].includes(m.state) && Date.now() - Date.parse(m.createdAt) < 86400000)
@@ -222,15 +237,32 @@ export default { async fetch(request, env, ctx) {
     }
     const match = url.pathname.match(/^\/api\/cad\/requests\/([a-f0-9-]{36})(\/cancel)?$/);
     if (!match) return json({ error: 'Not found' }, 404);
-    const { data, etag } = await store.get(match[1]);
-    if (match[2] && request.method === 'POST') { await store.put(match[1], { ...data, cancelled: true }, etag); return json({ cancelled: true }); }
-    if (!match[2] && request.method === 'GET') {
-      if (!data.cancelled && !data.response) {
-        // Repair an interrupted queue write, but never replay pre-subscription requests.
-        await events.queue(data, url.origin);
-        if (ctx?.waitUntil) dispatch(match[1]); else await dispatch(match[1]);
+    let { data, etag } = await store.get(match[1]);
+    if (match[2] && request.method === 'POST') {
+      for (let attempt = 0; attempt < MAX_CANCEL_ATTEMPTS; attempt++) {
+        if (data.cancelled) return json({ cancelled: true });
+        try { await store.put(match[1], { ...data, cancelled: true }, etag); return json({ cancelled: true }); }
+        catch (error) { if (error.status !== 409 || attempt === MAX_CANCEL_ATTEMPTS - 1) throw error; }
+        // A response may have arrived since the first read. Preserve it while
+        // honoring explicit cancellation; never overwrite from a stale snapshot.
+        ({ data, etag } = await store.get(match[1]));
       }
-      return json({ requestId: data.requestId, responseRevision: responseRevision(data), ...(url.searchParams.get('includeRequest') === '1' ? { request: data.request } : {}), response: data.response || null, cancelled: data.cancelled, webhook: { ...await events.status(data.request.task), ...await events.deliveryStatus(match[1]) } });
+    }
+    if (!match[2] && request.method === 'GET') {
+      let webhook;
+      try {
+        if (!data.cancelled && !data.response) {
+          // Repair an interrupted queue write, but never replay pre-subscription requests.
+          await events.queue(data, url.origin);
+          if (ctx?.waitUntil) dispatch(match[1]); else await dispatch(match[1]);
+        }
+        webhook = { ...await events.status(data.request.task), ...await events.deliveryStatus(match[1]) };
+      } catch {
+        // Notification recovery/diagnostics are auxiliary: an unavailable outbox
+        // must never hide a saved proposal or cancellation from the browser.
+        webhook = { unavailable: true, notificationError: true };
+      }
+      return json({ requestId: data.requestId, responseRevision: responseRevision(data), ...(url.searchParams.get('includeRequest') === '1' ? { request: data.request } : {}), response: data.response || null, cancelled: data.cancelled, webhook });
     }
     return json({ error: 'Method not allowed' }, 405);
   } catch (e) { return json({ error: e.message || '接続を利用できません' }, e.status || 400); }

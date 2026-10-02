@@ -67,7 +67,7 @@ test('explicit submission delivers exactly one minimal event; duplicate queue/dr
   await h.events.dispatch(requestId, async () => d);
   assert.equal(h.sent.length, 2); const e = h.sent[1]; checkSignature(e);
   assert.equal(e.headers['X-MCP-Subscription-Id'], s.id); assert.equal(e.headers['webhook-id'], e.parsed.eventId);
-  assert.deepEqual(e.parsed.data, { requestId, task: 'sketch', url: 'https://cad.test/?ai=1' });
+  assert.deepEqual(e.parsed.data, { requestId, task: 'sketch', url: 'https://cad.test/?ai=1&cadRequest=' + requestId });
   assert.deepEqual(await h.events.deliveryStatus(requestId), { pending: 0, delivered: 1, failed: 0, stopped: 0 });
 });
 

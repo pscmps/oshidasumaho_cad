@@ -179,7 +179,7 @@ export default function NativeViewer({ mesh, ghost, groups, mode, paint, onSelec
     <div ref={container} className="native-canvas" aria-label={view === 'projections' ? '立体と連動する3面図・タップで選択' : 'タップで面・ふち・部品を選ぶ立体'} />
     {view === 'projections' ? <div className="projection-labels" aria-hidden="true">{PLANES.map(p => <span key={p.label}>{p.label}</span>)}</div> : null}
     {view === '3d' ? <button type="button" className="native-edge-toggle" aria-pressed={showEdges} onClick={() => setShowEdges(!showEdges)}>輪郭線 {showEdges ? 'ON' : 'OFF'}</button> : null}
-    <div className="native-viewer-note" role="status">{error || (ghost && !mesh?.bodies.length ? '提案をプレビュー中 · 適用すると選択できます' : status) || (view === 'projections' ? '3面図もタップで選択できます' : paint ? '1本指でなぞる · 2本指で移動 / 拡大' : 'タップで選択 · 1本指で回転 · 2本指で移動 / 拡大')}</div>
+    <div className="native-viewer-note" role="status">{error || (ghost ? (mesh?.bodies.length ? '提案をプレビュー中 · 青が現在、黄が提案です' : '提案をプレビュー中 · 適用すると選択できます') : status) || (view === 'projections' ? '3面図もタップで選択できます' : paint ? '1本指でなぞる · 2本指で移動 / 拡大' : 'タップで選択 · 1本指で回転 · 2本指で移動 / 拡大')}</div>
     <button className="native-fit" type="button" aria-label="部品を中央に戻す" onClick={() => { const s = sceneRef.current; if (s && (s.faces.length || s.ghosts.children.length)) { fitModel(s); fitPlanes(s); } }}>中央へ</button>
   </div>;
 }

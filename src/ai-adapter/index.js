@@ -36,5 +36,7 @@ export async function interpretPrompt(document, prompt, { adapter = offlineAdapt
   }, { signal });
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
   if (response?.clarification && !response.commands) return { source: 'ai', clarification: String(response.clarification) };
-  return { source: 'ai', proposal: createProposal(snapshot, validateCommands(response?.commands), String(response?.explanation || '')) };
+  const proposal = createProposal(snapshot, validateCommands(response?.commands), String(response?.explanation || ''));
+  if (response.requestId) proposal.requestId = response.requestId;
+  return { source: 'ai', proposal };
 }

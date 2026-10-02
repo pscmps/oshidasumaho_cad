@@ -107,7 +107,7 @@ import SelectionToolbar from './ui/SelectionToolbar.jsx';
 import { useCadWorkspace } from './ui/useCadWorkspace.js';
 import './style.css';
 
-const STORAGE_KEY = 'oshidasumaho-cad-document-v1';
+import { DOCUMENT_STORAGE_KEY as STORAGE_KEY, readStoredDocumentRaw, saveDocumentIfUnchanged, withDocumentWriteLock } from './cad-core/persistence.js';
 const SAVED_PARTS_KEY = 'oshidasumaho-cad-saved-parts-v1';
 const ASSEMBLY_STORAGE_KEY = 'oshidasumaho-cad-assembly-v1';
 const RECEIVER_TOKEN_KEY = 'oshidasumaho-cad-receiver-token-v1';
@@ -308,12 +308,12 @@ function normalizeRotation(rotation) {
   };
 }
 
-function loadDocument() {
+function loadDocument(stored) {
   const fallback = (import.meta.env.VITE_AI_NATIVE_START === '1' || new URLSearchParams(window.location.search).get('ai') === '1')
     ? { ...initialDocument, shapes: [], cad: emptyCad() }
     : initialDocument;
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = stored === undefined ? localStorage.getItem(STORAGE_KEY) : stored;
     return saved
       ? normalizeDocument(validateAndMigrateModelDocument(JSON.parse(saved)))
       : normalizeDocument(fallback);
@@ -375,13 +375,17 @@ function clampRangeValue(value) {
 
 function App() {
   const [appMode, setAppMode] = useState('part');
-  const [document, setDocument] = useState(loadDocument);
+  const savedDocumentRaw = useRef(null);
+  const [document, setDocument] = useState(() => {
+    try { savedDocumentRaw.current = readStoredDocumentRaw(); } catch { /* storage failures are surfaced by guarded autosave */ }
+    return loadDocument(savedDocumentRaw.current);
+  });
   const [nativeOpen, setNativeOpen] = useState(() => import.meta.env.VITE_AI_NATIVE_START === '1' || new URLSearchParams(window.location.search).get('ai') === '1');
   const [nativeView, setNativeView] = useState(() => { const p = new URLSearchParams(window.location.search); return p.has('json') || p.get('cadView') === 'model' ? '3d' : 'sketch'; });
   const [selectedComment, setSelectedComment] = useState(null);
   const [nativeMenuOpen, setNativeMenuOpen] = useState(false);
   const workspace = useCadWorkspace(document, setDocument, nativeOpen || hasNativeGeometry(document));
-  useEffect(() => { if (workspace.proposal?.commands.some(c => c.operation === 'addSketchSolid')) setNativeView('3d'); }, [workspace.proposal]);
+  useEffect(() => { if (workspace.proposal) setNativeView('3d'); }, [workspace.proposal]);
   const outputReady = Boolean((!document.cad?.suppressedProjection && getLockedPreviewDimensions(document)) || document.cad?.features.length);
   const [assembly, setAssembly] = useState(loadAssemblyDocument);
   const [selectedId, setSelectedId] = useState(document.shapes[0]?.id ?? null);
@@ -462,7 +466,11 @@ function App() {
   }, [nativeOpen, appMode]);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(document));
+    let cancelled = false;
+    void withDocumentWriteLock(() => {
+      if (!cancelled) savedDocumentRaw.current = saveDocumentIfUnchanged(document, savedDocumentRaw.current);
+    }).catch(error => { if (!cancelled) workspace.message(error.message); });
+    return () => { cancelled = true; };
   }, [document]);
 
   useEffect(() => {

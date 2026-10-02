@@ -256,3 +256,117 @@ test('browser recovery lists only this user recent active requests including ans
   assert.equal((await (await fetcher(e,'bob')('/api/cad/requests')).json()).requests.length,1);
   assert.equal(e.CAD_EXCHANGE.items.size,count);
 });
+
+
+test('webhook queue and diagnostic outages never hide saved request, proposal, or cancellation', async t => {
+  for (const [label, state, method] of [['queue', 'pending', 'get'], ['subscription status', 'answered', 'get'], ['delivery status', 'answered', 'list'], ['cancelled status', 'cancelled', 'get']]) {
+    await t.test(label, async t => {
+      const e=env(), fetch=fetcher(e), bucket=e.CAD_EXCHANGE;
+      await fetch('/api/cad/requests', {method:'POST',body:JSON.stringify({requestId:id,request:request()})});
+      if (state==='answered') await rpc(fetch,'tools/call',{name:'propose_cad_commands',arguments:{requestId:id,commands:[cmd],explanation:'Saved proposal'}});
+      if (state==='cancelled') await fetch('/api/cad/requests/'+id+'/cancel',{method:'POST'});
+      const before=bucket.items.get('cad/alice/'+id+'.json').text, original=bucket[method].bind(bucket);
+      t.mock.method(bucket,method,async (...args)=>{
+        const key=method==='list'?args[0].prefix:args[0];
+        if(key.startsWith('cad-events/')) throw new Error('private-provider-failure-marker');
+        return original(...args);
+      });
+      const result=await fetch('/api/cad/requests/'+id+'?includeRequest=1'), body=await result.json();
+      assert.equal(result.status,200);
+      assert.deepEqual(body.webhook,{unavailable:true,notificationError:true});
+      assert.deepEqual(body.request,JSON.parse(before).request);
+      assert.deepEqual(body.response,state==='answered'?{commands:[cmd],explanation:'Saved proposal'}:null);
+      assert.equal(body.cancelled,state==='cancelled');
+      assert.equal(body.responseRevision,state==='answered'?1:0);
+      assert.equal(JSON.stringify(body).includes('private-provider'),false);
+      assert.equal(bucket.items.get('cad/alice/'+id+'.json').text,before);
+      t.mock.restoreAll();
+      const recovered=await (await fetch('/api/cad/requests/'+id)).json();
+      assert.equal(recovered.webhook.unavailable,undefined);
+      assert.deepEqual(recovered.response,body.response);
+    });
+  }
+});
+
+test('request storage get, put, and list outages return safe 503 while invalid input remains 400', async t => {
+  for(const method of ['get','put','list']) await t.test(method,async t=>{
+    const e=env(), fetch=fetcher(e), bucket=e.CAD_EXCHANGE;
+    await fetch('/api/cad/requests',{method:'POST',body:JSON.stringify({requestId:id,request:request()})});
+    t.mock.method(bucket,method,async()=>{throw new Error('private-provider-token-marker');});
+    const result=method==='put'
+      ?await fetch('/api/cad/requests',{method:'POST',body:JSON.stringify({requestId:crypto.randomUUID(),request:request()})})
+      :await fetch(method==='get'?'/api/cad/requests/'+id:'/api/cad/requests');
+    assert.equal(result.status,503);
+    const body=await result.json(); assert.ok(body.error); assert.equal(body.error.includes('private-provider'),false);
+    const invalid=await fetch('/api/cad/requests',{method:'POST',body:JSON.stringify({requestId:'invalid',request:request()})});
+    assert.equal(invalid.status,400);
+    assert.equal((await fetcher(e,null)('/api/cad/requests/'+id)).status,401);
+    t.mock.restoreAll();
+    assert.equal((await fetcher(e,'bob')('/api/cad/requests/'+id)).status,404);
+    assert.equal((await fetch('/api/cad/requests/'+id)).status,200);
+  });
+});
+
+test('connection storage outages expose a safe 503 instead of provider details',async t=>{
+  const e=env(), fetch=fetcher(e);
+  t.mock.method(e.CAD_EXCHANGE,'get',async()=>{throw new Error('private-provider-token-marker');});
+  const result=await fetch('/api/cad/connection'); assert.equal(result.status,503);
+  assert.equal((await result.text()).includes('private-provider'),false);
+  const mcp=await(await rpc(fetch,'tools/call',{name:'get_cad_connection_status',arguments:{}})).json();
+  assert.equal(mcp.result.isError,true);assert.equal(JSON.stringify(mcp).includes('private-provider'),false);
+});
+
+test('explicit cancellation retries a proposal race without erasing the response and is idempotent',async t=>{
+  const e=env(), fetch=fetcher(e), bucket=e.CAD_EXCHANGE;
+  await fetch('/api/cad/requests',{method:'POST',body:JSON.stringify({requestId:id,request:request()})});
+  const put=bucket.put.bind(bucket);let inserted=false, cancellationWrites=0;
+  t.mock.method(bucket,'put',async(key,text,options)=>{
+    if(key==='cad/alice/'+id+'.json'&&JSON.parse(text).cancelled){
+      cancellationWrites++;
+      if(!inserted){
+        inserted=true;
+        const proposed=await(await rpc(fetch,'tools/call',{name:'propose_cad_commands',arguments:{requestId:id,commands:[cmd],explanation:'Arrived during cancellation'}})).json();
+        assert.equal(proposed.result.isError,undefined);
+      }
+    }
+    return put(key,text,options);
+  });
+  assert.equal((await fetch('/api/cad/requests/'+id+'/cancel',{method:'POST'})).status,200);
+  assert.equal(cancellationWrites,2,'conflicting write rereads the new proposal before cancelling');
+  const stored=JSON.parse(bucket.items.get('cad/alice/'+id+'.json').text);
+  assert.equal(stored.cancelled,true);assert.equal(stored.responseRevision,1);
+  assert.deepEqual(stored.response,{commands:[cmd],explanation:'Arrived during cancellation'});
+  const serial=bucket.serial;
+  assert.equal((await fetch('/api/cad/requests/'+id+'/cancel',{method:'POST'})).status,200);
+  assert.equal(cancellationWrites,2);assert.equal(bucket.serial,serial,'already-cancelled response is not rewritten');
+  assert.equal((await fetcher(e,'bob')('/api/cad/requests/'+id+'/cancel',{method:'POST'})).status,404);
+  assert.equal((await fetch('/api/cad/requests/'+id+'/cancel',{method:'POST',headers:{Origin:'https://other.test'}})).status,403);
+});
+
+test('two explicit cancellation callers both succeed and preserve the existing response',async()=>{
+  const e=env(), fetch=fetcher(e);
+  await fetch('/api/cad/requests',{method:'POST',body:JSON.stringify({requestId:id,request:request()})});
+  await rpc(fetch,'tools/call',{name:'propose_cad_commands',arguments:{requestId:id,clarification:'Saved question'}});
+  const results=await Promise.all([fetch('/api/cad/requests/'+id+'/cancel',{method:'POST'}),fetch('/api/cad/requests/'+id+'/cancel',{method:'POST'})]);
+  assert.deepEqual(results.map(r=>r.status),[200,200]);
+  const stored=JSON.parse(e.CAD_EXCHANGE.items.get('cad/alice/'+id+'.json').text);
+  assert.equal(stored.cancelled,true);assert.equal(stored.responseRevision,1);assert.deepEqual(stored.response,{clarification:'Saved question'});
+});
+
+test('cancellation CAS retries have a strict bound and do not retry storage outages',async t=>{
+  for(const outage of [false,true]) await t.test(outage?'storage outage':'persistent conflict',async t=>{
+    const e=env(), fetch=fetcher(e), bucket=e.CAD_EXCHANGE;
+    await fetch('/api/cad/requests',{method:'POST',body:JSON.stringify({requestId:id,request:request()})});
+    const before=bucket.items.get('cad/alice/'+id+'.json').text, put=bucket.put.bind(bucket);let cancellationWrites=0;
+    t.mock.method(bucket,'put',async(key,text,options)=>{
+      if(key==='cad/alice/'+id+'.json'&&JSON.parse(text).cancelled){
+        cancellationWrites++;if(outage)throw new Error('private-provider-token-marker');return null;
+      }
+      return put(key,text,options);
+    });
+    const result=await fetch('/api/cad/requests/'+id+'/cancel',{method:'POST'});
+    assert.equal(result.status,outage?503:409);assert.equal(cancellationWrites,outage?1:3);
+    assert.equal((await result.text()).includes('private-provider'),false);
+    assert.equal(bucket.items.get('cad/alice/'+id+'.json').text,before);
+  });
+});

@@ -1,10 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { createCodexAdapter } from '../ai-adapter/codex.js';
 export default function CodexConnection({ workspace: w }) {
   const [connection, setConnection] = useState(null);
   useEffect(() => {
     if (w.adapterMode !== 'codex') return;
     const controller = new AbortController();
-    const refresh = () => fetch('/api/cad/connection', { credentials: 'same-origin', signal: controller.signal }).then(async r => { if (!r.ok) throw new Error(); return r.json(); }).then(setConnection).catch(() => { if (!controller.signal.aborted) setConnection({ unavailable: true }); });
+    const refresh = () => createCodexAdapter().connection({ signal: controller.signal }).then(setConnection).catch(() => { if (!controller.signal.aborted) setConnection({ unavailable: true }); });
     refresh(); window.addEventListener('focus', refresh);
     return () => { controller.abort(); window.removeEventListener('focus', refresh); };
   }, [w.adapterMode, w.pending]);
