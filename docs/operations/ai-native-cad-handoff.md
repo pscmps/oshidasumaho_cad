@@ -5,9 +5,9 @@
 - 対象ブランチ: `feat/ai-native-cad-foundation`（pscmps/oshidasumaho_cad）。main・元のスマホCAD・GitHub Pagesは対象外。
 - 対象Site: https://oshida-ai-native-lab.pscmps-mechatro.chatgpt.site
 - Site project: `appgprj_6abe87fa3e3481919fe3e891c4e6f082`。owner-privateを維持。新しいSiteや複製リポジトリを作らない。
-- 夜間の実装修正commit: `91e14a6a77a13d3913f71fa802c6515439011df8`。
-- 対応するSitesソースcommit: `b0ec0a01a0ea237a668ae7b8bb0b5800f893f5ec`。
-- 公開成功: 2026-10-02 17:22:26 UTC、version 13。deployment `appgdep_6abfe84801a88191bc4912c7e87fb671`。
+- 現在の実装commit: `2ffc9ef8f90ebfe7798f49425282282312916819`（待機状態表示・計算再利用）。夜間品質改善は `91e14a6a77a13d3913f71fa802c6515439011df8`。
+- 対応するSitesソースcommit: `105934241582b6421ad0992b980e417ea63c58f8`。
+- 公開成功: 2026-10-03 02:15:45 UTC、version 14。deployment `appgdep_6ac06541bdbc8191a0844ade90528af3`。
 - このメモ追加はdocsのみ。実装commit以後のdocsだけのcommitにSite再公開は不要。
 
 ## 2026-10-02夜間の修正
@@ -133,3 +133,6 @@ python scripts/cad-exchange-browser-smoke.py --base-url http://127.0.0.1:4199/
 全体177テスト成功（168トップレベル＋9サブケース）。ローカル実データのEdgeモバイルで長い待機、質問→提案、配送失敗、GET障害→同一依頼の再確認、2タブ取消、明示的新依頼、入力保持、再読込を確認。既存6ケース（二重適用、取消競合、Undo、別タブ競合、編集提案、壊れた保存データ）と、実Workerの質問→明示補足→revision2→未適用提案→再読込も成功。
 
 再現: `python scripts/cad-progress-browser-smoke.py --fixture <ローカルのread_cad_request JSON> --output-dir <画像保存先>`。loopbackだけ許可する。本番fixtureや個人データはgitへ保存しない。
+
+
+待機表示版の公開後確認: version 14はowner-private（ownerのみ、外部訪問者0）。既存依頼はrevision 2/commands 1件/取消なしで、依頼本文・提案・応答履歴が公開前と一致。購読1件も維持され、refreshBeforeは2026-10-03T15:36:55.013Zのまま。本番の新規依頼・モデル適用は今回実行していない。最終のUI文言修正後に関連18テストとモバイル状態遷移を再確認した。GitHub mainはdec3f78f0c025582368367d6d2699504ab19ce21から不変。
