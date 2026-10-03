@@ -1,3 +1,5 @@
+import { createMeshCache } from './mesh-cache.js';
+
 let worker, serial = 0;
 const jobs = new Map();
 function request(data) {
@@ -15,6 +17,6 @@ function request(data) {
   }
   return new Promise((resolve, reject) => { const id = ++serial; jobs.set(id, { resolve, reject }); worker.postMessage({ id, ...data }); });
 }
-export const evaluateInWorker = document => request({ document, action: 'mesh' });
+export const evaluateInWorker = createMeshCache(document => request({ document, action: 'mesh' }));
 export const exportInWorker = (document, format, name, resolution) => request({ document, action: 'export', format, name, resolution });
 export const buildReplicadStepBlob = document => exportInWorker(document, 'step', document.partName);

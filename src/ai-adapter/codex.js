@@ -13,7 +13,7 @@ function pause(ms, signal) {
   });
 }
 function validId(id) { if (!requestIdPattern.test(id || '')) throw new Error('依頼番号が不正です'); return id; }
-export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800, retryDelay = 200, onQueued = () => {}, onWebhook = () => {}, onClarification = () => {} } = {}) {
+export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800, retryDelay = 200, onQueued = () => {}, onWebhook = () => {}, onClarification = () => {}, onProgress = () => {}, timeoutMs = 15 * 60 * 1000, now = Date.now, sleep = pause } = {}) {
   const json = async (url, options = {}) => {
     const isRead = !options.method || options.method === 'GET';
     for (let attempt = 0; ; attempt++) {
@@ -22,13 +22,13 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
       try { response = await fetcher(url, { credentials: 'same-origin', ...options }); }
       catch (error) {
         if (error.name === 'AbortError' || options.signal?.aborted) { aborted(options.signal); throw error; }
-        if (isRead && attempt < 3) { await pause(retryDelay * 2 ** attempt, options.signal); continue; }
+        if (isRead && attempt < 3) { onProgress({ phase: 'retrying', retryAttempt: attempt + 1 }); await sleep(retryDelay * 2 ** attempt, options.signal); continue; }
         throw new Error('Codexとの通信が途切れました。保存済みの依頼から再確認できます');
       }
       aborted(options.signal);
       if (!response.ok) {
         let error; try { error = (await response.json()).error; } catch { /* non-JSON gateway */ }
-        if (isRead && transientStatuses.has(response.status) && attempt < 3) { await pause(retryDelay * 2 ** attempt, options.signal); continue; }
+        if (isRead && transientStatuses.has(response.status) && attempt < 3) { onProgress({ phase: 'retrying', retryAttempt: attempt + 1 }); await sleep(retryDelay * 2 ** attempt, options.signal); continue; }
         throw new Error(error || (response.status === 401 ? '個人用サイトにログインし直してください' : 'Codexとの接続を利用できません。スケッチは保存されています'));
       }
       try { return await response.json(); }
@@ -36,19 +36,21 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
         if (error.name === 'AbortError' || options.signal?.aborted) { aborted(options.signal); throw error; }
         // Stream/network failures can occur after the response headers arrived.
         // Invalid JSON is a server-data error, not a reason to repeat a request.
-        if (isRead && error instanceof TypeError && attempt < 3) { await pause(retryDelay * 2 ** attempt, options.signal); continue; }
+        if (isRead && error instanceof TypeError && attempt < 3) { onProgress({ phase: 'retrying', retryAttempt: attempt + 1 }); await sleep(retryDelay * 2 ** attempt, options.signal); continue; }
         throw error;
       }
     }
   };
   async function waitForResponse(requestId, { signal, initial } = {}) {
-    const deadline = Date.now() + 15 * 60 * 1000;
+    const deadline = now() + timeoutMs;
     let result = initial, lastQuestion = '';
-    while (Date.now() < deadline) {
+    while (now() < deadline) {
       aborted(signal);
       result ??= await json('/api/cad/requests/' + requestId, { signal });
       if (result.webhook) onWebhook(result.webhook);
-      if (result.cancelled) throw new Error('この依頼は取り消し済みです');
+      onProgress({ phase: result.cancelled ? 'cancelled' : result.response?.commands ? 'received' : result.response?.clarification ? 'clarification' : 'waiting',
+        requestId, createdAt: result.createdAt, responseAt: result.responseAt, webhook: result.webhook, checkedAt: now() });
+      if (result.cancelled) throw Object.assign(new Error('この依頼は取り消し済みです'), { code: 'REQUEST_CANCELLED' });
       if (result.response?.clarification && !result.response.commands) {
         if (lastQuestion !== result.response.clarification) {
           lastQuestion = result.response.clarification;
@@ -56,8 +58,9 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
         }
       } else if (result.response) return { ...result.response, requestId };
       result = null;
-      await pause(interval, signal);
+      await sleep(interval, signal);
     }
+    onProgress({ phase: 'paused' });
     throw new Error('Codexの応答待ちを終了しました。このページを再読み込みすると同じ依頼を確認できます。');
   }
   return {
@@ -66,8 +69,10 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
     async cancel(requestId) { return json('/api/cad/requests/' + validId(requestId) + '/cancel', { method: 'POST' }); },
     async propose(request, { signal } = {}) {
       const requestId = crypto.randomUUID();
+      onProgress({ phase: 'sending', startedAt: now() });
       const queued = await json('/api/cad/requests', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, request }), signal });
       onQueued(requestId, queued.webhook);
+      onProgress({ phase: 'waiting', requestId, createdAt: queued.createdAt, webhook: queued.webhook, checkedAt: now() });
       return waitForResponse(requestId, { signal });
     },
     async resume(requestId, { signal } = {}) {

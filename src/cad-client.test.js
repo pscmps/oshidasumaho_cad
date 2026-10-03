@@ -186,3 +186,35 @@ test('immediate undo saves the restored model and request receipt before the nex
   assert.deepEqual(h.writes[1].current, h.saved[0]);
   assert.deepEqual(h.writes[1].candidate, h.saved[1]);
 });
+
+
+test('progress distinguishes saved, delivered, clarification and returned proposal; no AI-running claim', async () => {
+  const progress = [], states = [
+    { webhook: { connected: true, pending: 1 } },
+    { webhook: { connected: true, delivered: 1 } },
+    { response: { clarification: 'Which size?' }, responseRevision: 1 },
+    { response: { commands: [command] }, responseRevision: 2, responseAt: '2026-10-03T01:00:00Z' },
+  ];
+  const adapter = createCodexAdapter({ interval: 1, onProgress: value => progress.push(value), fetcher: async () => Response.json({ request: snapshot(), createdAt: '2026-10-03T00:59:00Z', ...states.shift() }) });
+  await adapter.resume(id);
+  assert.deepEqual(progress.map(p => p.phase), ['waiting', 'waiting', 'clarification', 'received']);
+  assert.equal(progress[1].webhook.delivered, 1);
+  assert.equal(progress.at(-1).responseAt, '2026-10-03T01:00:00Z');
+  assert.ok(progress.every(p => p.checkedAt && p.requestId === id));
+});
+
+test('bounded waiting pauses honestly and resuming does not submit another request', async () => {
+  let now = 0; const phases = [], methods = [];
+  const adapter = createCodexAdapter({ timeoutMs: 5000, interval: 1800, now: () => now, sleep: async ms => { now += ms; }, onProgress: p => phases.push(p.phase), fetcher: async (url, options) => { methods.push(options.method || 'GET'); return Response.json({ request: snapshot(), response: null }); } });
+  await assert.rejects(adapter.resume(id), /応答待ちを終了/);
+  assert.equal(methods.length, 3); assert.ok(methods.every(m => m === 'GET'));
+  assert.equal(phases.at(-1), 'paused');
+});
+
+test('progress exposes bounded communication retries and a cancelled saved request', async () => {
+  let attempts = 0; const phases = [];
+  const adapter = createCodexAdapter({ retryDelay: 0, onProgress: p => phases.push(p), fetcher: async () => ++attempts === 1 ? new Response(null, { status: 503 }) : Response.json({ request: snapshot(), cancelled: true }) });
+  await assert.rejects(adapter.resume(id), e => e.code === 'REQUEST_CANCELLED');
+  assert.equal(phases[0].phase, 'retrying'); assert.equal(phases[0].retryAttempt, 1);
+  assert.equal(phases.at(-1).phase, 'cancelled'); assert.equal(attempts, 2);
+});

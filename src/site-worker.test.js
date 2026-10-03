@@ -370,3 +370,22 @@ test('cancellation CAS retries have a strict bound and do not retry storage outa
     assert.equal(bucket.items.get('cad/alice/'+id+'.json').text,before);
   });
 });
+
+
+test('optional request/response timestamps are owner scoped, stable on identical replies and legacy compatible', async () => {
+  const e = env(), fetch = fetcher(e);
+  const submitted = await (await fetch('/api/cad/requests', { method: 'POST', body: JSON.stringify({ requestId: id, request: request() }) })).json();
+  assert.ok(Number.isFinite(Date.parse(submitted.createdAt)));
+  let poll = await (await fetch('/api/cad/requests/' + id)).json();
+  assert.equal(poll.createdAt, submitted.createdAt); assert.equal(poll.responseAt, null);
+  await rpc(fetch, 'tools/call', { name: 'propose_cad_commands', arguments: { requestId: id, commands: [cmd] } });
+  poll = await (await fetch('/api/cad/requests/' + id)).json();
+  assert.ok(Number.isFinite(Date.parse(poll.responseAt)));
+  await rpc(fetch, 'tools/call', { name: 'propose_cad_commands', arguments: { requestId: id, commands: [cmd] } });
+  assert.equal((await (await fetch('/api/cad/requests/' + id)).json()).responseAt, poll.responseAt);
+  assert.equal((await fetcher(e, 'bob')('/api/cad/requests/' + id)).status, 404);
+  const item = e.CAD_EXCHANGE.items.get('cad/alice/' + id + '.json'), legacy = JSON.parse(item.text); delete legacy.responseAt;
+  item.text = JSON.stringify(legacy);
+  const restored = await (await fetch('/api/cad/requests/' + id)).json();
+  assert.equal(restored.responseAt, null); assert.deepEqual(restored.response.commands, [cmd]);
+});

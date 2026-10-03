@@ -176,7 +176,8 @@ export function createEvents(bucket, owner, { webhookFetch, now = Date.now, slee
         let response;
         try { response = await signedPost(latest, JSON.stringify(d.event), d.event.eventId); } catch { response = { ok: false, status: 0 }; }
         await response.body?.cancel();
-        d.lastStatus = response.status;
+        d.lastStatus = response.status; d.lastAttemptAt = new Date(now()).toISOString();
+        if (response.ok) d.deliveredAt = d.lastAttemptAt;
         if (response.ok) { d.state = 'delivered'; break; }
         if (response.status === 410 || response.status === 413 || response.status >= 400 && response.status < 500 && ![408, 425, 429].includes(response.status)) { d.state = 'failed'; break; }
         d.nextAt = now() + 1000 * 2 ** (d.attempts - 1);
@@ -193,9 +194,11 @@ export function createEvents(bucket, owner, { webhookFetch, now = Date.now, slee
     const pending = await list(`${root}deliveries/${requestId}/`, MAX_SUBSCRIPTIONS);
     await Promise.all(pending.map(item => deliverKey(item.key, currentRequest)));
   }
-  async function deliveryStatus(requestId) {
+  async function deliveryStatus(requestId, includeTiming = false) {
     const summary = { pending: 0, delivered: 0, failed: 0, stopped: 0 };
-    for (const item of await list(`${root}deliveries/${requestId}/`, MAX_SUBSCRIPTIONS)) { const state = (await get(item.key))?.value.state; if (state in summary) summary[state]++; }
+    for (const item of await list(`${root}deliveries/${requestId}/`, MAX_SUBSCRIPTIONS)) { const value = (await get(item.key))?.value, state = value?.state; if (state in summary) summary[state]++;
+      if (includeTiming) for (const field of ['lastAttemptAt', 'deliveredAt']) if (value?.[field] && (!summary[field] || value[field] > summary[field])) summary[field] = value[field];
+    }
     return summary;
   }
   return { subscribe, unsubscribe, status, queue, dispatch, deliveryStatus };

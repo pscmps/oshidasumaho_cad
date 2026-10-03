@@ -218,3 +218,17 @@ test('failed callback proof during renewal leaves the existing expiration unchan
   h.advance(Date.parse(first.refreshBefore) - h.deps.now());
   assert.equal((await h.events.status()).connected, false);
 });
+
+
+test('optional delivery timing reports receipt only and never exposes subscription secrets', async () => {
+  const h = harness(); await h.events.subscribe(params()); const d = h.data();
+  await h.events.queue(d, 'https://cad.test');
+  const pending = await h.events.deliveryStatus(d.requestId, true); assert.equal(pending.deliveredAt, undefined);
+  await h.events.dispatch(d.requestId, async () => d);
+  const delivered = await h.events.deliveryStatus(d.requestId, true);
+  assert.equal(delivered.delivered, 1); assert.ok(Date.parse(delivered.deliveredAt));
+  assert.equal(delivered.lastAttemptAt, delivered.deliveredAt);
+  assert.equal(JSON.stringify(delivered).includes(secret), false);
+  assert.equal(JSON.stringify(delivered).includes('receiver.example.com'), false);
+  assert.equal((await h.events.deliveryStatus(d.requestId)).deliveredAt, undefined);
+});

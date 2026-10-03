@@ -101,6 +101,7 @@ import { buildReplicadStepBlob, evaluateInWorker, exportInWorker } from './cad-c
 import { hasNativeGeometry, meshToSurfaces } from './cad-core/mesh.js';
 import NativeViewer from './ui/NativeViewer.jsx';
 import CommandPanel from './ui/CommandPanel.jsx';
+import RequestProgress from './ui/RequestProgress.jsx';
 import RoughSketchViewer from './ui/RoughSketchViewer.jsx';
 import SketchPanel from './ui/SketchPanel.jsx';
 import SelectionToolbar from './ui/SelectionToolbar.jsx';
@@ -1427,6 +1428,7 @@ function App() {
             onLocalPrintOpen={openLocalPrintDialog}
           />
         )}
+        {appMode === 'part' && nativeOpen ? <RequestProgress workspace={workspace} /> : null}
         {appMode === 'part' && nativeOpen && nativeView !== 'sketch' ? <SelectionToolbar workspace={workspace} /> : null}
       </section>
 

@@ -99,7 +99,7 @@ async function callTool(name, args, store, events) {
     if (!data.response && (args.clarificationAnswer !== undefined || args.expectedResponseRevision !== undefined)) throw new Error('補足は保存済みの確認質問に対して指定してください');
     let saved = data;
     if (!identical) {
-      saved = { ...data, response, responseRevision: revision + 1,
+      saved = { ...data, response, responseAt: new Date().toISOString(), responseRevision: revision + 1,
         ...(continuing ? { responseHistory: [...(data.responseHistory || []), { revision, response: data.response, clarificationAnswer: args.clarificationAnswer.trim(), continuedAt: new Date().toISOString() }] } : {}) };
       try { await store.put(args.requestId, saved, etag); }
       catch (error) {
@@ -233,7 +233,7 @@ export default { async fetch(request, env, ctx) {
       let subscribed = 0, notificationError = false;
       try { subscribed = await events.queue(saved, url.origin); if (ctx?.waitUntil) dispatch(body.requestId); else await dispatch(body.requestId); }
       catch { notificationError = true; }
-      return json({ requestId: body.requestId, webhook: { connected: subscribed > 0, notificationError } }, 201);
+      return json({ requestId: body.requestId, createdAt: saved.createdAt, webhook: { connected: subscribed > 0, notificationError } }, 201);
     }
     const match = url.pathname.match(/^\/api\/cad\/requests\/([a-f0-9-]{36})(\/cancel)?$/);
     if (!match) return json({ error: 'Not found' }, 404);
@@ -256,13 +256,14 @@ export default { async fetch(request, env, ctx) {
           await events.queue(data, url.origin);
           if (ctx?.waitUntil) dispatch(match[1]); else await dispatch(match[1]);
         }
-        webhook = { ...await events.status(data.request.task), ...await events.deliveryStatus(match[1]) };
+        const [connection, delivery] = await Promise.all([events.status(data.request.task), events.deliveryStatus(match[1], true)]);
+        webhook = { ...connection, ...delivery };
       } catch {
         // Notification recovery/diagnostics are auxiliary: an unavailable outbox
         // must never hide a saved proposal or cancellation from the browser.
         webhook = { unavailable: true, notificationError: true };
       }
-      return json({ requestId: data.requestId, responseRevision: responseRevision(data), ...(url.searchParams.get('includeRequest') === '1' ? { request: data.request } : {}), response: data.response || null, cancelled: data.cancelled, webhook });
+      return json({ requestId: data.requestId, createdAt: data.createdAt, responseAt: data.responseAt || null, responseRevision: responseRevision(data), ...(url.searchParams.get('includeRequest') === '1' ? { request: data.request } : {}), response: data.response || null, cancelled: data.cancelled, webhook });
     }
     return json({ error: 'Method not allowed' }, 405);
   } catch (e) { return json({ error: e.message || '接続を利用できません' }, e.status || 400); }

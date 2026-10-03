@@ -23,6 +23,17 @@ export function useCadWorkspace(document, setDocument, enabled) {
   const [requestId, setRequestId] = useState('');
   const [webhook, setWebhook] = useState(null), [recentRequests, setRecentRequests] = useState([]), [recentError, setRecentError] = useState('');
   const undo = useRef([]), resumeStarted = useRef(false);
+  const [progress, setProgress] = useState(null);
+  function reportProgress(patch) {
+    setProgress(previous => {
+      const next = { ...previous, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) };
+      if (!next.startedAt) next.startedAt = Date.now();
+      next.finishedAt = ['ready','applied','already-applied','error','paused','cancelled','stopped'].includes(next.phase) ? Date.now() : null;
+      return next;
+    });
+  }
+  function beginProgress(phase, id) { setProgress({ phase, startedAt: Date.now(), ...(id ? { requestId: id } : {}) }); }
+  function reportError(error) { setStatus(error.message); reportProgress({ error: error.message, phase: error.code === 'REQUEST_CANCELLED' ? 'cancelled' : error.message.includes('応答待ちを終了') ? 'paused' : 'error' }); }
   const key = geometryKey(document);
   const draft = cadOf(document).draft || emptyDraft(), draftKey = JSON.stringify(draft);
 
@@ -42,9 +53,11 @@ export function useCadWorkspace(document, setDocument, enabled) {
     let cancelled = false;
     let candidate;
     try { candidate = proposalDocument(proposal.previewSnapshot || latest.current, proposal); }
-    catch (e) { setGhost(null); setStatus(e.message); return; }
-    evaluateInWorker(candidate).then(result => { if (!cancelled) setGhost(result); })
-      .catch(e => { if (!cancelled) { setGhost(null); setStatus(`提案を生成できません: ${e.message}`); } });
+    catch (e) { setGhost(null); reportError(e); return; }
+    setGhost(null); const started = performance.now();
+    reportProgress({ phase: 'geometry' });
+    evaluateInWorker(candidate).then(result => { if (!cancelled) { setGhost(result); reportProgress({ phase: proposal.requestId && cadOf(latest.current).appliedRequestIds?.includes(proposal.requestId) ? 'already-applied' : 'ready', geometryMs: performance.now() - started }); } })
+      .catch(e => { if (!cancelled) { setGhost(null); reportError(new Error(`提案を生成できません: ${e.message}`)); } });
     return () => { cancelled = true; };
   }, [proposal, key, draftKey, enabled]);
   useEffect(() => () => { request.current?.abort(); sequence.current++; }, []);
@@ -77,7 +90,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   async function apply(p) {
     // One apply at a time, including time queued behind another tab's write lock.
     if (applyingNow.current) return;
-    applyingNow.current = true; setApplying(true);
+    applyingNow.current = true; setApplying(true); if (p.requestId) reportProgress({ phase: 'applying' });
     const generation = applyGeneration.current, n = sequence.current;
     const checkCurrent = () => { if (generation !== applyGeneration.current || n !== sequence.current) throw new DOMException('Aborted', 'AbortError'); };
     try {
@@ -94,7 +107,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
           undo.current.push({ key: geometryKey(rebased), cad: structuredClone(cadOf(current)) });
           undo.current = undo.current.slice(-20);
           latest.current = rebased; setDocument(rebased); setProposal(null); setGhost(null);
-          setStatus('変更を適用しました'); return;
+          setStatus('変更を適用しました'); if (p.requestId) reportProgress({ phase: 'applied' }); return;
         }
         throw new Error('モデルが更新されています。もう一度適用してください。');
       });
@@ -102,16 +115,16 @@ export function useCadWorkspace(document, setDocument, enabled) {
   }
   async function submit(prompt) {
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
-    const n = ++sequence.current; setStatus('指示を解釈しています'); setPending(true);
+    const n = ++sequence.current; setProposal(null); setGhost(null); beginProgress('sending'); setStatus('指示を確認しています'); setPending(true);
     try {
       activeRequest.current = ''; setRequestId('');
       const adapter = getAdapter(n);
       const result = await interpretPrompt(latest.current, prompt, { adapter, group, featureId: selectedFeatureId, signal: controller.signal });
       if (n !== sequence.current) return;
-      if (result.clarification) { setStatus(result.clarification + '\n元の指示に回答を補足して、もう一度送ってください。新しい依頼として続けます。'); return; }
-      if (result.source === 'local') { await apply(result.proposal); }
+      if (result.clarification) { reportProgress({ phase: 'stopped' }); setStatus(result.clarification + '\n元の指示に回答を補足して、もう一度送ってください。新しい依頼として続けます。'); return; }
+      if (result.source === 'local') { setProgress(null); await apply(result.proposal); }
       else { setProposal(result.proposal); setStatus('提案が届きました。ゴーストを確認して適用してください。'); }
-    } catch (e) { if (n === sequence.current && e.name !== 'AbortError') setStatus(e.message); }
+    } catch (e) { if (n === sequence.current && e.name !== 'AbortError') reportError(e); }
     finally { if (n === sequence.current) setPending(false); }
   }
   const runCommands = async commands => {
@@ -120,6 +133,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   function getAdapter(n) {
     return adapterMode === 'codex' ? createCodexAdapter({
       onQueued: (id, connection) => { if (sequence.current === n) { activeRequest.current = id; const url = new URL(window.location.href); url.searchParams.set('cadRequest', id); window.history.replaceState(null, '', url); setRequestId(id); setWebhook(connection); setStatus(connection?.notificationError ? '依頼は保存済みですが、通知を準備できませんでした。接続状態を確認しています。' : connection?.connected ? '依頼を保存しました。dotへ通知中です。' : '依頼は保存済みです。自動連携が未接続のため、dotにCADの最新依頼を確認するよう伝えてください。'); } },
+      onProgress: value => { if (sequence.current === n) reportProgress(value); },
       onWebhook: connection => { if (sequence.current === n) setWebhook(connection); },
       onClarification: question => { if (sequence.current === n) setStatus(question + '\n補足をdotに伝えると、この依頼の提案を引き続き受け取れます。説明やスケッチを変更した場合は新しい依頼を送ってください。'); },
     })
@@ -131,31 +145,31 @@ export function useCadWorkspace(document, setDocument, enabled) {
   }
   async function requestSketch() {
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
-    const n = ++sequence.current; activeRequest.current = ''; setPending(true); setRequestId(''); setStatus('スケッチを送っています');
+    const n = ++sequence.current; setProposal(null); setGhost(null); beginProgress('sending'); activeRequest.current = ''; setPending(true); setRequestId(''); setStatus('スケッチを送っています');
     const snapshot = structuredClone(latest.current), sketchDraft = cadOf(snapshot).draft || emptyDraft();
     try {
       validateDraft(sketchDraft);
       if (!Object.values(sketchDraft.views).some(v => v.strokes.length) && !sketchDraft.notes.trim()) throw new Error('外形を描くか、作りたい部品を説明してください');
       const response = await getAdapter(n).propose({ task: 'sketch', prompt: `${sketchDraft.notes || '描いたスケッチを部品にしてください'}\n追加位置の目安: ${JSON.stringify(sketchOrigin())} mm`, document: snapshot, sketchDraft, contract: AI_COMMAND_CONTRACT }, { signal: controller.signal });
       if (n !== sequence.current) return;
-      if (response?.clarification && !response.commands) { setStatus(String(response.clarification) + '\n「部品の説明」に回答を補足して、もう一度「Codexでモデル化」を押してください。新しい依頼として続けます。'); return; }
+      if (response?.clarification && !response.commands) { reportProgress({ phase: 'stopped' }); setStatus(String(response.clarification) + '\n「部品の説明」に回答を補足して、もう一度「Codexでモデル化」を押してください。新しい依頼として続けます。'); return; }
       const p = createProposal(snapshot, validateCommands(response?.commands), String(response?.explanation || 'スケッチからの提案です'));
       if (response.requestId) p.requestId = response.requestId;
-      p.draftKey = JSON.stringify(sketchDraft); proposalDocument(latest.current, p);
+      p.draftKey = JSON.stringify(sketchDraft); p.previewSnapshot = snapshot;
       setProposal(p); setStatus('Codexの提案が届きました。立体を確認して適用してください');
-    } catch (e) { if (n === sequence.current && e.name !== 'AbortError') setStatus(e.message); }
+    } catch (e) { if (n === sequence.current && e.name !== 'AbortError') reportError(e); }
     finally { if (n === sequence.current) setPending(false); }
   }
   async function resumeRequest(id) {
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
-    const n = ++sequence.current; activeRequest.current = id; setPending(true); setProposal(null); setRequestId(id); setStatus('同じ依頼の最新応答を確認しています');
+    const n = ++sequence.current; beginProgress('restoring', id); activeRequest.current = id; setPending(true); setProposal(null); setRequestId(id); setStatus('同じ依頼の最新応答を確認しています');
     try {
       const saved = await getAdapter(n).resume(id, { signal: controller.signal });
       if (n !== sequence.current) return;
       const p = resumedProposal(saved.request, saved.response, id);
       setProposal(p);
       setStatus(proposalIssue(latest.current, p) ? '依頼時のスケッチから提案を表示しています。現在の作業は変更していません。' : '提案を再取得しました。形と前提を確認してから適用してください');
-    } catch (e) { if (n === sequence.current && e.name !== 'AbortError') setStatus(e.message); }
+    } catch (e) { if (n === sequence.current && e.name !== 'AbortError') reportError(e); }
     finally { if (n === sequence.current) setPending(false); }
   }
   useEffect(() => {
@@ -184,7 +198,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
   }
 
   return {
-    mesh, ghost, group, setGroup, mode, setMode, paint, setPaint, proposal, pending, applying, status, meshStatus,
+    progress, mesh, ghost, group, setGroup, mode, setMode, paint, setPaint, proposal, pending, applying, status, meshStatus,
     adapterMode, setAdapterMode, selectedFeatureId, setSelectedFeatureId, submit, runCommands,
     requestId, webhook, draft, requestSketch, previewSketch, message: setStatus,
     recentRequests, recentError, resumeRequest, proposalIssue: proposalIssue(document, proposal),
@@ -207,15 +221,16 @@ export function useCadWorkspace(document, setDocument, enabled) {
       const id = pending && adapterMode === 'codex' ? activeRequest.current : '';
       request.current?.abort(); const n = ++sequence.current;
       setPending(false); setProposal(null); setGhost(null);
+      reportProgress({ phase: id ? 'cancelling' : 'stopped' });
       setStatus(id ? '依頼を取り消しています…' : pending && adapterMode === 'codex' ? '待機を中止しました。送信結果を確認できていないため、保存済みの依頼から状態を確認してください。' : 'キャンセルしました');
       if (id) {
         try {
           await createCodexAdapter().cancel(id);
-          if (sequence.current === n) { setRecentRequests(rows => rows.filter(row => row.requestId !== id)); setStatus('依頼を取り消しました'); }
-        } catch (error) { if (sequence.current === n) setStatus('依頼の取消を確認できませんでした。保存済みの依頼から確認してください。' + error.message); }
+          if (sequence.current === n) { setRecentRequests(rows => rows.filter(row => row.requestId !== id)); setStatus('依頼を取り消しました'); reportProgress({ phase: 'cancelled' }); }
+        } catch (error) { if (sequence.current === n) reportError(new Error('依頼の取消を確認できませんでした。保存済みの依頼から確認してください。' + error.message)); }
       }
     },
-    async applyProposal() { try { await apply(proposal); } catch (e) { if (e.name !== 'AbortError') setStatus(e.message); } },
+    async applyProposal() { try { await apply(proposal); } catch (e) { if (e.name !== 'AbortError') reportError(e); } },
     async undo() {
       const generation = ++applyGeneration.current, n = sequence.current;
       try {
@@ -227,7 +242,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
           const restored = { ...current, cad: { ...last.cad, draft: cadOf(current).draft } };
           persistDocumentChange(current, restored);
           undo.current.pop(); latest.current = restored; setDocument(restored);
-          setProposal(null); setGhost(null); setStatus('ひとつ前の変更に戻しました');
+          setProposal(null); setGhost(null); setProgress(null); setStatus('ひとつ前の変更に戻しました');
         });
       } catch (error) { if (generation === applyGeneration.current && n === sequence.current) setStatus(error.message); }
     },
