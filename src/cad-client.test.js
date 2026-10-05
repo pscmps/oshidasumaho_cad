@@ -79,11 +79,53 @@ test('failed submission is never retried; successful response carries its genera
   let generated;
   const adapter = createCodexAdapter({ fetcher: async (url, options = {}) => {
     if (options.method === 'POST') { generated = JSON.parse(options.body).requestId; return Response.json({ requestId: generated }); }
-    return Response.json({ response: { commands: [command] } });
+    return Response.json({ response: { commands: [command] }, responseRevision: 2 });
   } });
-  assert.equal((await adapter.propose(snapshot())).requestId, generated);
-  const edit = await adapters.interpretPrompt(document(), 'Please make an unspecified part', { adapter: { propose: async () => ({ commands: [command], requestId: id }) } });
+  const answer = await adapter.propose(snapshot());
+  assert.equal(answer.requestId, generated); assert.equal(answer.responseRevision, 2);
+  const edit = await adapters.interpretPrompt(document(), 'Please make an unspecified part', { adapter: { propose: async () => ({ commands: [command], requestId: id, responseRevision: 2 }) } });
   assert.equal(edit.proposal.requestId, id);
+  assert.equal(edit.proposal.responseRevision, 2);
+});
+
+test('apply verification reads fresh saved commands and rejects cancellation, stale revisions and changed payloads', async () => {
+  const proposal = { requestId: id, responseRevision: 2, commands: [command] };
+  const saved = { requestId: id, responseRevision: 2, cancelled: false, response: { commands: [command] } };
+  const calls = [];
+  let value = saved;
+  const adapter = createCodexAdapter({ fetcher: async (url, options) => { calls.push([url, options]); return Response.json(value); } });
+  await adapter.verifyProposal(proposal);
+  assert.equal(calls[0][0], '/api/cad/requests/' + id);
+  assert.equal(calls[0][1].cache, 'no-store'); assert.equal(calls[0][1].method, undefined);
+  value = { ...saved, response: { commands: [{ origin: [0,0,0], distance: 5, profile: { height: 20, width: 20, type: 'rectangle' }, operation: 'addExtrude' }] } };
+  await adapter.verifyProposal(proposal); // Object key order is not a revision.
+  value = { ...saved, cancelled: true };
+  await assert.rejects(adapter.verifyProposal(proposal), error => error.code === 'REQUEST_CANCELLED');
+  for (const patch of [
+    { requestId: 'b7c7c4a8-9005-49e2-91e8-568cd4b68212' }, { responseRevision: 1 }, { responseRevision: 3 },
+    { responseRevision: undefined }, { response: null }, { response: { clarification: 'New question?' } },
+    { response: { commands: [{ ...command, distance: 9 }] } },
+  ]) {
+    value = { ...saved, ...patch };
+    await assert.rejects(adapter.verifyProposal(proposal), /提案の応答が変わっています/);
+  }
+  value = saved;
+  for (const responseRevision of [undefined, 0, -1, '2', 2.5]) {
+    await assert.rejects(adapter.verifyProposal({ ...proposal, responseRevision }), /提案の応答が変わっています/);
+  }
+});
+
+test('apply verification fails closed on unavailable storage and aborts an in-flight response body', async () => {
+  const proposal = { requestId: id, responseRevision: 1, commands: [command] };
+  let attempts = 0;
+  await assert.rejects(createCodexAdapter({ retryDelay: 0, fetcher: async () => {
+    attempts++; return Response.json({ error: 'storage unavailable' }, { status: 503 });
+  } }).verifyProposal(proposal), /storage unavailable/);
+  assert.equal(attempts, 4);
+  const controller = new AbortController();
+  await assert.rejects(createCodexAdapter({ fetcher: async () => ({ ok: true, json: async () => {
+    controller.abort(); return { requestId: id, responseRevision: 1, response: { commands: [command] } };
+  } }) }).verifyProposal(proposal, { signal: controller.signal }), { name: 'AbortError' });
 });
 
 // Run the real hook's actions with inert rendering and a controllable kernel. This
@@ -140,15 +182,79 @@ test('starting another request while apply is evaluating prevents that old apply
 test('restored proposals keep their request ID; a failed explicit cancel is visible in workspace status', async () => {
   const r = snapshot();
   const h = workspaceHarness({ pending: true, adapterFactory: () => ({
-    resume: async () => ({ request: r, response: { commands: [command] } }),
+    resume: async () => ({ request: r, response: { commands: [command], responseRevision: 2 } }),
     cancel: async () => { throw new Error('temporary cancellation failure'); },
   }) });
   await h.workspace.resumeRequest(id);
   assert.equal(h.staged.at(-1).requestId, id);
+  assert.equal(h.staged.at(-1).responseRevision, 2);
   await h.workspace.cancel();
   assert.match(h.status.at(-1), /取消を確認できません/);
   assert.match(h.status.at(-1), /temporary cancellation failure/);
   assert.equal(h.saved.length, 0);
+});
+
+test('manual Site application checks the saved proposal after geometry and commits only after verification', async () => {
+  const p = { ...proposals.createProposal(document(), [command]), requestId: id, responseRevision: 2 };
+  let verified = 0, release;
+  const gate = new Promise(resolve => { release = resolve; });
+  const h = workspaceHarness({ proposal: p, adapterFactory: () => ({ verifyProposal: async actual => {
+    assert.equal(actual, p); assert.equal(h.kernelCalls, 1); verified++; await gate;
+  } }) });
+  const apply = h.workspace.applyProposal();
+  await Promise.resolve(); h.resolveKernel({ bodies: [] });
+  await new Promise(setImmediate);
+  assert.equal(verified, 1); assert.equal(h.writes.length, 0);
+  await h.workspace.applyProposal(); assert.equal(verified, 1, 'double click does not launch another verification');
+  release(); await apply;
+  assert.equal(h.writes.length, 1); assert.equal(h.saved[0].cad.features.length, 1);
+  assert.deepEqual(h.saved[0].cad.appliedRequestIds, [id]);
+});
+
+test('cancelled, stale or unavailable saved replies never commit an already displayed proposal', async () => {
+  for (const error of [Object.assign(new Error('cancelled'), { code: 'REQUEST_CANCELLED' }), new Error('stale revision'), new Error('network')]) {
+    const p = { ...proposals.createProposal(document(), [command]), requestId: id, responseRevision: 2 };
+    const h = workspaceHarness({ proposal: p, adapterFactory: () => ({ verifyProposal: async () => { throw error; } }) });
+    const apply = h.workspace.applyProposal(); await Promise.resolve(); h.resolveKernel({ bodies: [] }); await apply;
+    assert.equal(h.writes.length, 0); assert.equal(h.saved.length, 0); assert.equal(h.status.at(-1), error.message);
+  }
+});
+
+test('cancellation during apply verification aborts it and cannot be overwritten by a late success or failure', async () => {
+  for (const fails of [false, true]) {
+    let finish, signal;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const p = { ...proposals.createProposal(document(), [command]), requestId: id, responseRevision: 1 };
+    const h = workspaceHarness({ proposal: p, adapterFactory: () => ({ verifyProposal: async (_, options) => {
+      signal = options.signal; await gate; if (fails) throw new Error('late network failure');
+    } }) });
+    const apply = h.workspace.applyProposal(); await Promise.resolve(); h.resolveKernel({ bodies: [] });
+    await new Promise(setImmediate);
+    await h.workspace.cancel(); assert.equal(signal.aborted, true);
+    finish(); await apply;
+    assert.equal(h.writes.length, 0); assert.equal(h.saved.length, 0); assert.equal(h.status.at(-1), 'キャンセルしました');
+  }
+});
+
+test('switching to a new request during apply verification preserves its status and prevents the old commit', async () => {
+  for (const fails of [false, true]) {
+    let finish, signal;
+    const gate = new Promise(resolve => { finish = resolve; });
+    const p = { ...proposals.createProposal(document(), [command]), requestId: id, responseRevision: 1 };
+    const h = workspaceHarness({ proposal: p, adapterFactory: () => ({
+      propose: async () => ({ clarification: 'New request question' }),
+      verifyProposal: async (_, options) => {
+        signal = options.signal; await gate; if (fails) throw new Error('old request failure');
+      },
+    }) });
+    const apply = h.workspace.applyProposal(); await Promise.resolve(); h.resolveKernel({ bodies: [] });
+    await new Promise(setImmediate);
+    await h.workspace.submit('Please make a different unspecified part');
+    assert.equal(signal.aborted, true);
+    const newStatus = h.status.at(-1); assert.match(newStatus, /New request question/);
+    finish(); await apply;
+    assert.equal(h.writes.length, 0); assert.equal(h.saved.length, 0); assert.equal(h.status.at(-1), newStatus);
+  }
 });
 
 

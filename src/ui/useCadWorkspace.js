@@ -16,8 +16,8 @@ export function useCadWorkspace(document, setDocument, enabled) {
   const [group, setGroup] = useState('red'), [mode, setMode] = useState('face'), [paint, setPaint] = useState(false);
   const [proposal, setProposalState] = useState(null), [pending, setPending] = useState(false);
   const [applying, setApplying] = useState(false);
-  const applyingNow = useRef(false), applyGeneration = useRef(0), activeRequest = useRef('');
-  function setProposal(value) { applyGeneration.current++; setProposalState(value); }
+  const applyingNow = useRef(false), applyGeneration = useRef(0), activeRequest = useRef(''), applicationRequest = useRef();
+  function setProposal(value) { applyGeneration.current++; applicationRequest.current?.abort(); setProposalState(value); }
   const [status, setStatus] = useState(''), [meshStatus, setMeshStatus] = useState('');
   const [adapterMode, setAdapterMode] = useState(() => import.meta.env.VITE_SITE_CODEX === '1' ? 'codex' : window.oshidaCadAIAdapter?.propose ? 'connected' : 'offline'), [selectedFeatureId, setSelectedFeatureId] = useState('');
   const [requestId, setRequestId] = useState('');
@@ -60,7 +60,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
       .catch(e => { if (!cancelled) { setGhost(null); reportError(new Error(`提案を生成できません: ${e.message}`)); } });
     return () => { cancelled = true; };
   }, [proposal, key, draftKey, enabled]);
-  useEffect(() => () => { request.current?.abort(); sequence.current++; }, []);
+  useEffect(() => () => { request.current?.abort(); applicationRequest.current?.abort(); sequence.current++; }, []);
 
   useEffect(() => {
     const context = window.document.modelContext;
@@ -92,6 +92,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
     if (applyingNow.current) return;
     applyingNow.current = true; setApplying(true); if (p.requestId) reportProgress({ phase: 'applying' });
     const generation = applyGeneration.current, n = sequence.current;
+    const controller = new AbortController(); applicationRequest.current = controller;
     const checkCurrent = () => { if (generation !== applyGeneration.current || n !== sequence.current) throw new DOMException('Aborted', 'AbortError'); };
     try {
       await withDocumentWriteLock(async () => {
@@ -100,6 +101,10 @@ export function useCadWorkspace(document, setDocument, enabled) {
           const candidate = proposalDocument(latest.current, p);
           await evaluateInWorker(candidate);
           checkCurrent();
+          if (p.responseRevision !== undefined) {
+            await createCodexAdapter().verifyProposal(p, { signal: controller.signal });
+            checkCurrent();
+          }
           const current = latest.current;
           const rebased = proposalDocument(current, p);
           if (geometryKey(candidate) !== geometryKey(rebased)) continue;
@@ -111,7 +116,8 @@ export function useCadWorkspace(document, setDocument, enabled) {
         }
         throw new Error('モデルが更新されています。もう一度適用してください。');
       });
-    } finally { applyingNow.current = false; setApplying(false); }
+    } catch (error) { checkCurrent(); throw error; }
+    finally { applicationRequest.current = null; applyingNow.current = false; setApplying(false); }
   }
   async function submit(prompt) {
     request.current?.abort(); const controller = new AbortController(); request.current = controller;
@@ -155,6 +161,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
       if (response?.clarification && !response.commands) { reportProgress({ phase: 'stopped' }); setStatus(String(response.clarification) + '\n「部品の説明」に回答を補足して、もう一度「Codexでモデル化」を押してください。新しい依頼として続けます。'); return; }
       const p = createProposal(snapshot, validateCommands(response?.commands), String(response?.explanation || 'スケッチからの提案です'));
       if (response.requestId) p.requestId = response.requestId;
+      if (response.responseRevision !== undefined) p.responseRevision = response.responseRevision;
       p.draftKey = JSON.stringify(sketchDraft); p.previewSnapshot = snapshot;
       setProposal(p); setStatus('Codexの提案が届きました。立体を確認して適用してください');
     } catch (e) { if (n === sequence.current && e.name !== 'AbortError') reportError(e); }
@@ -233,6 +240,7 @@ export function useCadWorkspace(document, setDocument, enabled) {
     async applyProposal() { try { await apply(proposal); } catch (e) { if (e.name !== 'AbortError') reportError(e); } },
     async undo() {
       const generation = ++applyGeneration.current, n = sequence.current;
+      applicationRequest.current?.abort();
       try {
         await withDocumentWriteLock(() => {
           if (generation !== applyGeneration.current || n !== sequence.current) return;

@@ -3,6 +3,10 @@
 const requestIdPattern = /^[a-f0-9-]{36}$/;
 const transientStatuses = new Set([408, 429, 500, 502, 503]);
 const aborted = signal => { if (signal?.aborted) throw new DOMException('Aborted', 'AbortError'); };
+const canonical = value => JSON.stringify(value, function (key, item) {
+  return item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item;
+});
 function pause(ms, signal) {
   return new Promise((resolve, reject) => {
     const cleanup = () => signal?.removeEventListener('abort', abort);
@@ -56,7 +60,7 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
           lastQuestion = result.response.clarification;
           onClarification(lastQuestion, result.responseRevision);
         }
-      } else if (result.response) return { ...result.response, requestId };
+      } else if (result.response) return { ...result.response, requestId, responseRevision: result.responseRevision ?? 1 };
       result = null;
       await sleep(interval, signal);
     }
@@ -67,6 +71,18 @@ export function createCodexAdapter({ fetcher = globalThis.fetch, interval = 1800
     async connection({ signal } = {}) { return json('/api/cad/connection', { signal }); },
     async recent({ signal } = {}) { return (await json('/api/cad/requests', { signal })).requests; },
     async cancel(requestId) { return json('/api/cad/requests/' + validId(requestId) + '/cancel', { method: 'POST' }); },
+    async verifyProposal(proposal, { signal } = {}) {
+      // Preview polling ends when commands arrive. Recheck the saved request
+      // immediately before a manual commit; never infer validity from a cached ghost.
+      const result = await json('/api/cad/requests/' + validId(proposal.requestId), { signal, cache: 'no-store' });
+      aborted(signal);
+      if (result.cancelled) throw Object.assign(new Error('この依頼は取り消し済みです'), { code: 'REQUEST_CANCELLED' });
+      if (result.requestId !== proposal.requestId || !Number.isSafeInteger(proposal.responseRevision) || proposal.responseRevision < 1
+        || result.responseRevision !== proposal.responseRevision || !result.response?.commands || result.response.clarification
+        || canonical(result.response.commands) !== canonical(proposal.commands)) {
+        throw new Error('提案の応答が変わっています。同じ依頼を確認してから適用してください。');
+      }
+    },
     async propose(request, { signal } = {}) {
       const requestId = crypto.randomUUID();
       onProgress({ phase: 'sending', startedAt: now() });

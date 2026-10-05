@@ -38,5 +38,6 @@ export async function interpretPrompt(document, prompt, { adapter = offlineAdapt
   if (response?.clarification && !response.commands) return { source: 'ai', clarification: String(response.clarification) };
   const proposal = createProposal(snapshot, validateCommands(response?.commands), String(response?.explanation || ''));
   if (response.requestId) { proposal.requestId = response.requestId; proposal.previewSnapshot = snapshot; }
+  if (response.responseRevision !== undefined) proposal.responseRevision = response.responseRevision;
   return { source: 'ai', proposal };
 }

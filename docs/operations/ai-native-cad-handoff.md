@@ -5,10 +5,41 @@
 - 対象ブランチ: `feat/ai-native-cad-foundation`（pscmps/oshidasumaho_cad）。main・元のスマホCAD・GitHub Pagesは対象外。
 - 対象Site: https://oshida-ai-native-lab.pscmps-mechatro.chatgpt.site
 - Site project: `appgprj_6abe87fa3e3481919fe3e891c4e6f082`。owner-privateを維持。新しいSiteや複製リポジトリを作らない。
-- 現在の実装commit: `2ffc9ef8f90ebfe7798f49425282282312916819`（待機状態表示・計算再利用）。夜間品質改善は `91e14a6a77a13d3913f71fa802c6515439011df8`。
+- v14公開済みの実装commit: `2ffc9ef8f90ebfe7798f49425282282312916819`（待機状態表示・計算再利用）。夜間品質改善は `91e14a6a77a13d3913f71fa802c6515439011df8`。
 - 対応するSitesソースcommit: `105934241582b6421ad0992b980e417ea63c58f8`。
 - 公開成功: 2026-10-03 02:15:45 UTC、version 14。deployment `appgdep_6ac06541bdbc8191a0844ade90528af3`。
-- このメモ追加はdocsのみ。実装commit以後のdocsだけのcommitにSite再公開は不要。
+- 2026-10-03の記録追加はdocsのみ。下記2026-10-05のクライアント修正は未公開で、利用するには同じprivate Siteの再公開が必要。
+
+## 手動適用直前の確認と回帰強化（2026-10-05、未公開）
+
+提案表示後に別タブから同じ依頼を取り消すと、既に表示したタブは取消状態を確認せずモデルを保存できた。修正前の合成データによる実Worker＋Edgeで再現し、独立レビューでも同じ保存経路を確認した。
+
+- Codex応答の`responseRevision`を新規スケッチ・編集・保存済み依頼の復元で保持する。
+- ユーザーが「適用」を押したとき、形状評価後・文書の書込みロック内で、保存済み依頼を`cache: no-store`のGETで確認する。取消済み、依頼番号・応答番号・commands不一致、通信確認失敗では保存しない。GETの最大3回再試行は既存の範囲で、POSTを再送しない。
+- 照合待ち中の取消・別依頼への切替・Undo・画面終了で照合を中断する。古い照合の遅い成功や失敗が、新しい依頼の状態や文書を書き換えない。
+- 既存のローカル数値編集、スケッチ差分、対象モデル差分、別タブ保存競合、適用履歴のガードを維持する。通信失敗後は「同じ依頼を確認」から提案を確認し直せる。
+
+### 検証
+
+- Node全体は183件成功（174トップレベル＋9サブケース）。新規6件は照合の一致・不一致・取消・通信失敗・応答body中断・照合中の連打／取消／依頼切替を決定的なfakeで確認する。
+- `scripts/cad-lifecycle-browser-test.py`を追加。実Workerのループバックpreviewと隔離したブラウザー保存で、合成データのみを使用する。新規6シナリオ：依頼→質問→古いrevision拒否→明示補足→提案の立体表示→再読込→手動適用／連打／適用履歴、表示後の取消、照合通信失敗と復旧、古い応答番号、2タブの保存保護、待機中2タブの明示取消。page errorなし。
+- 明示文章は30×20×7mm、補助寸法欄は80×50×20mmとして送信し、文章に沿った合成提案の表示と手動適用後の寸法を確認する。LLMの解釈精度を測る試験ではない。
+- 既存`cad-exchange-browser-smoke.py`の6シナリオ、`cad-progress-browser-smoke.py`の3シナリオも合成fixtureで成功。合計15ブラウザーシナリオ。再読込、Undo、壊れた保存内容の保持、編集提案、待機中の入力変更、通信失敗、取消を含む。
+- Sites client/Worker build成功。独立レビューで当初の取消確認漏れの解消と、照合中の別依頼切替の遅い成功・失敗を別途確認した。
+
+既存のローカルpreviewを起動し、次で新規回帰を再実行できる。PythonのPlaywrightとChromium系ブラウザーが必要。Windowsでは既存Edgeを検出し、`CAD_BROWSER`で他の実行ファイルを指定できる。
+
+```powershell
+python scripts/cad-lifecycle-browser-test.py --base-url http://127.0.0.1:4199/ --output-dir output/playwright/lifecycle
+```
+
+本番URLは拒否し、ブラウザーから別originへの通信も遮断する。通常の実行に実依頼のfixture・認証情報・新規LLM APIは不要。`--scenario cancel-after-preview`で今回の不具合に絞って再実行できる。
+
+### 適用範囲と限界
+
+保証するのは**適用直前のサーバー照合**。サーバーの取消と端末のlocalStorage保存は単一トランザクションではないため、GET結果の取得直後に別の端末が取消した場合まで原子的に防げるとは主張しない。確認通信が完了しない間は保存しない。
+
+今回の納品は同じ実験ブランチへのコードとテストのpushまで。Site再公開、mainの変更、既存依頼・常設automation・subscriptionの変更、実ユーザーのモデル適用、実機操作は実施していない。v14へ修正を反映するには同じprivate Siteのclientを再公開する必要がある。Workerの保存schema・MCP・購読仕様に変更はない。
 
 ## 2026-10-02夜間の修正
 

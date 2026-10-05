@@ -29,7 +29,7 @@ export function createProposal(snapshot, commands, explanation = '') {
 export function resumedProposal(request, response, requestId) {
   const proposal = createProposal(request.document, response.commands, response.explanation || '保存された提案です');
   if (request.task === 'sketch') proposal.draftKey = JSON.stringify(request.sketchDraft);
-  return { ...proposal, ...(requestId ? { requestId } : {}), previewSnapshot: request.document };
+  return { ...proposal, ...(requestId ? { requestId, responseRevision: response.responseRevision ?? 1 } : {}), previewSnapshot: request.document };
 }
 export function proposalIssue(current, proposal) {
   if (!proposal) return '';
